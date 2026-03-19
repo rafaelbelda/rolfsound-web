@@ -109,10 +109,9 @@ class DownloadManager:
         self._current = job
         logger.info(f"Starting download: {track_id}")
 
-        output_dir = get("music_directory", "./music")
-        temp_dir = get("download_temp_directory", "./cache")
-        quality = str(get("download_quality", "192"))
-        audio_format = get("download_audio_format", "mp3")
+        output_dir   = get("music_directory", "./music")
+        temp_dir     = get("download_temp_directory", "./cache")
+        audio_format = get("download_audio_format", "opus")  # opus = native, no re-encode
 
         def update_progress(pct: int, status: str):
             conn = database.get_connection()
@@ -128,7 +127,6 @@ class DownloadManager:
             track_id=track_id,
             output_dir=output_dir,
             temp_dir=temp_dir,
-            quality=quality,
             audio_format=audio_format,
             progress_callback=update_progress,
         )

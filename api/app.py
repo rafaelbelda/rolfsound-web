@@ -110,9 +110,6 @@ def create_app() -> FastAPI:
                 status_code=503,
                 content={"error": "core_unavailable", "message": "rolfsound-core is not reachable"},
             )
-        # Annotate whether we're running in stub mode so the dashboard can show a dev badge
-        if core_client.is_stub_mode():
-            status["_stub"] = True
         return status
 
     # Serve dashboard static files

@@ -130,14 +130,11 @@
       padding: 6px 10px; border-radius: 20px;
       background: var(--surface); border: 1px solid var(--border);
       z-index: 200; backdrop-filter: blur(12px);
-      transition: border-color var(--t);
     }
     #core-status.hidden { display: none; }
-    #core-status.stub-mode { border-color: rgba(255,179,71,0.5); }
     .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
-    .status-dot.ok   { background: var(--accent);  box-shadow: 0 0 6px var(--accent); }
-    .status-dot.err  { background: var(--danger); }
-    .status-dot.stub { background: var(--warn);   box-shadow: 0 0 6px var(--warn); }
+    .status-dot.ok  { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .status-dot.err { background: var(--danger); }
 
     /* === NOW PLAYING === */
     #now-playing {
@@ -417,6 +414,34 @@
     .monitor-ctrl-label { font-size: 13px; font-weight: 700; }
     .monitor-ctrl-desc  { font-size: 11px; color: var(--text-mid); margin-top: 2px; }
 
+    /* Manual record button */
+    .rec-btn {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,85,85,0.5);
+      background: rgba(255,85,85,0.08);
+      color: var(--danger);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background var(--t), border-color var(--t), transform var(--t), box-shadow var(--t);
+      cursor: pointer;
+    }
+    .rec-btn svg { width: 12px; height: 12px; }
+    .rec-btn:hover { background: rgba(255,85,85,0.18); border-color: var(--danger); }
+    .rec-btn:active { transform: scale(0.92); }
+    /* Active (recording) state: glowing filled circle */
+    .rec-btn.active {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: white;
+      box-shadow: 0 0 10px rgba(255,85,85,0.6);
+      animation: pulse-rec-btn 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-rec-btn {
+      0%,100% { box-shadow: 0 0 8px rgba(255,85,85,0.5); }
+      50%      { box-shadow: 0 0 18px rgba(255,85,85,0.85); }
+    }
+
     /* === MISC === */
     #toast {
       position: fixed; bottom: calc(var(--nav-h) + 16px + var(--safe-b));
@@ -512,9 +537,13 @@
     <div class="monitor-card">
       <div class="viz-header">
         <span class="viz-channel" id="viz-channel">CHANNEL —</span>
-        <!-- Status chips live here, no separate section needed -->
+        <!-- Status chips -->
         <span class="chip" id="chip-rec"><span class="chip-dot"></span><span id="chip-rec-txt">IDLE</span></span>
         <span class="chip" id="chip-man"><span class="chip-dot"></span><span id="chip-man-txt">MANUAL OFF</span></span>
+        <!-- Manual record button: lives here so it's always visible alongside status -->
+        <button id="rec-btn" onclick="toggleManualRecord()" class="rec-btn" title="Manual Record">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+        </button>
       </div>
 
       <!-- Canvas wrapper: fixed height, ResizeObserver handles DPR scaling -->
@@ -672,6 +701,8 @@ const API={
   getMonitor()   {return this.fetch('/monitor');},
   setAutoRecord(e){return this.fetch('/monitor/auto-record',{method:'POST',body:JSON.stringify({enabled:e})});},
   setThreshold(v){return this.fetch('/monitor/threshold',   {method:'POST',body:JSON.stringify({value:v})});},
+  recordStart()  {return this.fetch('/monitor/record/start',{method:'POST',body:'{}'});},
+  recordStop()   {return this.fetch('/monitor/record/stop', {method:'POST',body:'{}'});},
   getRecordings(){return this.fetch('/recordings');},
   deleteRecording(n){return this.fetch('/recordings/'+encodeURIComponent(n),{method:'DELETE'});},
   queueRecording(n) {return this.fetch('/recordings/'+encodeURIComponent(n)+'/queue',{method:'POST',body:'{}'});},
@@ -684,7 +715,7 @@ async function pollStatus(){
   try{
     const s=await API.getStatus();
     S.status=s;
-    updatePill(s._stub ? 'stub' : 'ok');
+    updatePill('ok');
     updateNowPlaying(s);
     if(S.page==='home') updateQueue(s.queue||[]);
   }catch(e){updatePill('err');}
@@ -694,15 +725,9 @@ function updatePill(mode){
   const el  = document.getElementById('core-status');
   const dot = document.getElementById('status-dot');
   const txt = document.getElementById('status-text');
-  el.classList.remove('hidden','stub-mode');
-  dot.className = 'status-dot';
-  if(mode==='ok'){
-    dot.classList.add('ok');  txt.textContent='online';
-  } else if(mode==='stub'){
-    dot.classList.add('stub'); txt.textContent='stub'; el.classList.add('stub-mode');
-  } else {
-    dot.classList.add('err'); txt.textContent='offline';
-  }
+  el.classList.remove('hidden');
+  dot.className = 'status-dot ' + (mode==='ok' ? 'ok' : 'err');
+  txt.textContent = mode==='ok' ? 'online' : 'offline';
 }
 
 function thumbSrc(t){
@@ -1049,6 +1074,11 @@ function _updateMonitorUI(){
   // Auto-rec toggle
   document.getElementById('auto-rec-toggle').className = 'toggle' + (m.autoRecord ? ' on' : '');
 
+  // Manual record button — active when recording AND manual is on
+  const recBtn = document.getElementById('rec-btn');
+  recBtn.className = 'rec-btn' + (m.manual ? ' active' : '');
+  recBtn.title = m.manual ? 'Stop recording' : 'Start manual recording';
+
   // Threshold slider sync (only if user is NOT actively dragging)
   const slider = document.getElementById('thr-slider');
   if(slider !== document.activeElement){
@@ -1086,6 +1116,22 @@ async function toggleAutoRecord(el){
   const nv = !el.classList.contains('on');
   try{ await API.setAutoRecord(nv); el.className='toggle'+(nv?' on':''); S.mon.autoRecord=nv; }
   catch(e){ toast('Core unavailable'); }
+}
+
+async function toggleManualRecord(){
+  const btn = document.getElementById('rec-btn');
+  const isActive = btn.classList.contains('active');
+  try{
+    if(isActive){
+      await API.recordStop();
+      toast('Recording stopped');
+    } else {
+      await API.recordStart();
+      toast('Recording started');
+    }
+    // Don't optimistically toggle UI — let the next pollMonitor() cycle confirm state
+    setTimeout(pollMonitor, 300);
+  } catch(e){ toast('Core unavailable'); }
 }
 
 /* ================================================================
