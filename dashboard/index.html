@@ -851,7 +851,11 @@ function trackRowHTML(t,inLibrary,opts={}){
     actions=`<button class="btn-icon" onclick="downloadAndQueue('${esc(t.id)}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>`;
   }
   const title   = opts.isRecording?(t.name||''):(t.title||t.id||'Unknown');
-  const metaStr = opts.isRecording?fmtBytes(t.size_bytes)+(dur?' · '+dur:''):meta;
+  const metaStr = opts.metaOverride ?? (
+    opts.isRecording
+      ? fmtBytes(t.size_bytes) + (dur ? ' · ' + dur : '')
+      : meta
+  );
   return `<div class="track-row">
     ${src?`<img class="track-thumb" src="${esc(src)}" loading="lazy" onerror="this.style.display='none'">`:`<div class="track-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>`}
     <div class="track-info"><div class="track-title">${esc(title)}</div><div class="track-meta">${esc(metaStr)}</div></div>
@@ -1155,20 +1159,32 @@ async function confirmDeleteRecording(name){
    HISTORY
 ================================================================ */
 async function loadHistory(){
-  const c=document.getElementById('history-container');
-  c.innerHTML='<div class="loading-row"><div class="spinner"></div></div>';
-  try{
-    const d=await API.history(),items=d.history||[];
-    if(!items.length){c.innerHTML='<div class="empty-state"><p>No history yet.</p></div>';return;}
-    c.innerHTML=items.map(h=>{
-      const src=thumbSrc(h.thumbnail);
-      return `<div class="history-row">
-        ${src?`<img class="track-thumb" src="${esc(src)}" style="width:36px;height:36px" loading="lazy" onerror="this.style.display='none'">`:`<div style="width:36px;height:36px;background:var(--bg2);border-radius:6px;flex-shrink:0"></div>`}
-        <div class="track-info"><div class="track-title" style="font-size:13px">${esc(h.title||h.track_id)}</div><div class="track-meta">${esc(h.artist||'')}</div></div>
-        <div class="history-time">${relTime(h.played_at)}</div>
-      </div>`;
+  const c = document.getElementById('history-container');
+  c.innerHTML = '<div class="loading-row"><div class="spinner"></div></div>';
+
+  try {
+    const d = await API.history();
+    const items = d.history || [];
+
+    if (!items.length) {
+      c.innerHTML = '<div class="empty-state"><p>No history yet.</p></div>';
+      return;
+    }
+
+    c.innerHTML = items.map(h => {
+      return trackRowHTML({
+        id: h.track_id,
+        title: h.title || h.track_id,
+        artist: h.artist || '',
+        thumbnail: h.thumbnail
+      }, false, {
+        metaOverride: relTime(h.played_at)
+      });
     }).join('');
-  }catch(e){c.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
+
+  } catch (e) {
+    c.innerHTML = '<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';
+  }
 }
 
 /* ================================================================

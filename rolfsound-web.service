@@ -4,13 +4,13 @@ After=network.target rolfsound-core.service
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/rolfsound-control
+User=rolfsound
+WorkingDirectory=/home/pi/rolfsound/rolfsound-web
 ExecStart=/home/pi/.local/bin/python main.py
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/var/log/rolfsound-control.log
-StandardError=append:/var/log/rolfsound-control.log
+StandardOutput=append:/var/log/rolfsound-web.log
+StandardError=append:/var/log/rolfsound-web.log
 
 [Install]
 WantedBy=multi-user.target
