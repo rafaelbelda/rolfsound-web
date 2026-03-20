@@ -146,15 +146,16 @@ class DownloadManager:
                 )
 
                 database.insert_track(conn, {
-                    "id": track_id,
-                    "title": meta.get("title") or title,
-                    "artist": meta.get("artist") or meta.get("channel") or "",
-                    "duration": meta.get("duration"),
-                    "thumbnail": local_thumb or remote_thumb,
-                    "file_path": filepath,
-                    "date_added": int(time.time()),
-                    "streams": 0,
-                    "source": "youtube",
+                    "id":             track_id,
+                    "title":          meta.get("title") or title,
+                    "artist":         meta.get("artist") or meta.get("channel") or "",
+                    "duration":       meta.get("duration"),
+                    "thumbnail":      local_thumb or remote_thumb,
+                    "file_path":      filepath,
+                    "date_added":     int(time.time()),
+                    "published_date": meta.get("published_date"),
+                    "streams":        0,
+                    "source":         "youtube",
                 })
                 database.update_download_progress(conn, track_id, 100, "complete")
                 conn.commit()

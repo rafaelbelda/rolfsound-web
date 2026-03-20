@@ -50,15 +50,16 @@ def get_connection():
 def _create_tables(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tracks (
-            id          TEXT PRIMARY KEY,
-            title       TEXT,
-            artist      TEXT,
-            duration    INTEGER,
-            thumbnail   TEXT,
-            file_path   TEXT,
-            date_added  INTEGER,
-            streams     INTEGER DEFAULT 0,
-            source      TEXT
+            id              TEXT PRIMARY KEY,
+            title           TEXT,
+            artist          TEXT,
+            duration        INTEGER,
+            thumbnail       TEXT,
+            file_path       TEXT,
+            date_added      INTEGER,
+            published_date  INTEGER,
+            streams         INTEGER DEFAULT 0,
+            source          TEXT
         );
 
         CREATE TABLE IF NOT EXISTS history (
@@ -77,6 +78,12 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             thumbnail   TEXT
         );
     """)
+    # Safe migration: add published_date to existing databases that predate this column
+    try:
+        conn.execute("ALTER TABLE tracks ADD COLUMN published_date INTEGER")
+        logger.info("Migrated tracks table: added published_date column")
+    except sqlite3.OperationalError:
+        pass  # column already exists — normal on fresh or already-migrated DBs
 
 
 # ---- Track helpers ----
@@ -91,10 +98,23 @@ def get_track(conn, track_id: str) -> dict | None:
 def insert_track(conn, track: dict) -> None:
     conn.execute("""
         INSERT OR REPLACE INTO tracks
-            (id, title, artist, duration, thumbnail, file_path, date_added, streams, source)
+            (id, title, artist, duration, thumbnail, file_path,
+             date_added, published_date, streams, source)
         VALUES
-            (:id, :title, :artist, :duration, :thumbnail, :file_path, :date_added, :streams, :source)
-    """, track)
+            (:id, :title, :artist, :duration, :thumbnail, :file_path,
+             :date_added, :published_date, :streams, :source)
+    """, {
+        "id":             track.get("id"),
+        "title":          track.get("title"),
+        "artist":         track.get("artist"),
+        "duration":       track.get("duration"),
+        "thumbnail":      track.get("thumbnail"),
+        "file_path":      track.get("file_path"),
+        "date_added":     track.get("date_added"),
+        "published_date": track.get("published_date"),
+        "streams":        track.get("streams", 0),
+        "source":         track.get("source"),
+    })
 
 
 def increment_streams(conn, track_id: str) -> None:

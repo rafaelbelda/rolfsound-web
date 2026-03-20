@@ -42,3 +42,7 @@ tmp/
 # Production
 .next/
 out/
+
+*.jpg
+*.mp3
+*.db

@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>rolfsound</title>
+  <!-- Preconnect to font CDN so DNS+TLS is resolved before CSS requests fonts -->
+  <link rel="preconnect" href="https://encore.scdn.co" crossorigin>
+  <!-- Preload the two most critical fonts (body text weight 400 + 700).
+       Title and Mono are lower priority — browser will fetch them after layout. -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="https://encore.scdn.co/fonts/SpotifyMixUI-Regular-76c92fb1a35c462f73429fa8865163eb.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="https://encore.scdn.co/fonts/SpotifyMixUI-Bold-09c45a3a0ce9d2971e62cb26e97760fb.woff2">
   <style>
     @font-face {
       font-family: 'SpotifyMixUI';
@@ -51,14 +59,34 @@
       --radius-sm:   8px;
       --ease:        cubic-bezier(0.4,0,0.2,1);
       --t:           0.18s;
-      /* Font roles:
-         --ui    → SpotifyMixUI     : body, buttons, labels, nav
-         --title → SpotifyMixUITitle: page titles, track names (variable weight)
-         --mono  → SpotifyMixMono   : timestamps, values, codes, status tags
-      */
-      --ui:          'SpotifyMixUI', system-ui, sans-serif;
-      --title:       'SpotifyMixUITitle', 'SpotifyMixUI', system-ui, sans-serif;
-      --mono:        'SpotifyMixMono', 'Courier New', monospace;
+      /* ─── Font roles ───────────────────────────────────────────
+         --ui    → SpotifyMixUI (400 / 700)
+                   Body copy, labels, buttons, nav, descriptions,
+                   settings labels, artist names, page subtitles.
+                   Offline fallback: best system sans on any OS.
+
+         --title → SpotifyMixUITitle (variable 100–900)
+                   Page titles, now-playing track name, queue track
+                   titles, large headings. Falls back to SpotifyMixUI
+                   first (already cached), then system sans.
+
+         --mono  → SpotifyMixMono (400)
+                   Timestamps, RMS/threshold values, status codes,
+                   section labels, progress times, settings inputs,
+                   queue position numbers, track metadata.
+                   Offline fallback: best system monospace per OS
+                   (SF Mono on Mac, Cascadia on Windows, DejaVu/
+                   Liberation on Linux). Never Courier New.
+      ──────────────────────────────────────────────────────────── */
+      --ui:    'SpotifyMixUI',
+               -apple-system, BlinkMacSystemFont,
+               'Segoe UI', system-ui, sans-serif;
+      --title: 'SpotifyMixUITitle', 'SpotifyMixUI',
+               -apple-system, BlinkMacSystemFont,
+               'Segoe UI', system-ui, sans-serif;
+      --mono:  'SpotifyMixMono',
+               ui-monospace, 'SF Mono', 'Cascadia Code', 'Cascadia Mono',
+               'Liberation Mono', 'DejaVu Sans Mono', monospace;
       --safe-b:      env(safe-area-inset-bottom, 0px);
       --nav-h:       64px;
     }
@@ -330,11 +358,17 @@
     .viz-wrap {
       position: relative;
       width: 100%;
-      height: 88px;           /* fixed pixel height — reliable across browsers */
+      height: 140px;          /* taller for better audio visibility */
       border-radius: 6px;
       background: var(--bg2);
       overflow: hidden;
       margin-bottom: 10px;
+    }
+    /* Smaller variant used on home page mini-viz */
+    .viz-wrap.mini {
+      height: 56px;
+      margin-bottom: 0;
+      border-radius: 4px;
     }
     #viz-canvas {
       /* CSS: fill the wrapper */
@@ -352,12 +386,12 @@
     .level-rms-fill.inactive { background: var(--text-dim); opacity: 0.5; }
     .threshold-line { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--warn); pointer-events: none; }
 
-    /* Trigger / Silence mini bars */
+    /* Trigger / Silence mini bars — taller and easier to read */
     .progress-mini-row { display: flex; gap: 12px; margin-bottom: 14px; }
     .progress-mini-col { flex: 1; }
-    .progress-mini-col label { font-family: var(--mono); font-size: 9px; display: block; margin-bottom: 3px; }
-    .progress-mini { height: 3px; background: var(--bg2); border-radius: 2px; overflow: hidden; }
-    .progress-mini-fill { height: 100%; border-radius: 2px; width: 0%; transition: width 0.12s linear; }
+    .progress-mini-col label { font-family: var(--mono); font-size: 9px; display: block; margin-bottom: 4px; }
+    .progress-mini { height: 7px; background: var(--bg2); border-radius: 4px; overflow: hidden; }
+    .progress-mini-fill { height: 100%; border-radius: 4px; width: 0%; transition: width 0.12s linear; }
     .progress-mini-fill.trigger { background: var(--warn); }
     .progress-mini-fill.silence  { background: var(--danger); }
 
@@ -465,6 +499,58 @@
       .page { padding: 28px 24px calc(var(--nav-h) + 32px + var(--safe-b)); }
       .page-title { font-size: 32px; }
     }
+
+    /* === HOME TWO-COLUMN LAYOUT === */
+    /* On mobile: stacked. On ≥520px: now-playing left, right-panel right */
+    #home-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    @media (min-width: 520px) {
+      #home-grid {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 14px;
+      }
+      #home-left  { flex: 0 0 320px; min-width: 0; }
+      #home-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+    }
+
+    /* Mini audio card on home — slim, no controls */
+    .home-viz-card {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 12px;
+      position: relative; overflow: hidden;
+    }
+    .home-viz-card::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 50% 120%, rgba(29,185,84,0.06), transparent 70%);
+      pointer-events: none;
+    }
+    .home-viz-header {
+      display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+    }
+    .home-viz-label {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-dim); margin-right: auto;
+    }
+    /* Home queue: compact rows */
+    #home-queue-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); overflow: hidden;
+    }
+    .home-queue-header {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-dim);
+      padding: 8px 12px 6px; border-bottom: 1px solid var(--border);
+    }
+    /* Compact queue items in the home right panel */
+    .queue-item.compact { padding: 7px 10px; gap: 8px; }
+    .queue-item.compact .queue-thumb { width: 28px; height: 28px; }
+    .queue-item.compact .queue-title { font-size: 12px; }
+    .queue-item.compact .queue-artist { font-size: 10px; }
+    .queue-item.compact .queue-pos { font-size: 10px; width: 16px; }
   </style>
 </head>
 <body>
@@ -482,32 +568,59 @@
       <div class="page-title">rolfsound</div>
       <div class="page-subtitle" id="home-subtitle">loading…</div>
     </div>
-    <div id="now-playing">
-      <div class="np-state" id="np-state">IDLE</div>
-      <div class="np-track">
-        <div class="np-thumb-placeholder" id="np-thumb-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
-        </div>
-        <div class="np-info">
-          <div class="np-title" id="np-title">Nothing playing</div>
-          <div class="np-artist" id="np-artist">—</div>
+
+    <div id="home-grid">
+      <!-- LEFT: now playing -->
+      <div id="home-left">
+        <div id="now-playing">
+          <div class="np-state" id="np-state">IDLE</div>
+          <div class="np-track">
+            <div class="np-thumb-placeholder" id="np-thumb-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
+            </div>
+            <div class="np-info">
+              <div class="np-title" id="np-title">Nothing playing</div>
+              <div class="np-artist" id="np-artist">—</div>
+            </div>
+          </div>
+          <div class="np-progress">
+            <div class="progress-track" id="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-times"><span id="prog-current">0:00</span><span id="prog-duration">0:00</span></div>
+          </div>
+          <div class="np-controls">
+            <button class="ctrl-btn" onclick="API.skipBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+            <button class="ctrl-btn-primary" onclick="togglePlayPause()">
+              <svg id="play-icon"  viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+              <svg id="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            </button>
+            <button class="ctrl-btn" onclick="API.skip()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+          </div>
         </div>
       </div>
-      <div class="np-progress">
-        <div class="progress-track" id="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-        <div class="progress-times"><span id="prog-current">0:00</span><span id="prog-duration">0:00</span></div>
-      </div>
-      <div class="np-controls">
-        <button class="ctrl-btn" onclick="API.skipBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
-        <button class="ctrl-btn-primary" onclick="togglePlayPause()">
-          <svg id="play-icon"  viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-          <svg id="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-        </button>
-        <button class="ctrl-btn" onclick="API.skip()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+
+      <!-- RIGHT: mini audio viz + queue -->
+      <div id="home-right">
+        <!-- Mini audio input visualizer — reuses same VIZ system, separate canvas -->
+        <div class="home-viz-card">
+          <div class="home-viz-header">
+            <span class="home-viz-label">INPUT</span>
+            <span class="chip" id="home-chip-rec" style="font-size:8px;padding:2px 7px">
+              <span class="chip-dot" style="width:5px;height:5px"></span>
+              <span id="home-chip-rec-txt">IDLE</span>
+            </span>
+          </div>
+          <div class="viz-wrap mini">
+            <canvas id="home-viz-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Queue -->
+        <div id="home-queue-wrap">
+          <div class="home-queue-header">QUEUE</div>
+          <div id="queue-list"><div class="loading-row" style="padding:16px"><div class="spinner"></div></div></div>
+        </div>
       </div>
     </div>
-    <div class="section-label">QUEUE</div>
-    <div id="queue-list"><div class="loading-row"><div class="spinner"></div></div></div>
   </div>
 
   <!-- SEARCH -->
@@ -555,21 +668,21 @@
       <div class="level-bar-labels">
         <span>0</span>
         <span id="rms-label" style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">RMS: —</span>
-        <span>MAX</span>
+        <span id="rms-max-label" style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">0.100</span>
       </div>
       <div class="level-bar-wrap">
         <div class="level-rms-fill" id="level-fill" style="width:0%"></div>
         <div class="threshold-line" id="thr-line" style="left:0%"></div>
       </div>
 
-      <!-- Trigger / Silence progress -->
+      <!-- Trigger / Silence progress — labels show actual durations from core config -->
       <div class="progress-mini-row">
         <div class="progress-mini-col">
-          <label style="color:var(--warn)">TRIGGER</label>
+          <label style="color:var(--warn)">TRIGGER <span id="trigger-dur-label" style="opacity:0.6"></span></label>
           <div class="progress-mini"><div class="progress-mini-fill trigger" id="trigger-fill"></div></div>
         </div>
         <div class="progress-mini-col">
-          <label style="color:var(--danger)">SILENCE</label>
+          <label style="color:var(--danger)">SILENCE <span id="silence-dur-label" style="opacity:0.6"></span></label>
           <div class="progress-mini"><div class="progress-mini-fill silence"  id="silence-fill"></div></div>
         </div>
       </div>
@@ -578,7 +691,7 @@
       <div class="thr-row">
         <span class="thr-label">Threshold</span>
         <input type="range" id="thr-slider" class="thr-slider"
-               min="0.001" max="0.3" step="0.001" value="0.015"
+               min="0.001" max="0.1" step="0.005" value="0.015"
                oninput="onThresholdSlide(this)"
                onchange="onThresholdCommit(this)">
         <span class="thr-val" id="thr-val">0.0150</span>
@@ -654,7 +767,11 @@ const S = {
   page:'home', status:null, playing:false, paused:false, currentId:null,
   settingsData:{},
   mon:{ rms:0, threshold:0.015, autoRecord:false, recording:false,
-        manual:false, trigP:0, silP:0, allCh:true, chIdx:1 },
+        manual:false, trigP:0, silP:0, allCh:true, chIdx:1,
+        // Config bounds — populated from first pollMonitor() response
+        minThreshold:0.001, maxThreshold:0.1, encoderStep:0.005,
+        triggerDuration:0.5, stopSeconds:5,
+        sampleRate:48000, blockSize:1024 },
 };
 
 /* ================================================================
@@ -665,12 +782,20 @@ function navigate(page) {
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
   document.getElementById('nav-'+page).classList.add('active');
-  S.page=page;
-  if(page==='library')  loadLibrary();
-  if(page==='history')  loadHistory();
-  if(page==='settings') loadSettings();
-  if(page==='monitor')  { startMonitor(); loadRecordings(); }
-  else                  stopMonitor();
+  S.page = page;
+
+  // ── Stop whatever was running on the previous page ──────────────
+  // Always kill home viz poll and monitor poll before starting the new page.
+  // Each page start function is responsible for re-enabling what it needs.
+  clearInterval(_homeVizPollId); _homeVizPollId = null;
+  stopMonitor(); // no-op if monitor wasn't running
+
+  // ── Start what the new page needs ───────────────────────────────
+  if(page === 'home')    { _startHomeVizPoll(); }
+  if(page === 'monitor') { startMonitor(); loadRecordings(); }
+  if(page === 'library') { loadLibrary(); }
+  if(page === 'history') { loadHistory(); }
+  if(page === 'settings'){ loadSettings(); }
 }
 
 /* ================================================================
@@ -761,15 +886,24 @@ function updateNowPlaying(s){
   }
 }
 
+// Dirty-check key for the queue — avoid full re-render when nothing changed
+let _lastQueueKey = '';
+
 function updateQueue(tracks){
   const list=document.getElementById('queue-list');
+
+  // Build a cheap key from track IDs + current playing track
+  const key = (tracks||[]).map(t=>t.track_id).join(',') + '|' + S.currentId;
+  if(key === _lastQueueKey) return;
+  _lastQueueKey = key;
+  const compact = true;
   if(!tracks||!tracks.length){
-    list.innerHTML=`<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><p>Queue is empty</p></div>`;
+    list.innerHTML=`<div class="empty-state" style="padding:20px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><p>Queue is empty</p></div>`;
     return;
   }
   list.innerHTML=tracks.map((t,i)=>{
     const src=thumbSrc(t.thumbnail);
-    return `<div class="queue-item ${t.track_id===S.currentId?'active-track':''}" draggable="true" data-pos="${i}" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dragDrop(event)" ondragend="dragEnd(event)">
+    return `<div class="queue-item ${compact?'compact':''} ${t.track_id===S.currentId?'active-track':''}" draggable="true" data-pos="${i}" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dragDrop(event)" ondragend="dragEnd(event)">
       <span class="queue-pos">${i+1}</span>
       ${src?`<img class="queue-thumb" src="${esc(src)}" loading="lazy" onerror="this.style.display='none'">`:'<div class="queue-thumb"></div>'}
       <div class="queue-info"><div class="queue-title">${esc(t.title||t.track_id||'Unknown')}</div><div class="queue-artist">${esc(t.artist||t.added_by||'')}</div></div>
@@ -839,23 +973,35 @@ document.addEventListener('DOMContentLoaded',()=>{
 function trackRowHTML(t,inLibrary,opts={}){
   const src=thumbSrc(t.thumbnail);
   const dur=t.duration?fmtTime(t.duration):(t.duration_s?fmtTime(t.duration_s):'');
-  const meta=[t.channel||t.artist||'',dur].filter(Boolean).join(' · ');
+
+  // Date: for YT tracks use published_date, fall back to date_added; for recordings use date
+  const dateTs = opts.isRecording ? t.date : (t.published_date || t.date_added);
+  const dateStr = dateTs ? fmtDate(dateTs) : '';
+
+  // Meta line construction
+  let metaStr;
+  if(opts.isRecording){
+    metaStr = [fmtBytes(t.size_bytes), dur, dateStr].filter(Boolean).join(' · ');
+  } else {
+    const parts = [t.channel||t.artist||'', dur, dateStr].filter(Boolean);
+    metaStr = parts.join(' · ');
+  }
+
+  const title = opts.isRecording ? (t.name||'') : (t.title||t.id||'Unknown');
+
   let actions='';
   if(opts.isRecording){
-    actions=`<button class="btn-icon primary" onclick="queueRecording('${escQ(t.name)}')" title="Queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    actions=`<button class="btn-icon primary" onclick="queueRecording('${escQ(t.name)}')" title="Add to queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <a class="btn-icon" href="/api/recordings/${encodeURIComponent(t.name)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteRecording('${escQ(t.name)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else if(inLibrary){
-    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}')" title="Queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}')" title="Add to queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <a class="btn-icon" href="/api/library/${esc(t.id)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteTrack('${esc(t.id)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else{
     actions=`<button class="btn-icon" onclick="downloadAndQueue('${esc(t.id)}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>`;
   }
-  const title   = opts.isRecording?(t.name||''):(t.title||t.id||'Unknown');
-  const metaStr = opts.metaOverride ?? (
-    opts.isRecording
-      ? fmtBytes(t.size_bytes) + (dur ? ' · ' + dur : '')
-      : meta
-  );
+
   return `<div class="track-row">
     ${src?`<img class="track-thumb" src="${esc(src)}" loading="lazy" onerror="this.style.display='none'">`:`<div class="track-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>`}
     <div class="track-info"><div class="track-title">${esc(title)}</div><div class="track-meta">${esc(metaStr)}</div></div>
@@ -902,194 +1048,336 @@ async function confirmDeleteTrack(id){
 ================================================================ */
 
 const VIZ = {
-  BARS:      60,
-  MAX_RMS:   0.30,   // practical ceiling for display normalization
-  DECAY:     0.88,   // smoothing applied to peak hold (not currently used but reserved)
-  BAR_GAP:   2,
+  BARS:    60,
+  BAR_GAP: 2,
+
+  /*
+   * TWO INDEPENDENT SCALES:
+   *
+   * 1. Bar scale  → _vizCeiling (auto-scales to signal level)
+   *    Bars always look well-sized regardless of mic gain.
+   *    Snaps up instantly on loud peaks, decays slowly.
+   *
+   * 2. Threshold line & level bar → S.mon.maxThreshold (fixed, from core config)
+   *    Always stable. Threshold position on the level bar never jumps.
+   */
+
+  // Auto-scale parameters for bar ceiling
+  CEIL_DECAY:    0.9995,   // ~23s to halve at 60fps — slow, non-distracting
+  CEIL_HEADROOM: 1.4,      // ceiling sits 40% above current peak
+  CEIL_FLOOR:    0.005,    // updated by _applyBoundsToUI to 20% of max_threshold
 };
 
-let _monPollId   = null;
-let _rafId       = null;
-let _vizW        = 0;     // logical canvas width  (px / dpr)
-let _vizH        = 0;     // logical canvas height
-let _vizDPR      = 1;
-let _vizBars     = new Float32Array(VIZ.BARS);   // ring buffer of RMS samples
-let _roObserver  = null;  // ResizeObserver reference
+// Mutable auto-scaling ceiling for bars only
+let _vizCeiling = VIZ.CEIL_FLOOR;
 
-function startMonitor(){
-  if(_monPollId) return;
-  _monPollId = setInterval(pollMonitor, 120);
-  _initViz();
-  pollMonitor();
+/** Called once per animation frame to update the auto-scaling ceiling. */
+function _updateVizCeiling(){
+  let peak = 0;
+  for(let i = 0; i < _vizBars.length; i++) if(_vizBars[i] > peak) peak = _vizBars[i];
+
+  // Floor: never collapse below CEIL_FLOOR (a small absolute minimum)
+  const floor  = VIZ.CEIL_FLOOR;
+  const target = Math.max(floor, peak * VIZ.CEIL_HEADROOM);
+
+  // Snap up instantly, decay down slowly
+  if(target > _vizCeiling){
+    _vizCeiling = target;
+  } else {
+    _vizCeiling = _vizCeiling * VIZ.CEIL_DECAY;
+    if(_vizCeiling < floor) _vizCeiling = floor;
+  }
+  // _vizCeiling is the only bar-scale — do NOT write to VIZ.MAX_RMS here
 }
 
-function stopMonitor(){
-  clearInterval(_monPollId); _monPollId = null;
-  cancelAnimationFrame(_rafId); _rafId = null;
-  if(_roObserver){ _roObserver.disconnect(); _roObserver = null; }
+let _monPollId  = null;
+
+// Ring buffer — fixed-size typed array + write-index pointer.
+// No allocations on each push, unlike the previous Float32Array spread approach.
+const _vizBars  = new Float32Array(VIZ.BARS);
+let   _vizHead  = 0;   // next write position
+
+function _pushVizSample(val){
+  _vizBars[_vizHead] = val;
+  _vizHead = (_vizHead + 1) % VIZ.BARS;
 }
 
-function _initViz(){
-  const canvas  = document.getElementById('viz-canvas');
+function _vizBarAt(i){
+  // i=0 is oldest, i=BARS-1 is newest
+  return _vizBars[(_vizHead + i) % VIZ.BARS];
+}
+
+// Each canvas gets its own state object — sizing is independent
+// { canvas, ctx, W, H, DPR, ro, rafId }
+const _vizInstances = {};
+
+function _createVizInstance(canvasId){
+  const canvas  = document.getElementById(canvasId);
+  if(!canvas) return null;
   const wrapper = canvas.parentElement;
+  const inst    = { canvas, ctx: canvas.getContext('2d'), W:0, H:0, DPR:1, ro:null, rafId:null };
 
-  // ResizeObserver: fires on mount and whenever the wrapper changes size.
-  // This is the correct, non-fragile way to handle canvas sizing.
-  _roObserver = new ResizeObserver(entries => {
+  inst.ro = new ResizeObserver(entries => {
     for(const entry of entries){
-      const { width, height } = entry.contentRect;
-      _vizDPR = window.devicePixelRatio || 1;
-      // Set pixel dimensions on the canvas element
-      canvas.width  = Math.round(width  * _vizDPR);
-      canvas.height = Math.round(height * _vizDPR);
-      // Store logical size for the draw loop
-      _vizW = width;
-      _vizH = height;
+      const {width, height} = entry.contentRect;
+      inst.DPR    = window.devicePixelRatio || 1;
+      canvas.width  = Math.round(width  * inst.DPR);
+      canvas.height = Math.round(height * inst.DPR);
+      inst.W = width;
+      inst.H = height;
     }
   });
-  _roObserver.observe(wrapper);
+  inst.ro.observe(wrapper);
 
-  // Start render loop
-  const ctx = canvas.getContext('2d');
-  _startRaf(ctx);
-}
-
-function _startRaf(ctx){
   function frame(){
-    _rafId = requestAnimationFrame(frame);
-    _drawViz(ctx);
+    inst.rafId = requestAnimationFrame(frame);
+    _drawVizInst(inst);
   }
   frame();
+  return inst;
 }
 
-function _drawViz(ctx){
-  const W = _vizW, H = _vizH, DPR = _vizDPR;
+function _destroyVizInstance(key){
+  const inst = _vizInstances[key];
+  if(!inst) return;
+  cancelAnimationFrame(inst.rafId);
+  if(inst.ro) inst.ro.disconnect();
+  delete _vizInstances[key];
+}
+
+function _drawVizInst(inst){
+  const {ctx, W, H, DPR} = inst;
   if(W <= 0 || H <= 0) return;
+
+  // Update the auto-scaling ceiling for bars on every frame
+  _updateVizCeiling();
 
   const m    = S.mon;
   const bars = VIZ.BARS;
   const gap  = VIZ.BAR_GAP;
   const barW = Math.max(1, (W - gap * (bars - 1)) / bars);
 
-  // Scale context to devicePixelRatio so all drawing uses logical px
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
-  // ---- Threshold dashed line ----
-  const thrY = H - (m.threshold / VIZ.MAX_RMS) * H;
+  // ── Threshold dashed line ────────────────────────────────────────
+  // Uses max_threshold as its fixed ceiling — NEVER auto-scaled.
+  // This keeps the line visually consistent regardless of signal level.
+  const thrCeiling = m.maxThreshold;
+  const thrY = H - Math.min(m.threshold / thrCeiling, 1) * H;
   ctx.strokeStyle = m.autoRecord ? 'rgba(255,179,71,0.55)' : 'rgba(80,80,100,0.35)';
-  ctx.lineWidth   = 1;
+  ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(0, thrY);
-  ctx.lineTo(W, thrY);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, thrY); ctx.lineTo(W, thrY); ctx.stroke();
   ctx.setLineDash([]);
 
-  // ---- Bars ----
+  // ── Bars ─────────────────────────────────────────────────────────
+  // Uses _vizCeiling — auto-scales so bars always look well-sized.
   for(let i = 0; i < bars; i++){
-    const val  = _vizBars[i] || 0;
-    const norm = Math.min(val / VIZ.MAX_RMS, 1);
-    const bH   = Math.max(2, norm * H);
-    const x    = i * (barW + gap);
-    const y    = H - bH;
+    const val   = _vizBarAt(i);
+    const norm  = Math.min(val / _vizCeiling, 1);
+    const bH    = Math.max(2, norm * H);
+    const x     = i * (barW + gap);
+    const y     = H - bH;
     const above = val >= m.threshold;
 
-    if(m.recording && above)
-      ctx.fillStyle = `rgba(255,85,85,${0.45 + norm * 0.55})`;
-    else if(above && m.autoRecord)
-      ctx.fillStyle = `rgba(29,185,84,${0.45 + norm * 0.55})`;
-    else if(!m.autoRecord)
-      ctx.fillStyle = `rgba(70,70,90,${0.2 + norm * 0.5})`;
-    else
-      ctx.fillStyle = `rgba(55,110,75,${0.2 + norm * 0.5})`;
+    if(m.recording && above)       ctx.fillStyle = `rgba(255,85,85,${0.45+norm*0.55})`;
+    else if(above && m.autoRecord) ctx.fillStyle = `rgba(29,185,84,${0.45+norm*0.55})`;
+    else if(!m.autoRecord)         ctx.fillStyle = `rgba(70,70,90,${0.2+norm*0.5})`;
+    else                           ctx.fillStyle = `rgba(55,110,75,${0.2+norm*0.5})`;
 
     const r = Math.min(barW / 2, 2.5);
     ctx.beginPath();
-    if(ctx.roundRect){
-      ctx.roundRect(x, y, barW, bH, [r, r, 0, 0]);
-    } else {
-      // Fallback for older browsers (Safari <16, Firefox <112)
-      ctx.rect(x, y, barW, bH);
-    }
+    if(ctx.roundRect) ctx.roundRect(x, y, barW, bH, [r, r, 0, 0]);
+    else ctx.rect(x, y, barW, bH);
     ctx.fill();
   }
+}
+
+function startMonitor(){
+  if(_monPollId) return;
+  _monPollId = setInterval(pollMonitor, 120);
+  if(!_vizInstances['monitor'])
+    _vizInstances['monitor'] = _createVizInstance('viz-canvas');
+  pollMonitor(); // immediate first sample
+}
+
+function stopMonitor(){
+  clearInterval(_monPollId); _monPollId = null;
+  _destroyVizInstance('monitor');
+}
+
+// Home mini-viz — canvas created once on first visit, reused on return.
+// Poll is started/stopped strictly by navigate().
+let _homeVizPollId = null;
+
+function startHomeViz(){
+  // Create canvas instance once — ResizeObserver + rAF run continuously
+  // (rAF is cheap: it just draws existing _vizBars data, no network)
+  if(!_vizInstances['home'])
+    _vizInstances['home'] = _createVizInstance('home-viz-canvas');
+  // Poll is managed by _startHomeVizPoll / navigate, not here
+}
+
+function _startHomeVizPoll(){
+  // Ensure canvas exists
+  startHomeViz();
+  // Start poll only if not already running and not superseded by monitor
+  if(!_homeVizPollId && !_monPollId){
+    _homeVizPollId = setInterval(pollMonitor, 500);
+    pollMonitor(); // immediate first sample
+  }
+}
+
+function stopHomeViz(){
+  clearInterval(_homeVizPollId); _homeVizPollId = null;
+  // Keep the canvas instance alive — cheap to redraw, avoids re-init on return
+  // Only destroy if explicitly needed (e.g. DOM removed)
 }
 
 async function pollMonitor(){
   try{
     const m = await API.getMonitor();
-    S.mon.rms       = m.rms_level          || 0;
-    S.mon.threshold = m.threshold          || 0.015;
-    S.mon.autoRecord= m.auto_record_enabled|| false;
-    S.mon.recording = m.recording          || false;
-    S.mon.manual    = m.manual_record_active||false;
-    S.mon.trigP     = m.trigger_progress   || 0;
-    S.mon.silP      = m.silence_progress   || 0;
-    S.mon.allCh     = m.monitor_all_channels!==false;
-    S.mon.chIdx     = m.channel_index      || 1;
 
-    // Push new sample — shift ring buffer left by 1
-    _vizBars = new Float32Array([...Array.from(_vizBars).slice(1), S.mon.rms]);
+    // ── Live state ────────────────────────────────────────────────
+    S.mon.rms       = m.rms_level           || 0;
+    S.mon.threshold = m.threshold           || 0.015;
+    S.mon.autoRecord= m.auto_record_enabled || false;
+    S.mon.recording = m.recording           || false;
+    S.mon.manual    = m.manual_record_active|| false;
+    S.mon.trigP     = m.trigger_progress    || 0;
+    S.mon.silP      = m.silence_progress    || 0;
+    S.mon.allCh     = m.monitor_all_channels!== false;
+    S.mon.chIdx     = m.channel_index       || 1;
+
+    // ── Config bounds from core ───────────────────────────────────
+    const boundsChanged =
+      S.mon.minThreshold  !== (m.min_threshold   ?? S.mon.minThreshold)  ||
+      S.mon.maxThreshold  !== (m.max_threshold   ?? S.mon.maxThreshold)  ||
+      S.mon.encoderStep   !== (m.encoder_step    ?? S.mon.encoderStep);
+
+    S.mon.minThreshold     = m.min_threshold   ?? S.mon.minThreshold;
+    S.mon.maxThreshold     = m.max_threshold   ?? S.mon.maxThreshold;
+    S.mon.encoderStep      = m.encoder_step    ?? S.mon.encoderStep;
+    S.mon.triggerDuration  = m.trigger_duration?? S.mon.triggerDuration;
+    S.mon.stopSeconds      = m.stop_seconds    ?? S.mon.stopSeconds;
+    S.mon.sampleRate       = m.sample_rate     ?? S.mon.sampleRate;
+    S.mon.blockSize        = m.block_size      ?? S.mon.blockSize;
+
+    // Update slider attributes and VIZ ceiling whenever bounds change
+    if(boundsChanged) _applyBoundsToUI();
+
+    // Push new sample into ring buffer — zero allocations
+    _pushVizSample(S.mon.rms);
 
     _updateMonitorUI();
   } catch(e){
-    // Core offline: vizBars naturally decays toward zero (last value stays, not pushed)
+    // Core offline — vizBars hold last values, UI stays frozen until reconnect
   }
 }
 
-function _updateMonitorUI(){
-  const m = S.mon, MAX = VIZ.MAX_RMS;
+function _applyBoundsToUI(){
+  const mn   = S.mon.minThreshold;
+  const mx   = S.mon.maxThreshold;
+  const step = S.mon.encoderStep;
 
-  document.getElementById('viz-channel').textContent =
-    m.allCh ? 'ALL CHANNELS' : `CHANNEL ${m.chIdx}`;
-
-  // Rec chip
-  const cRec = document.getElementById('chip-rec');
-  const cRT  = document.getElementById('chip-rec-txt');
-  if(m.recording){
-    cRec.className='chip recording rec-pulse'; cRT.textContent='RECORDING';
-  }else if(m.autoRecord){
-    cRec.className='chip monitoring'; cRT.textContent='MONITORING';
-  }else{
-    cRec.className='chip'; cRT.textContent='IDLE';
-  }
-
-  // Manual chip
-  const cMan = document.getElementById('chip-man');
-  document.getElementById('chip-man-txt').textContent = m.manual?'MANUAL ON':'MANUAL OFF';
-  cMan.className = 'chip' + (m.manual ? ' monitoring' : '');
-
-  // Level bar
-  const rmsPct = Math.min(m.rms / MAX * 100, 100);
-  const thrPct = Math.min(m.threshold / MAX * 100, 100);
-  const fill   = document.getElementById('level-fill');
-  fill.style.width = rmsPct + '%';
-  fill.className   = 'level-rms-fill'
-    + (m.rms > MAX * 0.92 ? ' clipping' : '')
-    + (m.autoRecord ? '' : ' inactive');
-  document.getElementById('thr-line').style.left = thrPct + '%';
-  document.getElementById('rms-label').textContent = `RMS: ${m.rms.toFixed(4)}`;
-
-  // Mini progress bars
-  document.getElementById('trigger-fill').style.width = (m.trigP * 100) + '%';
-  document.getElementById('silence-fill').style.width  = (m.silP  * 100) + '%';
-
-  // Auto-rec toggle
-  document.getElementById('auto-rec-toggle').className = 'toggle' + (m.autoRecord ? ' on' : '');
-
-  // Manual record button — active when recording AND manual is on
-  const recBtn = document.getElementById('rec-btn');
-  recBtn.className = 'rec-btn' + (m.manual ? ' active' : '');
-  recBtn.title = m.manual ? 'Stop recording' : 'Start manual recording';
-
-  // Threshold slider sync (only if user is NOT actively dragging)
+  // Update slider HTML attributes to match core's enforced range
   const slider = document.getElementById('thr-slider');
-  if(slider !== document.activeElement){
-    slider.value = m.threshold;
+  if(slider){
+    slider.min  = mn.toFixed(4);
+    slider.max  = mx.toFixed(4);
+    slider.step = step.toFixed(4);
+    // Re-clamp current value if now out of bounds
+    const cur = parseFloat(slider.value);
+    if(cur < mn) slider.value = mn;
+    if(cur > mx) slider.value = mx;
     _updateSliderFill(slider);
   }
-  document.getElementById('thr-val').textContent = m.threshold.toFixed(4);
+
+  // Update the right-hand label of the level bar to show actual max
+  const maxLabel = document.getElementById('rms-max-label');
+  if(maxLabel) maxLabel.textContent = mx.toFixed(3);
+
+  // Update trigger/silence duration labels
+  const trigLbl = document.getElementById('trigger-dur-label');
+  const silLbl  = document.getElementById('silence-dur-label');
+  if(trigLbl) trigLbl.textContent = S.mon.triggerDuration + 's';
+  if(silLbl)  silLbl.textContent  = S.mon.stopSeconds + 's';
+
+  // Update the floor for the auto-scaling bar ceiling so it never collapses
+  // below a meaningful fraction of max_threshold (handled in _updateVizCeiling)
+  VIZ.CEIL_FLOOR = Math.max(0.005, S.mon.maxThreshold * 0.2);
+}
+
+function _updateMonitorUI(){
+  const m = S.mon;
+  // Level bar uses max_threshold as fixed ceiling — consistent, never jumps
+  const BAR_MAX = m.maxThreshold;
+
+  // ── Elements that only exist on the monitor tab ───────────────────
+  const onMonitorTab = !!document.getElementById('chip-rec');
+
+  if(onMonitorTab){
+    // Channel label
+    document.getElementById('viz-channel').textContent =
+      m.allCh ? 'ALL CHANNELS' : `CHANNEL ${m.chIdx}`;
+
+    // Rec chip
+    const cRec = document.getElementById('chip-rec');
+    const cRT  = document.getElementById('chip-rec-txt');
+    if(m.recording){
+      cRec.className='chip recording rec-pulse'; cRT.textContent='RECORDING';
+    }else if(m.autoRecord){
+      cRec.className='chip monitoring'; cRT.textContent='MONITORING';
+    }else{
+      cRec.className='chip'; cRT.textContent='IDLE';
+    }
+
+    // Manual chip
+    const cMan = document.getElementById('chip-man');
+    document.getElementById('chip-man-txt').textContent = m.manual?'MANUAL ON':'MANUAL OFF';
+    cMan.className = 'chip' + (m.manual ? ' monitoring' : '');
+
+    // Level bar
+    const rmsPct = Math.min(m.rms / BAR_MAX * 100, 100);
+    const thrPct = Math.min(m.threshold / BAR_MAX * 100, 100);
+    const fill   = document.getElementById('level-fill');
+    fill.style.width = rmsPct + '%';
+    fill.className   = 'level-rms-fill'
+      + (m.rms > BAR_MAX * 0.92 ? ' clipping' : '')
+      + (m.autoRecord ? '' : ' inactive');
+    document.getElementById('thr-line').style.left = thrPct + '%';
+    document.getElementById('rms-label').textContent = `RMS: ${m.rms.toFixed(4)}`;
+
+    // Mini progress bars
+    document.getElementById('trigger-fill').style.width = (m.trigP * 100) + '%';
+    document.getElementById('silence-fill').style.width  = (m.silP  * 100) + '%';
+
+    // Auto-rec toggle
+    document.getElementById('auto-rec-toggle').className = 'toggle' + (m.autoRecord ? ' on' : '');
+
+    // Manual record button
+    const recBtn = document.getElementById('rec-btn');
+    recBtn.className = 'rec-btn' + (m.manual ? ' active' : '');
+    recBtn.title = m.manual ? 'Stop recording' : 'Start manual recording';
+
+    // Threshold slider sync (only if user is NOT actively dragging)
+    const slider = document.getElementById('thr-slider');
+    if(slider && slider !== document.activeElement){
+      slider.value = m.threshold;
+      _updateSliderFill(slider);
+    }
+    document.getElementById('thr-val').textContent = m.threshold.toFixed(4);
+  }
+
+  // ── Home mini-viz chip — always update regardless of current tab ──
+  const hChip = document.getElementById('home-chip-rec');
+  const hTxt  = document.getElementById('home-chip-rec-txt');
+  if(hChip && hTxt){
+    if(m.recording){ hChip.className='chip recording rec-pulse'; hTxt.textContent='REC'; }
+    else if(m.autoRecord){ hChip.className='chip monitoring'; hTxt.textContent='MON'; }
+    else{ hChip.className='chip'; hTxt.textContent='IDLE'; }
+  }
 }
 
 /* ---- Slider helpers ---- */
@@ -1159,32 +1447,20 @@ async function confirmDeleteRecording(name){
    HISTORY
 ================================================================ */
 async function loadHistory(){
-  const c = document.getElementById('history-container');
-  c.innerHTML = '<div class="loading-row"><div class="spinner"></div></div>';
-
-  try {
-    const d = await API.history();
-    const items = d.history || [];
-
-    if (!items.length) {
-      c.innerHTML = '<div class="empty-state"><p>No history yet.</p></div>';
-      return;
-    }
-
-    c.innerHTML = items.map(h => {
-      return trackRowHTML({
-        id: h.track_id,
-        title: h.title || h.track_id,
-        artist: h.artist || '',
-        thumbnail: h.thumbnail
-      }, false, {
-        metaOverride: relTime(h.played_at)
-      });
+  const c=document.getElementById('history-container');
+  c.innerHTML='<div class="loading-row"><div class="spinner"></div></div>';
+  try{
+    const d=await API.history(),items=d.history||[];
+    if(!items.length){c.innerHTML='<div class="empty-state"><p>No history yet.</p></div>';return;}
+    c.innerHTML=items.map(h=>{
+      const src=thumbSrc(h.thumbnail);
+      return `<div class="history-row">
+        ${src?`<img class="track-thumb" src="${esc(src)}" style="width:36px;height:36px" loading="lazy" onerror="this.style.display='none'">`:`<div style="width:36px;height:36px;background:var(--bg2);border-radius:6px;flex-shrink:0"></div>`}
+        <div class="track-info"><div class="track-title" style="font-size:13px">${esc(h.title||h.track_id)}</div><div class="track-meta">${esc(h.artist||'')}</div></div>
+        <div class="history-time">${relTime(h.played_at)}</div>
+      </div>`;
     }).join('');
-
-  } catch (e) {
-    c.innerHTML = '<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';
-  }
+  }catch(e){c.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
 }
 
 /* ================================================================
@@ -1236,6 +1512,16 @@ async function saveSettings(){try{await API.saveSettings(S.settingsData);toast('
 ================================================================ */
 function fmtTime(s){s=Math.floor(s||0);return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
 function fmtBytes(b){if(!b)return '';if(b<1048576)return (b/1024).toFixed(0)+' KB';return (b/1048576).toFixed(1)+' MB';}
+function fmtDate(ts){
+  if(!ts) return '';
+  const d = new Date(ts * 1000);
+  if(isNaN(d)) return '';
+  // Show year only if not current year, for compactness
+  const now = new Date();
+  if(d.getFullYear() === now.getFullYear())
+    return d.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+  return d.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
+}
 function relTime(ts){if(!ts)return '';const d=Math.floor(Date.now()/1000-ts);if(d<60)return 'now';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function escQ(s){return String(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');}
@@ -1245,8 +1531,50 @@ function toast(msg){const el=document.getElementById('toast');el.textContent=msg
 /* ================================================================
    INIT
 ================================================================ */
+
+// ---- Page Visibility API ----
+// Pause ALL network polling when the browser tab is hidden.
+// Resumes immediately when the tab becomes visible again.
+// This covers: switching browser tabs, minimising, phone screen-off.
+let _statusIntervalId = null;
+
+function _startStatusPoll(){
+  if(_statusIntervalId) return;
+  _statusIntervalId = setInterval(pollStatus, 1500);
+}
+
+function _stopStatusPoll(){
+  clearInterval(_statusIntervalId);
+  _statusIntervalId = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){
+    // Tab hidden — stop ALL network polling
+    _stopStatusPoll();
+    clearInterval(_monPollId);     _monPollId     = null;
+    clearInterval(_homeVizPollId); _homeVizPollId = null;
+  } else {
+    // Tab visible again — resume based on current page
+    pollStatus();
+    _startStatusPoll();
+    if(S.page === 'monitor'){
+      if(!_monPollId){ _monPollId = setInterval(pollMonitor, 120); pollMonitor(); }
+    } else if(S.page === 'home'){
+      if(!_homeVizPollId){ _homeVizPollId = setInterval(pollMonitor, 500); pollMonitor(); }
+    }
+    // All other pages: no monitor polling needed
+  }
+});
+
+// Start everything on load
 pollStatus();
-setInterval(pollStatus, 1500);
+_startStatusPoll();
+// Home is the default active page — start canvas + poll
+document.addEventListener('DOMContentLoaded', () => {
+  startHomeViz();       // create canvas instance
+  _startHomeVizPoll();  // start the 500ms monitor poll for home viz
+});
 </script>
 </body>
 </html>
