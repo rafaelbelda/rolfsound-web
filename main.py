@@ -53,9 +53,8 @@ def main() -> None:
         host="0.0.0.0",
         port=port,
         log_level="info",
-        access_log=False,
+        access_log=False
     )
-
 
 if __name__ == "__main__":
     main()

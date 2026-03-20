@@ -46,3 +46,8 @@ out/
 *.jpg
 *.mp3
 *.db
+library.*
+
+music/
+
+config.json

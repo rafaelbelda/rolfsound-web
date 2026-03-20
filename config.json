@@ -6,7 +6,7 @@
     "database_path": "./db/library.db",
     "download_temp_directory": "./cache",
     "max_search_results": 10,
-    "download_audio_format": "mp3",
+    "download_audio_format": "opus",
     "cleanup_enabled": true,
     "cleanup_min_streams": 3,
     "cleanup_days": 30,

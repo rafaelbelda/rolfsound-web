@@ -635,7 +635,16 @@
 
   <!-- LIBRARY -->
   <div class="page" id="page-library">
-    <div class="page-header"><div class="page-title">Library</div><div class="page-subtitle" id="lib-subtitle">Loading…</div></div>
+    <div class="page-header">
+      <div class="page-title">Library</div>
+      <div class="page-subtitle" id="lib-subtitle">Loading…</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn btn-ghost" style="font-size:12px;padding:8px 14px" onclick="scanLibrary()" id="scan-btn">
+        <svg style="width:13px;height:13px;display:inline;vertical-align:middle;margin-right:5px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        Scan folder
+      </button>
+    </div>
     <div id="library-list"><div class="loading-row"><div class="spinner"></div></div></div>
   </div>
 
@@ -816,8 +825,8 @@ const API={
   queueAdd(t,f,n){return this.fetch('/queue/add',   {method:'POST',body:JSON.stringify({track_id:t,filepath:f,title:n})});},
   queueRemove(p) {return this.fetch('/queue/remove',{method:'POST',body:JSON.stringify({position:p})});},
   queueMove(f,t) {return this.fetch('/queue/move',  {method:'POST',body:JSON.stringify({from_pos:f,to_pos:t})});},
-  search(q)      {return this.fetch('/search?q='+encodeURIComponent(q));},
-  library()      {return this.fetch('/library');},
+  search(q)      {return this.fetch('/search?q='+encodeURIComponent(q));},  // kept for library-only use
+  scanLibrary()  {return this.fetch('/library/scan',{method:'POST',body:'{}'});},
   history(n=50)  {return this.fetch('/history?limit='+n);},
   deleteTrack(id){return this.fetch('/library/'+id,{method:'DELETE'});},
   getSettings()  {return this.fetch('/settings');},
@@ -949,22 +958,121 @@ function dragEnd(){document.querySelectorAll('.queue-item').forEach(el=>el.class
 /* ================================================================
    SEARCH
 ================================================================ */
+let _searchAbort = null; // AbortController for in-flight search
+
 async function doSearch(){
-  const q=document.getElementById('search-input').value.trim();if(!q)return;
-  const r=document.getElementById('search-results');
-  r.innerHTML='<div class="loading-row"><div class="spinner"></div> Searching…</div>';
-  try{renderSearchResults(await API.search(q));}
-  catch(e){r.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Search failed</p>';}
+  const q = document.getElementById('search-input').value.trim();
+  if(!q) return;
+
+  // Cancel any previous in-flight search
+  if(_searchAbort){ _searchAbort.abort(); _searchAbort = null; }
+
+  const results = document.getElementById('search-results');
+  results.innerHTML = '<div class="loading-row"><div class="spinner"></div> Searching…</div>';
+
+  // Section containers — rendered once, results appended as they stream in
+  let libSection  = null;
+  let ytSection   = null;
+  let ytCount     = 0;
+  let libDone     = false;
+
+  _searchAbort = new AbortController();
+  const signal = _searchAbort.signal;
+
+  try {
+    const resp = await fetch('/api/search?q=' + encodeURIComponent(q), { signal });
+    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const dec    = new TextDecoder();
+    let   buf    = '';
+
+    results.innerHTML = ''; // clear spinner once stream begins
+
+    while(true){
+      const { done, value } = await reader.read();
+      if(done) break;
+
+      buf += dec.decode(value, { stream: true });
+
+      // SSE messages are separated by double newline
+      const messages = buf.split('\n\n');
+      buf = messages.pop(); // keep incomplete last chunk
+
+      for(const msg of messages){
+        if(!msg.trim()) continue;
+        // Parse "event: X\ndata: Y"
+        let event = 'result', dataStr = '';
+        for(const line of msg.split('\n')){
+          if(line.startsWith('event:')) event = line.slice(6).trim();
+          if(line.startsWith('data:'))  dataStr = line.slice(5).trim();
+        }
+        if(!dataStr) continue;
+
+        let payload;
+        try { payload = JSON.parse(dataStr); } catch(e){ continue; }
+
+        if(event === 'library'){
+          const tracks = payload.tracks || [];
+          if(tracks.length){
+            libSection = document.createElement('div');
+            libSection.innerHTML = '<div class="section-label">IN YOUR LIBRARY</div>';
+            results.appendChild(libSection);
+            tracks.forEach(t => {
+              libSection.insertAdjacentHTML('beforeend', trackRowHTML(t, true));
+            });
+          }
+          libDone = true;
+          // If no library results and no YT section yet, show YouTube heading
+          if(!tracks.length){
+            ytSection = document.createElement('div');
+            results.appendChild(ytSection);
+          }
+        }
+
+        if(event === 'result'){
+          // Create YouTube section on first result
+          if(!ytSection){
+            ytSection = document.createElement('div');
+            if(libDone){
+              ytSection.insertAdjacentHTML('afterbegin',
+                '<div class="section-label" style="margin-top:20px">YOUTUBE</div>');
+            }
+            results.appendChild(ytSection);
+          }
+          ytCount++;
+          ytSection.insertAdjacentHTML('beforeend', trackRowHTML(payload, false));
+          // Animate in
+          const rows = ytSection.querySelectorAll('.track-row');
+          const last = rows[rows.length - 1];
+          if(last){ last.style.animation = 'fadeIn 0.15s ease'; }
+        }
+
+        if(event === 'done'){
+          if(ytCount === 0 && !libSection){
+            results.innerHTML = '<div class="empty-state"><p>No results.</p></div>';
+          } else if(ytCount === 0 && ytSection){
+            // Remove the empty YouTube section heading
+            ytSection.remove();
+          }
+        }
+      }
+    }
+  } catch(e){
+    if(e.name === 'AbortError') return; // cancelled by new search — normal
+    results.innerHTML = '<p style="color:var(--danger);padding:16px;font-size:13px">Search failed — ' + esc(e.message) + '</p>';
+  }
 }
-function renderSearchResults(data){
-  const c=document.getElementById('search-results');let html='';
-  if(data.library?.length){html+='<div class="section-label">IN YOUR LIBRARY</div>';data.library.forEach(t=>{html+=trackRowHTML(t,true);});}
-  if(data.youtube?.length){html+='<div class="section-label" style="margin-top:20px">YOUTUBE</div>';data.youtube.forEach(t=>{html+=trackRowHTML(t,false);});}
-  c.innerHTML=html||'<div class="empty-state"><p>No results.</p></div>';
-}
+
 document.addEventListener('DOMContentLoaded',()=>{
   const i=document.getElementById('search-input');
-  i&&i.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+  if(!i) return;
+  // Enter key triggers immediately; typing debounces 400ms
+  // (debounce only matters if we ever add search-as-you-type)
+  let _debounce;
+  i.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ clearTimeout(_debounce); doSearch(); }
+  });
 });
 
 /* ================================================================
@@ -1020,6 +1128,23 @@ async function downloadAndQueue(tid,name,thumb){
 /* ================================================================
    LIBRARY
 ================================================================ */
+async function scanLibrary(){
+  const btn = document.getElementById('scan-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Scanning…'; }
+  try{
+    const r = await API.scanLibrary();
+    const msg = r.added > 0 ? `Found ${r.added} new track${r.added!==1?'s':''}` : 'Already up to date';
+    toast(msg);
+    if(r.added > 0) loadLibrary();
+  }catch(e){ toast('Scan failed'); }
+  finally{
+    if(btn){
+      btn.disabled = false;
+      btn.innerHTML = '<svg style="width:13px;height:13px;display:inline;vertical-align:middle;margin-right:5px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Scan folder';
+    }
+  }
+}
+
 async function loadLibrary(){
   const list=document.getElementById('library-list'),sub=document.getElementById('lib-subtitle');
   list.innerHTML='<div class="loading-row"><div class="spinner"></div></div>';

@@ -35,6 +35,17 @@ async def lifespan(app: FastAPI):
     cfg.load()
     database.init(cfg.get("database_path", "./db/library.db"))
 
+    # Reconcile music directory with DB — picks up manually added files
+    # and tracks downloaded before the DB existed
+    music_dir = cfg.get("music_directory", "./music")
+    conn = database.get_connection()
+    try:
+        added = database.scan_and_reconcile(conn, music_dir)
+        if added:
+            logger.info(f"Library scan: added {added} previously untracked files")
+    finally:
+        conn.close()
+
     # Clean up temp files from any previous crashed downloads
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 

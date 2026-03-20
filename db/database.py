@@ -117,6 +117,112 @@ def insert_track(conn, track: dict) -> None:
     })
 
 
+def get_all_track_ids(conn) -> set[str]:
+    """Return the set of all track IDs in the library. Used for fast dedup in search."""
+    rows = conn.execute("SELECT id FROM tracks").fetchall()
+    return {row["id"] for row in rows}
+
+
+def scan_and_reconcile(conn, music_dir: str) -> int:
+    """
+    Walk the music directory and insert any audio files not already in the DB.
+    Returns the number of new tracks added.
+
+    This handles:
+    - Tracks downloaded before the DB existed
+    - Tracks added manually to the music directory
+    - Tracks whose DB record was accidentally deleted
+
+    Title is inferred from filename. artwork/metadata stay empty until
+    the track is played (stream counter update) or manually refreshed.
+    """
+    import time as _time
+    from youtube.ytdlp import AUDIO_EXTENSIONS
+
+    music_path = Path(music_dir)
+    if not music_path.exists():
+        return 0
+
+    added = 0
+    for f in music_path.iterdir():
+        if f.suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        # Skip thumbnail files
+        if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+            continue
+
+        track_id = f.stem  # YouTube ID is the filename stem
+        existing = conn.execute(
+            "SELECT id FROM tracks WHERE id = ? OR file_path = ?",
+            (track_id, str(f))
+        ).fetchone()
+
+        if existing:
+            continue
+
+        # Check if there's a local thumbnail alongside the file
+        thumb = None
+        for ext in (".jpg", ".jpeg", ".png"):
+            candidate = music_path / f"{f.stem}{ext}"
+            if candidate.exists():
+                thumb = str(candidate)
+                break
+
+        conn.execute("""
+            INSERT OR IGNORE INTO tracks
+                (id, title, artist, duration, thumbnail, file_path,
+                 date_added, published_date, streams, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            track_id,
+            f.stem,   # use filename as title until metadata is fetched
+            "",
+            None,
+            thumb,
+            str(f),
+            int(_time.time()),
+            None,
+            0,
+            "local",
+        ))
+        added += 1
+        logger.info(f"Library scan: added {f.name}")
+
+    if added:
+        conn.commit()
+    return added
+
+
+def search_tracks(conn, query: str, limit: int = 50) -> list[dict]:
+    """
+    Filter tracks by title or artist.
+    Uses SQL LIKE for ASCII (fast path). Falls back to Python lower()
+    for non-ASCII characters that SQLite LOWER() can miss.
+    """
+    pattern = f"%{query}%"
+    rows = conn.execute("""
+        SELECT * FROM tracks
+        WHERE title LIKE ? OR artist LIKE ?
+        ORDER BY streams DESC, date_added DESC
+        LIMIT ?
+    """, (pattern, pattern, limit)).fetchall()
+    results = [dict(r) for r in rows]
+
+    # Python fallback for non-ASCII (accents, CJK, etc.)
+    if not results:
+        q_lower = query.lower()
+        all_rows = conn.execute(
+            "SELECT * FROM tracks ORDER BY streams DESC, date_added DESC"
+        ).fetchall()
+        results = [
+            dict(r) for r in all_rows
+            if q_lower in (r["title"] or "").lower()
+            or q_lower in (r["artist"] or "").lower()
+        ][:limit]
+
+    return results
+
+
 def increment_streams(conn, track_id: str) -> None:
     conn.execute(
         "UPDATE tracks SET streams = streams + 1 WHERE id = ?", (track_id,)

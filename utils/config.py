@@ -17,10 +17,11 @@ _DEFAULTS = {
     "core_url": "http://localhost:8765",
     "server_port": 8766,
     "music_directory": "./music",
+    "recordings_directory": "./recordings",
     "database_path": "./db/library.db",
     "download_temp_directory": "./cache",
     "max_search_results": 10,
-    "download_audio_format": "mp3",
+    "download_audio_format": "opus",   # native stream, no re-encode
     "cleanup_enabled": True,
     "cleanup_min_streams": 3,
     "cleanup_days": 30,
