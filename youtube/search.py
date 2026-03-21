@@ -309,13 +309,20 @@ async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] 
             logger.error(f"YouTube API: 400 Bad Request — {e.response.text[:200]}")
         else:
             logger.error(f"YouTube API: HTTP {status} for {query!r}")
-        return None   # infrastructure failure → caller should fallback
+        # return none = yt-dlp fallback
+        return None
     except httpx.TimeoutException:
         logger.warning(f"YouTube API: timeout for {query!r} — falling back to yt-dlp")
-        return None   # infrastructure failure → caller should fallback
+        return None
+
+    except httpx.NetworkError as e:
+        # Covers ConnectError, DNS issues, no internet, etc.
+        logger.error(f"YouTube API: network error for {query!r}: {e}")
+        return None
+    
     except Exception as e:
         logger.error(f"YouTube API: unexpected error for {query!r}: {e}", exc_info=True)
-        return None   # infrastructure failure → caller should fallback
+        return None
 
 
 # ── yt-dlp fallback path ──────────────────────────────────────────────────────

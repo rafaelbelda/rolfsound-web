@@ -16,6 +16,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 _DEFAULTS = {
     "core_url":                  "http://localhost:8765",
     "server_port":               8766,
+    "log_file_level":           logging.INFO,
     "music_directory":           "./music",
     "recordings_directory":      "./recordings",
     "database_path":             "./db/library.db",
