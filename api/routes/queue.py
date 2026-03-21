@@ -25,7 +25,7 @@ class MoveRequest(BaseModel):
 
 @router.get("/queue")
 async def get_queue():
-    result = core_client.get_queue()
+    result = await core_client.get_queue()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -45,7 +45,7 @@ async def add_to_queue(req: AddRequest):
         finally:
             conn.close()
 
-    result = core_client.queue_add(req.track_id, req.filepath, req.title, req.position)
+    result = await core_client.queue_add(req.track_id, req.filepath, req.title, req.position)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -53,7 +53,7 @@ async def add_to_queue(req: AddRequest):
 
 @router.post("/queue/remove")
 async def remove_from_queue(req: RemoveRequest):
-    result = core_client.queue_remove(req.position)
+    result = await core_client.queue_remove(req.position)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -61,7 +61,7 @@ async def remove_from_queue(req: RemoveRequest):
 
 @router.post("/queue/move")
 async def move_in_queue(req: MoveRequest):
-    result = core_client.queue_move(req.from_pos, req.to_pos)
+    result = await core_client.queue_move(req.from_pos, req.to_pos)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -69,7 +69,7 @@ async def move_in_queue(req: MoveRequest):
 
 @router.post("/queue/clear")
 async def clear_queue():
-    result = core_client.queue_clear()
+    result = await core_client.queue_clear()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

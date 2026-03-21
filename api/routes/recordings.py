@@ -68,7 +68,7 @@ async def queue_recording(name: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    result = core_client.queue_add(
+    result = await core_client.queue_add(
         track_id=name,
         filepath=str(path),
         title=name,

@@ -1,9 +1,16 @@
 # utils/core_client.py
 """
-HTTP client for rolfsound-core communication.
-All requests include timeouts and return None on any failure —
-callers raise HTTPException(503) and the dashboard shows its
-own "unavailable" message. No stub logic here.
+Async HTTP client for rolfsound-core communication.
+
+CRITICAL: All functions are async and use httpx.AsyncClient.
+The previous version used synchronous httpx.get/post which blocked
+the entire uvicorn event loop for TIMEOUT seconds on every call.
+With core offline and the dashboard polling /status every 1.5s and
+/monitor every 120ms, this caused 5-30s queuing delays on every
+other request (settings, library, search, etc.).
+
+Every async function returns None on any failure — callers raise
+HTTPException(503). No blocking I/O anywhere in this module.
 """
 
 import logging
@@ -11,18 +18,22 @@ import httpx
 from utils.config import get
 
 logger  = logging.getLogger(__name__)
-TIMEOUT = 5.0
+
+# Aggressive timeout: core is local. If it doesn't respond in 2s it's down.
+# 5s was the old value — too long when the dashboard polls constantly.
+TIMEOUT = httpx.Timeout(2.0, connect=1.0)
 
 
 def _url(path: str) -> str:
     return get("core_url", "http://localhost:8765").rstrip("/") + path
 
 
-def _get(path: str, params: dict = None) -> dict | None:
+async def _get(path: str, params: dict = None) -> dict | None:
     try:
-        r = httpx.get(_url(path), params=params, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            r = await client.get(_url(path), params=params)
+            r.raise_for_status()
+            return r.json()
     except httpx.ConnectError:
         logger.debug(f"Core unreachable: GET {path}")
     except httpx.TimeoutException:
@@ -32,11 +43,12 @@ def _get(path: str, params: dict = None) -> dict | None:
     return None
 
 
-def _post(path: str, data: dict = None) -> dict | None:
+async def _post(path: str, data: dict = None) -> dict | None:
     try:
-        r = httpx.post(_url(path), json=data or {}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            r = await client.post(_url(path), json=data or {})
+            r.raise_for_status()
+            return r.json()
     except httpx.ConnectError:
         logger.debug(f"Core unreachable: POST {path}")
     except httpx.TimeoutException:
@@ -46,32 +58,32 @@ def _post(path: str, data: dict = None) -> dict | None:
     return None
 
 
-# ---- Public API ----
+# ── Public API ────────────────────────────────────────────────────────────────
 
-def get_status() -> dict | None:          return _get("/status")
-def get_queue()  -> dict | None:          return _get("/queue")
-def get_events(since: int = 0):           return _get("/events", {"since": since})
+async def get_status() -> dict | None:    return await _get("/status")
+async def get_queue()  -> dict | None:    return await _get("/queue")
+async def get_events(since: int = 0):     return await _get("/events", {"since": since})
 
-def play(filepath=None, track_id=None):
+async def play(filepath=None, track_id=None) -> dict | None:
     p = {}
     if filepath:  p["filepath"]  = filepath
     if track_id:  p["track_id"]  = track_id
-    return _post("/play", p)
+    return await _post("/play", p)
 
-def pause()                    -> dict | None: return _post("/pause")
-def skip()                     -> dict | None: return _post("/skip")
-def seek(position: float)      -> dict | None: return _post("/seek", {"position": position})
+async def pause()                    -> dict | None: return await _post("/pause")
+async def skip()                     -> dict | None: return await _post("/skip")
+async def seek(position: float)      -> dict | None: return await _post("/seek", {"position": position})
 
-def record_start()             -> dict | None: return _post("/recorder/start")
-def record_stop()              -> dict | None: return _post("/recorder/stop")
+async def record_start()             -> dict | None: return await _post("/recorder/start")
+async def record_stop()              -> dict | None: return await _post("/recorder/stop")
 
-def queue_add(track_id, filepath, title="", position=None):
+async def queue_add(track_id, filepath, title="", position=None) -> dict | None:
     p = {"track_id": track_id, "filepath": filepath, "title": title}
     if position is not None:
         p["position"] = position
-    return _post("/queue/add", p)
+    return await _post("/queue/add", p)
 
-def queue_remove(position: int) -> dict | None: return _post("/queue/remove", {"position": position})
-def queue_move(from_pos, to_pos)-> dict | None: return _post("/queue/move", {"from": from_pos, "to": to_pos})
-def queue_clear()               -> dict | None: return _post("/queue/clear")
-def is_available()              -> bool:        return get_status() is not None
+async def queue_remove(position: int) -> dict | None: return await _post("/queue/remove", {"position": position})
+async def queue_move(from_pos, to_pos)-> dict | None: return await _post("/queue/move", {"from": from_pos, "to": to_pos})
+async def queue_clear()               -> dict | None: return await _post("/queue/clear")
+async def is_available()              -> bool:        return await get_status() is not None

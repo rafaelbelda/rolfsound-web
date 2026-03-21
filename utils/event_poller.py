@@ -1,9 +1,21 @@
 # utils/event_poller.py
 """
 Polls rolfsound-core for events and dispatches them to registered handlers.
-Runs in a background thread.
+Runs in a dedicated background daemon thread.
+
+Since core_client is now fully async, each poll call uses asyncio.run()
+to execute the coroutine from the background thread without touching the
+main uvicorn event loop. This is safe because:
+  - asyncio.run() creates and tears down a fresh event loop per call
+  - The thread never shares state with the uvicorn loop
+  - Handlers are sync and dispatched directly in the poller thread
+
+POLL_INTERVAL is intentionally conservative — this is for server-side
+event tracking (stream counts, history), not the UI. The dashboard has
+its own polling via /api/status and /api/monitor.
 """
 
+import asyncio
 import logging
 import threading
 import time
@@ -13,7 +25,7 @@ from utils import core_client
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 0.75  # seconds
+POLL_INTERVAL = 2.0   # seconds — conservative, this is background bookkeeping
 
 
 class EventPoller:
@@ -49,7 +61,16 @@ class EventPoller:
             time.sleep(POLL_INTERVAL)
 
     def _poll_once(self) -> None:
-        result = core_client.get_events(since=self._last_event_id)
+        # asyncio.run() is safe here — we're in a dedicated daemon thread,
+        # not in the uvicorn event loop thread.
+        try:
+            result = asyncio.run(
+                core_client.get_events(since=self._last_event_id)
+            )
+        except Exception as e:
+            logger.debug(f"EventPoller get_events failed: {e}")
+            return
+
         if result is None:
             return
 
@@ -57,22 +78,19 @@ class EventPoller:
         if not events:
             return
 
-        # Ensure events are sorted by ID
         events.sort(key=lambda e: e["id"])
 
-        # Detect gap
         first_id = events[0]["id"]
         if first_id > self._last_event_id + 1 and self._last_event_id > 0:
             logger.warning(
-                f"Event ID gap detected ({self._last_event_id} → {first_id}). "
-                "Triggering state refresh."
+                f"Event ID gap ({self._last_event_id} → {first_id}) — "
+                "triggering state refresh."
             )
             self._dispatch("state_refresh", {})
 
         for event in events:
             if event["id"] <= self._last_event_id:
-                continue  # skip already-processed
-
+                continue
             self._last_event_id = event["id"]
             self._dispatch(event["type"], event.get("data", {}))
 
@@ -82,13 +100,11 @@ class EventPoller:
                 handler(data)
             except Exception as e:
                 logger.error(f"Event handler error ({event_type}): {e}")
-
-        # Also dispatch to wildcard handlers
         for handler in self._handlers.get("*", []):
             try:
                 handler({"type": event_type, "data": data})
             except Exception as e:
-                logger.error(f"Wildcard handler error ({event_type}): {e}")
+                logger.error(f"Wildcard handler error: {e}")
 
 
 # Module-level singleton

@@ -29,7 +29,7 @@ async def get_monitor():
     trigger_duration, stop_seconds) are emitted by RecorderService into
     SystemState so they are always in sync with what the hardware actually uses.
     """
-    status = core_client.get_status()
+    status = await core_client.get_status()
     if status is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
 
@@ -72,7 +72,7 @@ class ThresholdRequest(BaseModel):
 
 @router.post("/monitor/auto-record")
 async def set_auto_record(req: AutoRecordRequest):
-    result = core_client._post("/recorder/auto-record", {"enabled": req.enabled})
+    result = await core_client._post("/recorder/auto-record", {"enabled": req.enabled})
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -86,7 +86,7 @@ async def set_threshold(req: ThresholdRequest):
     but we validate the range here too so bad requests never reach core.
     """
     # Fetch current bounds to validate
-    status = core_client.get_status()
+    status = await core_client.get_status()
     if status is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
 
@@ -96,7 +96,7 @@ async def set_threshold(req: ThresholdRequest):
 
     value = max(mn, min(mx, req.value))
 
-    result = core_client._post("/recorder/threshold", {"value": value})
+    result = await core_client._post("/recorder/threshold", {"value": value})
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -105,7 +105,7 @@ async def set_threshold(req: ThresholdRequest):
 @router.post("/monitor/record/start")
 async def manual_record_start():
     """Trigger a manual recording start on core (same as pressing the hardware switch ON)."""
-    result = core_client.record_start()
+    result = await core_client.record_start()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -114,7 +114,7 @@ async def manual_record_start():
 @router.post("/monitor/record/stop")
 async def manual_record_stop():
     """Stop a manual recording on core (same as pressing the hardware switch OFF)."""
-    result = core_client.record_stop()
+    result = await core_client.record_stop()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

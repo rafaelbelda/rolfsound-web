@@ -116,7 +116,7 @@ def create_app() -> FastAPI:
     @app.get("/api/status")
     async def get_status():
         from utils import core_client
-        status = core_client.get_status()
+        status = await core_client.get_status()
         if status is None:
             return JSONResponse(
                 status_code=503,
