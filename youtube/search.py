@@ -224,7 +224,7 @@ _API_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 _API_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
-async def _search_api(query: str, max_results: int, api_key: str) -> list[dict]:
+async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] | None:
     """
     Parallel two-request YouTube Data API v3 search.
 
@@ -298,21 +298,24 @@ async def _search_api(query: str, max_results: int, api_key: str) -> list[dict]:
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         if status == 403:
-            logger.error(
-                "YouTube API: 403 Forbidden — check your API key and confirm "
-                "'YouTube Data API v3' is enabled in Google Cloud Console"
-            )
+            if "quotaExceeded" in e.response.text or "dailyLimitExceeded" in e.response.text:
+                logger.warning(f"YouTube API: quota exceeded for {query!r} — falling back to yt-dlp")
+            else:
+                logger.error(
+                    "YouTube API: 403 Forbidden — check your API key and confirm "
+                    "'YouTube Data API v3' is enabled in Google Cloud Console"
+                )
         elif status == 400:
             logger.error(f"YouTube API: 400 Bad Request — {e.response.text[:200]}")
         else:
             logger.error(f"YouTube API: HTTP {status} for {query!r}")
-        return []
+        return None   # infrastructure failure → caller should fallback
     except httpx.TimeoutException:
-        logger.warning(f"YouTube API: timeout for {query!r}")
-        return []
+        logger.warning(f"YouTube API: timeout for {query!r} — falling back to yt-dlp")
+        return None   # infrastructure failure → caller should fallback
     except Exception as e:
         logger.error(f"YouTube API: unexpected error for {query!r}: {e}", exc_info=True)
-        return []
+        return None   # infrastructure failure → caller should fallback
 
 
 # ── yt-dlp fallback path ──────────────────────────────────────────────────────
@@ -443,6 +446,17 @@ async def search(query: str, max_results: int = 10) -> list[dict]:
     # Miss — run the search
     if api_key:
         results = await _search_api(query, max_results, api_key)
+
+        # None means infrastructure failure (timeout, quota, bad key, network).
+        # [] means the API worked but found nothing — that's a real empty result,
+        # don't fallback (yt-dlp wouldn't find anything different).
+        if results is None:
+            logger.info(f"API unavailable for {query!r} — falling back to yt-dlp")
+            results = await _search_ytdlp(query, max_results)
+            # Cache under ytdlp prefix so it doesn't poison the api: namespace
+            if results:
+                _cache_set(make_cache_key(query, max_results, ""), results)
+            return results
     else:
         results = await _search_ytdlp(query, max_results)
 

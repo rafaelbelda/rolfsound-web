@@ -26,10 +26,13 @@ def setup_logging() -> None:
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    log_file_level = get("log_file_level", logging.INFO)
+
     fh = RotatingFileHandler(
         "control.log", maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
     )
-    fh.setLevel(logging.DEBUG)
+    fh.setLevel(log_file_level)
     fh.setFormatter(fmt)
 
     ch = logging.StreamHandler()
