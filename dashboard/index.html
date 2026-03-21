@@ -4,10 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>rolfsound</title>
-  <!-- Preconnect to font CDN so DNS+TLS is resolved before CSS requests fonts -->
   <link rel="preconnect" href="https://encore.scdn.co" crossorigin>
-  <!-- Preload the two most critical fonts (body text weight 400 + 700).
-       Title and Mono are lower priority — browser will fetch them after layout. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin
         href="https://encore.scdn.co/fonts/SpotifyMixUI-Regular-76c92fb1a35c462f73429fa8865163eb.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin
@@ -59,25 +56,6 @@
       --radius-sm:   8px;
       --ease:        cubic-bezier(0.4,0,0.2,1);
       --t:           0.18s;
-      /* ─── Font roles ───────────────────────────────────────────
-         --ui    → SpotifyMixUI (400 / 700)
-                   Body copy, labels, buttons, nav, descriptions,
-                   settings labels, artist names, page subtitles.
-                   Offline fallback: best system sans on any OS.
-
-         --title → SpotifyMixUITitle (variable 100–900)
-                   Page titles, now-playing track name, queue track
-                   titles, large headings. Falls back to SpotifyMixUI
-                   first (already cached), then system sans.
-
-         --mono  → SpotifyMixMono (400)
-                   Timestamps, RMS/threshold values, status codes,
-                   section labels, progress times, settings inputs,
-                   queue position numbers, track metadata.
-                   Offline fallback: best system monospace per OS
-                   (SF Mono on Mac, Cascadia on Windows, DejaVu/
-                   Liberation on Linux). Never Courier New.
-      ──────────────────────────────────────────────────────────── */
       --ui:    'SpotifyMixUI',
                -apple-system, BlinkMacSystemFont,
                'Segoe UI', system-ui, sans-serif;
@@ -313,10 +291,6 @@
 
     /* ============================================================
        MONITOR — Visualizer
-       Designed to be robust:
-       - ResizeObserver drives canvas sizing (no offsetWidth in rAF)
-       - devicePixelRatio applied once on resize, not every frame
-       - Canvas element fills its container via CSS, not JS width attrs
     ============================================================ */
     .monitor-card {
       background: var(--bg3); border: 1px solid var(--border);
@@ -329,7 +303,6 @@
       pointer-events: none;
     }
 
-    /* Header: channel + status chips all in one row */
     .viz-header {
       display: flex; align-items: center; gap: 8px;
       margin-bottom: 12px; flex-wrap: wrap;
@@ -339,7 +312,6 @@
       text-transform: uppercase; color: var(--text-dim); margin-right: auto;
     }
 
-    /* Status chips — inline in the viz header */
     .chip {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 3px 9px; border-radius: 20px;
@@ -354,28 +326,30 @@
     .chip.rec-pulse .chip-dot { animation: pulse-rec 1s ease-in-out infinite; }
     @keyframes pulse-rec { 0%,100%{opacity:1} 50%{opacity:0.25} }
 
-    /* Canvas wrapper — key: fixed height, 100% width, canvas fills it */
+    /* Canvas wrapper */
     .viz-wrap {
       position: relative;
       width: 100%;
-      height: 140px;          /* taller for better audio visibility */
+      height: 140px;
       border-radius: 6px;
       background: var(--bg2);
       overflow: hidden;
       margin-bottom: 10px;
+      /* Cursor changes during drag — set by JS */
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none; /* prevent page scroll during drag */
     }
-    /* Smaller variant used on home page mini-viz */
     .viz-wrap.mini {
       height: 56px;
       margin-bottom: 0;
       border-radius: 4px;
+      cursor: default;
     }
     #viz-canvas {
-      /* CSS: fill the wrapper */
       position: absolute; inset: 0;
       width: 100%; height: 100%;
       display: block;
-      /* Pixel dimensions set by ResizeObserver × devicePixelRatio */
     }
 
     /* Level bar */
@@ -386,7 +360,7 @@
     .level-rms-fill.inactive { background: var(--text-dim); opacity: 0.5; }
     .threshold-line { position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--warn); pointer-events: none; }
 
-    /* Trigger / Silence mini bars — taller and easier to read */
+    /* Trigger / Silence mini bars */
     .progress-mini-row { display: flex; gap: 12px; margin-bottom: 14px; }
     .progress-mini-col { flex: 1; }
     .progress-mini-col label { font-family: var(--mono); font-size: 9px; display: block; margin-bottom: 4px; }
@@ -395,51 +369,12 @@
     .progress-mini-fill.trigger { background: var(--warn); }
     .progress-mini-fill.silence  { background: var(--danger); }
 
-    /* === THRESHOLD SLIDER === */
-    .thr-row {
-      display: flex; align-items: center; gap: 10px;
+    /* Threshold drag hint */
+    .thr-hint {
+      font-family: var(--mono); font-size: 9px; color: var(--text-dim);
+      text-align: center; letter-spacing: 0.06em; margin-top: 2px; margin-bottom: 4px;
+      opacity: 0.7;
     }
-    .thr-label { font-size: 13px; font-weight: 700; flex-shrink: 0; }
-    .thr-val {
-      font-family: var(--mono); font-size: 12px; color: var(--accent);
-      min-width: 52px; text-align: right; flex-shrink: 0;
-    }
-
-    /*
-      Range slider — fully custom, works on mobile/desktop.
-      Browser-native input[type=range] with CSS vendor overrides
-      for consistent cross-browser appearance.
-    */
-    input[type=range].thr-slider {
-      flex: 1;
-      -webkit-appearance: none;
-      appearance: none;
-      height: 4px;
-      border-radius: 2px;
-      background: var(--bg2);
-      outline: none;
-      cursor: pointer;
-      /* filled portion via JS gradient on --filled var */
-      background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--filled, 5%), var(--bg2) var(--filled, 5%), var(--bg2) 100%);
-      touch-action: none;  /* prevents page scroll interference on mobile */
-    }
-    input[type=range].thr-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 18px; height: 18px;
-      border-radius: 50%;
-      background: white;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-      transition: transform var(--t);
-    }
-    input[type=range].thr-slider:active::-webkit-slider-thumb { transform: scale(1.2); }
-    input[type=range].thr-slider::-moz-range-thumb {
-      width: 18px; height: 18px; border: none;
-      border-radius: 50%; background: white;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-      cursor: pointer;
-    }
-    input[type=range].thr-slider::-moz-range-track { height: 4px; border-radius: 2px; background: var(--bg2); }
 
     /* Controls card */
     .monitor-controls { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
@@ -463,7 +398,6 @@
     .rec-btn svg { width: 12px; height: 12px; }
     .rec-btn:hover { background: rgba(255,85,85,0.18); border-color: var(--danger); }
     .rec-btn:active { transform: scale(0.92); }
-    /* Active (recording) state: glowing filled circle */
     .rec-btn.active {
       background: var(--danger);
       border-color: var(--danger);
@@ -506,10 +440,10 @@
       flex-direction: column;
       gap: 10px;
     }
+
     #home-left, #home-right { width: 100%; }
     #home-right { display: flex; flex-direction: column; gap: 10px; }
 
-    /* Mini audio card on home — full width, taller */
     .home-viz-card {
       background: var(--bg3); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 10px 12px;
@@ -527,7 +461,6 @@
       font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
       text-transform: uppercase; color: var(--text-dim);
     }
-    /* Home queue */
     #home-queue-wrap {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius-sm); overflow: hidden;
@@ -670,33 +603,32 @@
   </div>
 
   <!-- MONITOR -->
-
-  <!-- MONITOR -->
   <div class="page" id="page-monitor">
     <div class="page-header">
       <div class="page-title">Monitor</div>
       <div class="page-subtitle">Audio input · Recorder · Recordings</div>
     </div>
 
-    <!-- Visualizer card: header has channel + all status chips in one row -->
+    <!-- Visualizer card -->
     <div class="monitor-card">
       <div class="viz-header">
         <span class="viz-channel" id="viz-channel">CHANNEL —</span>
-        <!-- Status chips -->
         <span class="chip" id="chip-rec"><span class="chip-dot"></span><span id="chip-rec-txt">IDLE</span></span>
         <span class="chip" id="chip-man"><span class="chip-dot"></span><span id="chip-man-txt">MANUAL OFF</span></span>
-        <!-- Manual record button: lives here so it's always visible alongside status -->
         <button id="rec-btn" onclick="toggleManualRecord()" class="rec-btn" title="Manual Record">
           <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
         </button>
       </div>
 
-      <!-- Canvas wrapper: fixed height, ResizeObserver handles DPR scaling -->
-      <div class="viz-wrap">
+      <!-- Canvas: draggable threshold line lives here -->
+      <div class="viz-wrap" id="viz-wrap">
         <canvas id="viz-canvas"></canvas>
       </div>
 
-      <!-- RMS level bar -->
+      <!-- Drag hint — shown briefly then fades, or always shown until first drag -->
+      <div class="thr-hint" id="thr-hint">↕ drag threshold line to adjust</div>
+
+      <!-- RMS level bar (uses fixed maxThreshold ceiling — never jumps) -->
       <div class="level-bar-labels">
         <span>0</span>
         <span id="rms-label" style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">RMS: —</span>
@@ -707,7 +639,7 @@
         <div class="threshold-line" id="thr-line" style="left:0%"></div>
       </div>
 
-      <!-- Trigger / Silence progress — labels show actual durations from core config -->
+      <!-- Trigger / Silence progress bars -->
       <div class="progress-mini-row">
         <div class="progress-mini-col">
           <label style="color:var(--warn)">TRIGGER <span id="trigger-dur-label" style="opacity:0.6"></span></label>
@@ -717,16 +649,6 @@
           <label style="color:var(--danger)">SILENCE <span id="silence-dur-label" style="opacity:0.6"></span></label>
           <div class="progress-mini"><div class="progress-mini-fill silence"  id="silence-fill"></div></div>
         </div>
-      </div>
-
-      <!-- Threshold slider (replaces ± buttons) -->
-      <div class="thr-row">
-        <span class="thr-label">Threshold</span>
-        <input type="range" id="thr-slider" class="thr-slider"
-               min="0.001" max="0.1" step="0.005" value="0.015"
-               oninput="onThresholdSlide(this)"
-               onchange="onThresholdCommit(this)">
-        <span class="thr-val" id="thr-val">0.0150</span>
       </div>
     </div>
 
@@ -798,12 +720,15 @@
 const S = {
   page:'home', status:null, playing:false, paused:false, currentId:null,
   settingsData:{},
-  mon:{ rms:0, threshold:0.015, autoRecord:false, recording:false,
-        manual:false, trigP:0, silP:0, allCh:true, chIdx:1,
-        // Config bounds — populated from first pollMonitor() response
-        minThreshold:0.001, maxThreshold:0.1, encoderStep:0.005,
-        triggerDuration:0.5, stopSeconds:5,
-        sampleRate:48000, blockSize:1024 },
+  mon:{
+    rms:0, threshold:0.015, autoRecord:false, recording:false,
+    manual:false, trigP:0, silP:0, allCh:true, chIdx:1,
+    // Config bounds — fetched ONCE on first successful pollMonitor().
+    // Never updated again unless the page is reloaded.
+    minThreshold:0.001, maxThreshold:0.1, encoderStep:0.005,
+    triggerDuration:0.5, stopSeconds:5,
+    sampleRate:48000, blockSize:1024,
+  },
 };
 
 /* ================================================================
@@ -816,13 +741,9 @@ function navigate(page) {
   document.getElementById('nav-'+page).classList.add('active');
   S.page = page;
 
-  // ── Stop whatever was running on the previous page ──────────────
-  // Always kill home viz poll and monitor poll before starting the new page.
-  // Each page start function is responsible for re-enabling what it needs.
   clearInterval(_homeVizPollId); _homeVizPollId = null;
-  stopMonitor(); // no-op if monitor wasn't running
+  stopMonitor();
 
-  // ── Start what the new page needs ───────────────────────────────
   if(page === 'home')    { _startHomeVizPoll(); }
   if(page === 'monitor') { startMonitor(); loadRecordings(); }
   if(page === 'search')  { _checkApiKeyNudge(); }
@@ -1196,82 +1117,46 @@ async function confirmDeleteTrack(id){
   if(!confirm('Remove from library?'))return;
   try{await API.deleteTrack(id);toast('Deleted ✓');loadLibrary();}catch(e){toast('Delete failed');}
 }
-
 /* ================================================================
-   MONITOR — visualizer (robust implementation)
+   MONITOR — visualizer
 
-   Design principles matching production audio visualizers:
-   1. ResizeObserver drives canvas pixel dimensions — not checked in rAF
-   2. devicePixelRatio applied at resize time, drawing ops use logical coords
-   3. rAF loop is lightweight: no DOM reads, only canvas draws
-   4. Bar history ring buffer — typed Float32Array for GC friendliness
-   5. Canvas element fills its CSS container via position:absolute/inset:0
-      so layout never depends on JS-set element dimensions
-   6. stopMonitor() cancels both intervals and the rAF to prevent leaks
+   Key design decisions:
+   1. Bounds (min/max threshold, encoder step, durations) are fetched ONCE
+      on first successful pollMonitor(). A _boundsLoaded flag prevents any
+      further bounds processing. Reload the page to pick up config changes.
+   2. Threshold is set by dragging the line directly on the canvas.
+      The slider HTML/CSS is gone entirely.
+   3. Bar ceiling auto-scales (_vizCeiling) — separate from threshold scale.
+   4. Threshold line drawn at (H - threshold/maxThreshold * H).
+      A floating label on the right side shows the current value.
+   5. Invisible hit area: ±12px around the line responds to mouse/touch.
 ================================================================ */
 
 const VIZ = {
   BARS:    60,
   BAR_GAP: 2,
-
-  /*
-   * TWO INDEPENDENT SCALES:
-   *
-   * 1. Bar scale  → _vizCeiling (auto-scales to signal level)
-   *    Bars always look well-sized regardless of mic gain.
-   *    Snaps up instantly on loud peaks, decays slowly.
-   *
-   * 2. Threshold line & level bar → S.mon.maxThreshold (fixed, from core config)
-   *    Always stable. Threshold position on the level bar never jumps.
-   */
-
-  // Auto-scale parameters for bar ceiling
-  CEIL_DECAY:    0.9995,   // ~23s to halve at 60fps — slow, non-distracting
-  CEIL_HEADROOM: 1.4,      // ceiling sits 40% above current peak
-  CEIL_FLOOR:    0.005,    // updated by _applyBoundsToUI to 20% of max_threshold
+  /* Hit area half-height for threshold drag (logical px) */
+  HIT_SLOP: 14,
 };
 
-// Mutable auto-scaling ceiling for bars only
-let _vizCeiling = VIZ.CEIL_FLOOR;
+let _monPollId   = null;
 
-/** Called once per animation frame to update the auto-scaling ceiling. */
-function _updateVizCeiling(){
-  let peak = 0;
-  for(let i = 0; i < _vizBars.length; i++) if(_vizBars[i] > peak) peak = _vizBars[i];
+/* Bounds loaded flag — set true after first successful response with bounds */
+let _boundsLoaded = false;
 
-  // Floor: never collapse below CEIL_FLOOR (a small absolute minimum)
-  const floor  = VIZ.CEIL_FLOOR;
-  const target = Math.max(floor, peak * VIZ.CEIL_HEADROOM);
-
-  // Snap up instantly, decay down slowly
-  if(target > _vizCeiling){
-    _vizCeiling = target;
-  } else {
-    _vizCeiling = _vizCeiling * VIZ.CEIL_DECAY;
-    if(_vizCeiling < floor) _vizCeiling = floor;
-  }
-  // _vizCeiling is the only bar-scale — do NOT write to VIZ.MAX_RMS here
-}
-
-let _monPollId  = null;
-
-// Ring buffer — fixed-size typed array + write-index pointer.
-// No allocations on each push, unlike the previous Float32Array spread approach.
+/* Ring buffer */
 const _vizBars  = new Float32Array(VIZ.BARS);
-let   _vizHead  = 0;   // next write position
+let   _vizHead  = 0;
 
 function _pushVizSample(val){
   _vizBars[_vizHead] = val;
   _vizHead = (_vizHead + 1) % VIZ.BARS;
 }
-
 function _vizBarAt(i){
-  // i=0 is oldest, i=BARS-1 is newest
   return _vizBars[(_vizHead + i) % VIZ.BARS];
 }
 
-// Each canvas gets its own state object — sizing is independent
-// { canvas, ctx, W, H, DPR, ro, rafId }
+/* Per-canvas instance: { canvas, ctx, W, H, DPR, ro, rafId } */
 const _vizInstances = {};
 
 function _createVizInstance(canvasId){
@@ -1312,9 +1197,6 @@ function _drawVizInst(inst){
   const {ctx, W, H, DPR} = inst;
   if(W <= 0 || H <= 0) return;
 
-  // Update the auto-scaling ceiling for bars on every frame
-  _updateVizCeiling();
-
   const m    = S.mon;
   const bars = VIZ.BARS;
   const gap  = VIZ.BAR_GAP;
@@ -1323,22 +1205,20 @@ function _drawVizInst(inst){
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
-  // ── Threshold dashed line ────────────────────────────────────────
-  // Uses max_threshold as its fixed ceiling — NEVER auto-scaled.
-  // This keeps the line visually consistent regardless of signal level.
+  /* ── Threshold line ──────────────────────────────────────────────
+     Position uses maxThreshold as the fixed scale ceiling.
+     This keeps the line stable regardless of audio level.
+  ──────────────────────────────────────────────────────────────── */
   const thrCeiling = m.maxThreshold;
-  const thrY = H - Math.min(m.threshold / thrCeiling, 1) * H;
-  ctx.strokeStyle = m.autoRecord ? 'rgba(255,179,71,0.55)' : 'rgba(80,80,100,0.35)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(0, thrY); ctx.lineTo(W, thrY); ctx.stroke();
-  ctx.setLineDash([]);
+  const thrRatio   = Math.min(m.threshold / thrCeiling, 1);
+  const thrY       = H - thrRatio * H;
 
-  // ── Bars ─────────────────────────────────────────────────────────
-  // Uses _vizCeiling — auto-scales so bars always look well-sized.
+  /* ── Bars ────────────────────────────────────────────────────────
+     Use _vizCeiling (auto-scales) — bars always look well-sized.
+  ──────────────────────────────────────────────────────────────── */
   for(let i = 0; i < bars; i++){
     const val   = _vizBarAt(i);
-    const norm  = Math.min(val / _vizCeiling, 1);
+    const norm  = Math.min(val / m.maxThreshold, 1);
     const bH    = Math.max(2, norm * H);
     const x     = i * (barW + gap);
     const y     = H - bH;
@@ -1355,14 +1235,216 @@ function _drawVizInst(inst){
     else ctx.rect(x, y, barW, bH);
     ctx.fill();
   }
+
+  /* ── Draw threshold line on top of bars ─────────────────────────── */
+  const isDragging = _thrDrag.active;
+  const lineAlpha  = isDragging ? 0.95 : (m.autoRecord ? 0.65 : 0.35);
+  const lineColor  = isDragging
+    ? `rgba(255,220,80,${lineAlpha})`
+    : (m.autoRecord ? `rgba(255,179,71,${lineAlpha})` : `rgba(80,80,100,${lineAlpha})`);
+
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth   = isDragging ? 1.5 : 1;
+  ctx.setLineDash(isDragging ? [] : [4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, thrY);
+  ctx.lineTo(W, thrY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  /* ── Floating label attached to threshold line ──────────────────
+     Shows on: always while dragging, otherwise only when auto-record on.
+     Position: right side, inside canvas bounds.
+  ──────────────────────────────────────────────────────────────── */
+  if(isDragging || m.autoRecord || m.recording){
+    const labelText = m.threshold.toFixed(4);
+    const subText   = 'THR';
+    const fontSize  = 10;
+    const padding   = 5;
+
+    ctx.font = `700 ${fontSize}px monospace`;
+    const tw = Math.max(ctx.measureText(labelText).width, ctx.measureText(subText).width);
+    const lw = tw + padding * 2;
+    const lh = fontSize * 2 + padding * 2 + 2;
+
+    /* Keep pill inside canvas vertically */
+    const pillX = W - lw - 6;
+    let   pillY = thrY - lh / 2;
+    if(pillY < 2)      pillY = 2;
+    if(pillY + lh > H) pillY = H - lh - 2;
+
+    /* Pill background */
+    const bgAlpha = isDragging ? 0.88 : 0.7;
+    ctx.fillStyle = isDragging
+      ? `rgba(50,40,10,${bgAlpha})`
+      : (m.autoRecord ? `rgba(40,30,10,${bgAlpha})` : `rgba(20,20,28,${bgAlpha})`);
+
+    const pr = 4;
+    if(ctx.roundRect) ctx.roundRect(pillX, pillY, lw, lh, pr);
+    else ctx.rect(pillX, pillY, lw, lh);
+    ctx.fill();
+
+    /* Pill border */
+    ctx.strokeStyle = isDragging ? 'rgba(255,220,80,0.6)' : 'rgba(255,179,71,0.3)';
+    ctx.lineWidth   = 0.5;
+    ctx.setLineDash([]);
+    if(ctx.roundRect) ctx.roundRect(pillX, pillY, lw, lh, pr);
+    else ctx.rect(pillX, pillY, lw, lh);
+    ctx.stroke();
+
+    /* Value text */
+    ctx.fillStyle   = isDragging ? 'rgba(255,220,80,1)' : 'rgba(255,179,71,0.9)';
+    ctx.font        = `700 ${fontSize}px monospace`;
+    ctx.textAlign   = 'center';
+    ctx.textBaseline= 'top';
+    ctx.fillText(labelText, pillX + lw/2, pillY + padding);
+
+    /* Sub label */
+    ctx.fillStyle   = isDragging ? 'rgba(255,220,80,0.55)' : 'rgba(255,179,71,0.45)';
+    ctx.font        = `400 ${fontSize - 1}px monospace`;
+    ctx.fillText(subText, pillX + lw/2, pillY + padding + fontSize + 2);
+
+    ctx.textAlign   = 'left';
+    ctx.textBaseline= 'alphabetic';
+  }
+
+  /* ── Drag handle indicator (subtle, only on monitor canvas) ─────
+     A small triangle/arrow on the left of the line when not dragging.
+     Shows user the line is interactive.
+  ──────────────────────────────────────────────────────────────── */
+  if(!isDragging && inst.canvas.id === 'viz-canvas'){
+    const hx = 8, hy = thrY;
+    const hs = 5;
+    ctx.fillStyle = m.autoRecord ? 'rgba(255,179,71,0.5)' : 'rgba(100,100,130,0.4)';
+    ctx.beginPath();
+    ctx.moveTo(hx - hs, hy - hs);
+    ctx.lineTo(hx + hs, hy);
+    ctx.lineTo(hx - hs, hy + hs);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
+/* ================================================================
+   THRESHOLD DRAG — mouse & touch on the viz-wrap element
+================================================================ */
+const _thrDrag = {
+  active:    false,
+  startY:    0,
+  startThr:  0,
+};
+
+/* Debounced API commit — fires 80ms after last drag move */
+let _thrCommitTimer = null;
+
+function _thrYToValue(canvasLogicalY, canvasH){
+  const m   = S.mon;
+  const raw = (canvasH - canvasLogicalY) / canvasH * m.maxThreshold;
+  return Math.max(m.minThreshold, Math.min(m.maxThreshold, raw));
+}
+
+function _getLogicalY(e, rect){
+  /* Returns Y in logical (CSS) pixels relative to the element top */
+  if(e.touches && e.touches.length > 0){
+    return e.touches[0].clientY - rect.top;
+  }
+  return e.clientY - rect.top;
+}
+
+function _isThrHit(logicalY, canvasH){
+  const m    = S.mon;
+  const thrY = canvasH - (m.threshold / m.maxThreshold) * canvasH;
+  return Math.abs(logicalY - thrY) <= VIZ.HIT_SLOP;
+}
+
+function _attachDragHandlers(){
+  const wrap = document.getElementById('viz-wrap');
+  if(!wrap || wrap._dragAttached) return;
+  wrap._dragAttached = true;
+
+  function onStart(e){
+    const inst = _vizInstances['monitor'];
+    if(!inst) return;
+    const rect = wrap.getBoundingClientRect();
+    const ly   = _getLogicalY(e, rect);
+
+    if(!_isThrHit(ly, inst.H)) return;
+
+    e.preventDefault();
+    _thrDrag.active   = true;
+    _thrDrag.startY   = ly;
+    _thrDrag.startThr = S.mon.threshold;
+    wrap.style.cursor = 'grabbing';
+
+    /* Hide hint once user has dragged */
+    const hint = document.getElementById('thr-hint');
+    if(hint){ hint.style.opacity = '0'; hint.style.transition = 'opacity 0.4s'; }
+  }
+
+  function onMove(e){
+    if(!_thrDrag.active) return;
+    e.preventDefault();
+    const inst = _vizInstances['monitor'];
+    if(!inst) return;
+    const rect = wrap.getBoundingClientRect();
+    const ly   = _getLogicalY(e, rect);
+    const val  = _thrYToValue(ly, inst.H);
+    S.mon.threshold = val;
+
+    /* Update level-bar threshold line in real time */
+    const thrPct = Math.min(val / S.mon.maxThreshold * 100, 100);
+    const thrLine = document.getElementById('thr-line');
+    if(thrLine) thrLine.style.left = thrPct + '%';
+
+    /* Debounce the API call */
+    clearTimeout(_thrCommitTimer);
+    _thrCommitTimer = setTimeout(async () => {
+      try{ await API.setThreshold(val); }
+      catch(e){ toast('Core unavailable'); }
+    }, 80);
+  }
+
+  function onEnd(e){
+    if(!_thrDrag.active) return;
+    _thrDrag.active   = false;
+    wrap.style.cursor = 'ns-resize';
+    /* Fire one final commit in case debounce didn't fire */
+    clearTimeout(_thrCommitTimer);
+    const finalVal = S.mon.threshold;
+    API.setThreshold(finalVal).catch(() => toast('Core unavailable'));
+  }
+
+  /* Mouse */
+  wrap.addEventListener('mousedown',  onStart, { passive: false });
+  document.addEventListener('mousemove', onMove,  { passive: false });
+  document.addEventListener('mouseup',   onEnd);
+
+  /* Touch */
+  wrap.addEventListener('touchstart', onStart, { passive: false });
+  document.addEventListener('touchmove',  onMove,  { passive: false });
+  document.addEventListener('touchend',   onEnd);
+
+  /* Cursor feedback on hover — show grab cursor near threshold line */
+  wrap.addEventListener('mousemove', e => {
+    if(_thrDrag.active) return;
+    const inst = _vizInstances['monitor'];
+    if(!inst) return;
+    const rect = wrap.getBoundingClientRect();
+    const ly   = e.clientY - rect.top;
+    wrap.style.cursor = _isThrHit(ly, inst.H) ? 'grab' : 'default';
+  });
+}
+
+/* ================================================================
+   MONITOR LIFECYCLE
+================================================================ */
 function startMonitor(){
   if(_monPollId) return;
   _monPollId = setInterval(pollMonitor, 120);
   if(!_vizInstances['monitor'])
     _vizInstances['monitor'] = _createVizInstance('viz-canvas');
-  pollMonitor(); // immediate first sample
+  _attachDragHandlers();
+  pollMonitor();
 }
 
 function stopMonitor(){
@@ -1370,122 +1452,101 @@ function stopMonitor(){
   _destroyVizInstance('monitor');
 }
 
-// Home mini-viz — canvas created once on first visit, reused on return.
-// Poll is started/stopped strictly by navigate().
 let _homeVizPollId = null;
 
 function startHomeViz(){
-  // Create canvas instance once — ResizeObserver + rAF run continuously
-  // (rAF is cheap: it just draws existing _vizBars data, no network)
   if(!_vizInstances['home'])
     _vizInstances['home'] = _createVizInstance('home-viz-canvas');
-  // Poll is managed by _startHomeVizPoll / navigate, not here
 }
 
 function _startHomeVizPoll(){
-  // Ensure canvas exists
   startHomeViz();
-  // Start poll only if not already running and not superseded by monitor
   if(!_homeVizPollId && !_monPollId){
     _homeVizPollId = setInterval(pollMonitor, 500);
-    pollMonitor(); // immediate first sample
+    pollMonitor();
   }
 }
 
-function stopHomeViz(){
-  clearInterval(_homeVizPollId); _homeVizPollId = null;
-  // Keep the canvas instance alive — cheap to redraw, avoids re-init on return
-  // Only destroy if explicitly needed (e.g. DOM removed)
-}
-
+/* ================================================================
+   POLL MONITOR
+   Bounds are read once (_boundsLoaded flag). After that only live
+   state fields (rms, threshold, recording, etc.) are processed.
+   This eliminates unnecessary re-processing of static config data
+   on every 120ms tick.
+================================================================ */
 async function pollMonitor(){
   try{
     const m = await API.getMonitor();
 
-    // ── Live state ────────────────────────────────────────────────
-    S.mon.rms       = m.rms_level           || 0;
-    S.mon.threshold = m.threshold           || 0.015;
-    S.mon.autoRecord= m.auto_record_enabled || false;
-    S.mon.recording = m.recording           || false;
-    S.mon.manual    = m.manual_record_active|| false;
-    S.mon.trigP     = m.trigger_progress    || 0;
-    S.mon.silP      = m.silence_progress    || 0;
-    S.mon.allCh     = m.monitor_all_channels!== false;
-    S.mon.chIdx     = m.channel_index       || 1;
+    /* ── Live state (always update) ─────────────────────────────── */
+    S.mon.rms        = m.rms_level            || 0;
+    S.mon.autoRecord = m.auto_record_enabled  || false;
+    S.mon.recording  = m.recording            || false;
+    S.mon.manual     = m.manual_record_active || false;
+    S.mon.trigP      = m.trigger_progress     || 0;
+    S.mon.silP       = m.silence_progress     || 0;
+    S.mon.allCh      = m.monitor_all_channels !== false;
+    S.mon.chIdx      = m.channel_index        || 1;
 
-    // ── Config bounds from core ───────────────────────────────────
-    const boundsChanged =
-      S.mon.minThreshold  !== (m.min_threshold   ?? S.mon.minThreshold)  ||
-      S.mon.maxThreshold  !== (m.max_threshold   ?? S.mon.maxThreshold)  ||
-      S.mon.encoderStep   !== (m.encoder_step    ?? S.mon.encoderStep);
+    /* Only update threshold from server if user is NOT currently dragging.
+       This prevents the server's stale value from jumping the line mid-drag. */
+    if(!_thrDrag.active){
+      S.mon.threshold = m.threshold || 0.015;
+    }
 
-    S.mon.minThreshold     = m.min_threshold   ?? S.mon.minThreshold;
-    S.mon.maxThreshold     = m.max_threshold   ?? S.mon.maxThreshold;
-    S.mon.encoderStep      = m.encoder_step    ?? S.mon.encoderStep;
-    S.mon.triggerDuration  = m.trigger_duration?? S.mon.triggerDuration;
-    S.mon.stopSeconds      = m.stop_seconds    ?? S.mon.stopSeconds;
-    S.mon.sampleRate       = m.sample_rate     ?? S.mon.sampleRate;
-    S.mon.blockSize        = m.block_size      ?? S.mon.blockSize;
+    /* ── Bounds — fetch ONCE, never again ────────────────────────── */
+    if(!_boundsLoaded && m.min_threshold !== undefined){
+      S.mon.minThreshold    = m.min_threshold;
+      S.mon.maxThreshold    = m.max_threshold    ?? S.mon.maxThreshold;
+      S.mon.encoderStep     = m.encoder_step     ?? S.mon.encoderStep;
+      S.mon.triggerDuration = m.trigger_duration ?? S.mon.triggerDuration;
+      S.mon.stopSeconds     = m.stop_seconds     ?? S.mon.stopSeconds;
+      S.mon.sampleRate      = m.sample_rate      ?? S.mon.sampleRate;
+      S.mon.blockSize       = m.block_size       ?? S.mon.blockSize;
+      _boundsLoaded = true;
+      _applyBoundsToUI();
+    }
 
-    // Update slider attributes and VIZ ceiling whenever bounds change
-    if(boundsChanged) _applyBoundsToUI();
-
-    // Push new sample into ring buffer — zero allocations
+    /* Push sample into ring buffer */
     _pushVizSample(S.mon.rms);
 
     _updateMonitorUI();
   } catch(e){
-    // Core offline — vizBars hold last values, UI stays frozen until reconnect
+    /* Core offline — ring buffer holds last values, UI stays frozen */
   }
 }
 
+/* Called once after bounds are loaded */
 function _applyBoundsToUI(){
-  const mn   = S.mon.minThreshold;
-  const mx   = S.mon.maxThreshold;
-  const step = S.mon.encoderStep;
+  const mx  = S.mon.maxThreshold;
 
-  // Update slider HTML attributes to match core's enforced range
-  const slider = document.getElementById('thr-slider');
-  if(slider){
-    slider.min  = mn.toFixed(4);
-    slider.max  = mx.toFixed(4);
-    slider.step = step.toFixed(4);
-    // Re-clamp current value if now out of bounds
-    const cur = parseFloat(slider.value);
-    if(cur < mn) slider.value = mn;
-    if(cur > mx) slider.value = mx;
-    _updateSliderFill(slider);
-  }
-
-  // Update the right-hand label of the level bar to show actual max
+  /* Max-label on the level bar */
   const maxLabel = document.getElementById('rms-max-label');
   if(maxLabel) maxLabel.textContent = mx.toFixed(3);
 
-  // Update trigger/silence duration labels
+  /* Trigger/silence duration labels */
   const trigLbl = document.getElementById('trigger-dur-label');
   const silLbl  = document.getElementById('silence-dur-label');
   if(trigLbl) trigLbl.textContent = S.mon.triggerDuration + 's';
   if(silLbl)  silLbl.textContent  = S.mon.stopSeconds + 's';
-
-  // Update the floor for the auto-scaling bar ceiling so it never collapses
-  // below a meaningful fraction of max_threshold (handled in _updateVizCeiling)
-  VIZ.CEIL_FLOOR = Math.max(0.005, S.mon.maxThreshold * 0.2);
+  
+  /* Sync home threshold line to initial bounds */
+  const hThrLine = document.getElementById('home-thr-line');
+  if(hThrLine){
+    const thrPct = Math.min(S.mon.threshold / mx * 100, 100);
+    hThrLine.style.left = thrPct + '%';
+  }
 }
 
 function _updateMonitorUI(){
   const m = S.mon;
-  // Level bar uses max_threshold as fixed ceiling — consistent, never jumps
   const BAR_MAX = m.maxThreshold;
-
-  // ── Elements that only exist on the monitor tab ───────────────────
   const onMonitorTab = !!document.getElementById('chip-rec');
 
   if(onMonitorTab){
-    // Channel label
     document.getElementById('viz-channel').textContent =
       m.allCh ? 'ALL CHANNELS' : `CHANNEL ${m.chIdx}`;
 
-    // Rec chip
     const cRec = document.getElementById('chip-rec');
     const cRT  = document.getElementById('chip-rec-txt');
     if(m.recording){
@@ -1496,55 +1557,34 @@ function _updateMonitorUI(){
       cRec.className='chip'; cRT.textContent='IDLE';
     }
 
-    // Manual chip
     const cMan = document.getElementById('chip-man');
     document.getElementById('chip-man-txt').textContent = m.manual?'MANUAL ON':'MANUAL OFF';
     cMan.className = 'chip' + (m.manual ? ' monitoring' : '');
 
-    // Level bar
-    const rmsPct = Math.min(m.rms / BAR_MAX * 100, 100);
-    const thrPct = Math.min(m.threshold / BAR_MAX * 100, 100);
-    const fill   = document.getElementById('level-fill');
-    fill.style.width = rmsPct + '%';
-    fill.className   = 'level-rms-fill'
-      + (m.rms > BAR_MAX * 0.92 ? ' clipping' : '')
-      + (m.autoRecord ? '' : ' inactive');
-    document.getElementById('thr-line').style.left = thrPct + '%';
+    /* Level bar — only update if not dragging (prevent jitter) */
+    if(!_thrDrag.active){
+      const rmsPct = Math.min(m.rms / BAR_MAX * 100, 100);
+      const thrPct = Math.min(m.threshold / BAR_MAX * 100, 100);
+      const fill   = document.getElementById('level-fill');
+      fill.style.width = rmsPct + '%';
+      fill.className   = 'level-rms-fill'
+        + (m.rms > BAR_MAX * 0.92 ? ' clipping' : '')
+        + (m.autoRecord ? '' : ' inactive');
+      document.getElementById('thr-line').style.left = thrPct + '%';
+    }
     document.getElementById('rms-label').textContent = `RMS: ${m.rms.toFixed(4)}`;
 
-    // Mini progress bars
     document.getElementById('trigger-fill').style.width = (m.trigP * 100) + '%';
     document.getElementById('silence-fill').style.width  = (m.silP  * 100) + '%';
 
-    // Auto-rec toggle
     document.getElementById('auto-rec-toggle').className = 'toggle' + (m.autoRecord ? ' on' : '');
 
-    // Manual record button
     const recBtn = document.getElementById('rec-btn');
     recBtn.className = 'rec-btn' + (m.manual ? ' active' : '');
     recBtn.title = m.manual ? 'Stop recording' : 'Start manual recording';
-
-    // Threshold slider sync (only if user is NOT actively dragging)
-    const slider = document.getElementById('thr-slider');
-    if(slider && slider !== document.activeElement){
-      slider.value = m.threshold;
-      _updateSliderFill(slider);
-    }
-    document.getElementById('thr-val').textContent = m.threshold.toFixed(4);
   }
 
-  // Sync home page level bar + RMS readout
-  const hlf = document.getElementById('home-level-fill');
-  const htl = document.getElementById('home-thr-line');
-  const hrv = document.getElementById('home-rms-val');
-  if(hlf || htl || hrv){
-    const BAR_MAX_H = m.maxThreshold || 0.1;
-    if(hlf) hlf.style.width = Math.min(m.rms / BAR_MAX_H * 100, 100) + '%';
-    if(htl) htl.style.left  = Math.min(m.threshold / BAR_MAX_H * 100, 100) + '%';
-    if(hrv) hrv.textContent = 'RMS ' + (m.rms || 0).toFixed(4);
-  }
-
-  // ── Home mini-viz chip — always update regardless of current tab ──
+  /* Home mini-viz — chip, RMS label, level bar, threshold line */
   const hChip = document.getElementById('home-chip-rec');
   const hTxt  = document.getElementById('home-chip-rec-txt');
   if(hChip && hTxt){
@@ -1552,32 +1592,33 @@ function _updateMonitorUI(){
     else if(m.autoRecord){ hChip.className='chip monitoring'; hTxt.textContent='MON'; }
     else{ hChip.className='chip'; hTxt.textContent='IDLE'; }
   }
+ 
+  /* Home RMS readout */
+  const hRms = document.getElementById('home-rms-val');
+  if(hRms) hRms.textContent = 'RMS ' + m.rms.toFixed(4);
+ 
+  /* Home level bar + threshold line — skip during drag (same rule as monitor tab) */
+  if(!_thrDrag.active){
+    const BAR_MAX = m.maxThreshold;
+    const hFill = document.getElementById('home-level-fill');
+    const hThrLine = document.getElementById('home-thr-line');
+    if(hFill){
+      const rmsPct = Math.min(m.rms / BAR_MAX * 100, 100);
+      hFill.style.width = rmsPct + '%';
+      hFill.style.background = m.rms > BAR_MAX * 0.92
+        ? 'var(--danger)'
+        : (m.autoRecord ? 'var(--accent)' : 'var(--text-dim)');
+    }
+    if(hThrLine){
+      const thrPct = Math.min(m.threshold / BAR_MAX * 100, 100);
+      hThrLine.style.left = thrPct + '%';
+    }
+  }
 }
 
-/* ---- Slider helpers ---- */
-function _updateSliderFill(slider){
-  const min  = parseFloat(slider.min);
-  const max  = parseFloat(slider.max);
-  const val  = parseFloat(slider.value);
-  const pct  = ((val - min) / (max - min) * 100).toFixed(1) + '%';
-  slider.style.setProperty('--filled', pct);
-}
-
-function onThresholdSlide(slider){
-  // Live visual feedback while dragging — no network call yet
-  _updateSliderFill(slider);
-  document.getElementById('thr-val').textContent = parseFloat(slider.value).toFixed(4);
-  S.mon.threshold = parseFloat(slider.value);  // update local state for viz
-}
-
-async function onThresholdCommit(slider){
-  // Called on 'change' (finger lift / mouse up) — send to core
-  const v = parseFloat(slider.value);
-  _updateSliderFill(slider);
-  try{ await API.setThreshold(v); S.mon.threshold = v; }
-  catch(e){ toast('Core unavailable'); }
-}
-
+/* ================================================================
+   MONITOR CONTROLS
+================================================================ */
 async function toggleAutoRecord(el){
   const nv = !el.classList.contains('on');
   try{ await API.setAutoRecord(nv); el.className='toggle'+(nv?' on':''); S.mon.autoRecord=nv; }
@@ -1595,7 +1636,6 @@ async function toggleManualRecord(){
       await API.recordStart();
       toast('Recording started');
     }
-    // Don't optimistically toggle UI — let the next pollMonitor() cycle confirm state
     setTimeout(pollMonitor, 300);
   } catch(e){ toast('Core unavailable'); }
 }
@@ -1611,7 +1651,7 @@ async function loadRecordings(){
     list.innerHTML=recs.length?recs.map(r=>trackRowHTML(r,false,{isRecording:true})).join(''):'<div class="empty-state"><p>No recordings yet.</p></div>';
   }catch(e){list.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
 }
-async function queueRecording(name){try{await API.queueRecording(name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
+async function queueRecording(name){try{await API.queueRecording(name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast('Error: '+e.message);}}
 async function confirmDeleteRecording(name){
   if(!confirm(`Delete "${name}"?`))return;
   try{await API.deleteRecording(name);toast('Deleted ✓');loadRecordings();}catch(e){toast('Delete failed');}
