@@ -500,24 +500,16 @@
       .page-title { font-size: 32px; }
     }
 
-    /* === HOME TWO-COLUMN LAYOUT === */
-    /* On mobile: stacked. On ≥520px: now-playing left, right-panel right */
+    /* === HOME LAYOUT — single column, full width === */
     #home-grid {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
-    @media (min-width: 520px) {
-      #home-grid {
-        flex-direction: row;
-        align-items: flex-start;
-        gap: 14px;
-      }
-      #home-left  { flex: 0 0 320px; min-width: 0; }
-      #home-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-    }
+    #home-left, #home-right { width: 100%; }
+    #home-right { display: flex; flex-direction: column; gap: 10px; }
 
-    /* Mini audio card on home — slim, no controls */
+    /* Mini audio card on home — full width, taller */
     .home-viz-card {
       background: var(--bg3); border: 1px solid var(--border);
       border-radius: var(--radius-sm); padding: 10px 12px;
@@ -533,9 +525,9 @@
     }
     .home-viz-label {
       font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
-      text-transform: uppercase; color: var(--text-dim); margin-right: auto;
+      text-transform: uppercase; color: var(--text-dim);
     }
-    /* Home queue: compact rows */
+    /* Home queue */
     #home-queue-wrap {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius-sm); overflow: hidden;
@@ -545,12 +537,13 @@
       text-transform: uppercase; color: var(--text-dim);
       padding: 8px 12px 6px; border-bottom: 1px solid var(--border);
     }
-    /* Compact queue items in the home right panel */
-    .queue-item.compact { padding: 7px 10px; gap: 8px; }
-    .queue-item.compact .queue-thumb { width: 28px; height: 28px; }
-    .queue-item.compact .queue-title { font-size: 12px; }
-    .queue-item.compact .queue-artist { font-size: 10px; }
-    .queue-item.compact .queue-pos { font-size: 10px; width: 16px; }
+    /* Queue items in home — full width, not compact */
+    #queue-list .queue-item {
+      border-radius: 0;
+      border-left: none; border-right: none; border-top: none;
+    }
+    #queue-list .queue-item:last-child { border-bottom: none; }
+    #queue-list .queue-item:first-child { border-top: 1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -564,62 +557,79 @@
 
   <!-- HOME -->
   <div class="page active" id="page-home">
-    <div class="page-header">
-      <div class="page-title">rolfsound</div>
-      <div class="page-subtitle" id="home-subtitle">loading…</div>
-    </div>
-
     <div id="home-grid">
-      <!-- LEFT: now playing -->
-      <div id="home-left">
-        <div id="now-playing">
-          <div class="np-state" id="np-state">IDLE</div>
-          <div class="np-track">
-            <div class="np-thumb-placeholder" id="np-thumb-wrap">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
-            </div>
-            <div class="np-info">
-              <div class="np-title" id="np-title">Nothing playing</div>
-              <div class="np-artist" id="np-artist">—</div>
-            </div>
-          </div>
-          <div class="np-progress">
-            <div class="progress-track" id="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-            <div class="progress-times"><span id="prog-current">0:00</span><span id="prog-duration">0:00</span></div>
-          </div>
-          <div class="np-controls">
-            <button class="ctrl-btn" onclick="API.skipBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
-            <button class="ctrl-btn-primary" onclick="togglePlayPause()">
-              <svg id="play-icon"  viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-              <svg id="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            </button>
-            <button class="ctrl-btn" onclick="API.skip()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
-          </div>
-        </div>
-      </div>
 
-      <!-- RIGHT: mini audio viz + queue -->
-      <div id="home-right">
-        <!-- Mini audio input visualizer — reuses same VIZ system, separate canvas -->
-        <div class="home-viz-card">
-          <div class="home-viz-header">
-            <span class="home-viz-label">INPUT</span>
-            <span class="chip" id="home-chip-rec" style="font-size:8px;padding:2px 7px">
-              <span class="chip-dot" style="width:5px;height:5px"></span>
-              <span id="home-chip-rec-txt">IDLE</span>
-            </span>
-          </div>
-          <div class="viz-wrap mini">
-            <canvas id="home-viz-canvas"></canvas>
+      <!-- ── NOW PLAYING — full-width hero card ───────────────────── -->
+      <div id="now-playing">
+        <!-- Branding row + inline status pill -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div>
+            <div style="font-family:var(--title);font-variation-settings:'wght' 900;font-size:22px;letter-spacing:-0.03em;line-height:1">rolfsound</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:3px" id="home-subtitle">loading…</div>
           </div>
         </div>
 
-        <!-- Queue -->
-        <div id="home-queue-wrap">
-          <div class="home-queue-header">QUEUE</div>
-          <div id="queue-list"><div class="loading-row" style="padding:16px"><div class="spinner"></div></div></div>
+        <div class="np-state" id="np-state">IDLE</div>
+
+        <div class="np-track">
+          <div class="np-thumb-placeholder" id="np-thumb-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
+          </div>
+          <div class="np-info">
+            <div class="np-title" id="np-title">Nothing playing</div>
+            <div class="np-artist" id="np-artist">—</div>
+          </div>
+        </div>
+
+        <div class="np-progress">
+          <div class="progress-track" id="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="progress-times"><span id="prog-current">0:00</span><span id="prog-duration">0:00</span></div>
+        </div>
+
+        <div class="np-controls">
+          <button class="ctrl-btn" onclick="API.skipBack()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          </button>
+          <button class="ctrl-btn-primary" onclick="togglePlayPause()">
+            <svg id="play-icon"  viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+            <svg id="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <button class="ctrl-btn" onclick="API.skip()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          </button>
         </div>
       </div>
+
+      <!-- ── INPUT MONITOR — full width, taller canvas ─────────────── -->
+      <div class="home-viz-card">
+        <div class="home-viz-header">
+          <span class="home-viz-label">INPUT</span>
+          <span class="chip" id="home-chip-rec" style="font-size:8px;padding:2px 7px">
+            <span class="chip-dot" style="width:5px;height:5px"></span>
+            <span id="home-chip-rec-txt">IDLE</span>
+          </span>
+          <span id="home-rms-val" style="font-family:var(--mono);font-size:9px;color:var(--text-dim);margin-left:auto">RMS —</span>
+        </div>
+        <!-- Taller viz canvas -->
+        <div class="viz-wrap" style="height:80px">
+          <canvas id="home-viz-canvas"></canvas>
+        </div>
+        <!-- Slim level + threshold bar -->
+        <div style="position:relative;height:3px;background:var(--bg2);border-radius:2px;margin-top:7px">
+          <div id="home-level-fill" style="height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width 0.07s linear;max-width:100%"></div>
+          <div id="home-thr-line"   style="position:absolute;top:-3px;bottom:-3px;width:2px;border-radius:1px;background:var(--warn);left:15%"></div>
+        </div>
+      </div>
+
+      <!-- ── QUEUE — fills remaining space ─────────────────────────── -->
+      <div id="home-queue-wrap">
+        <div class="home-queue-header">
+          <span>QUEUE</span>
+          <span id="home-queue-count" style="font-family:var(--mono);font-size:9px;color:var(--text-dim)"></span>
+        </div>
+        <div id="queue-list"><div class="loading-row" style="padding:16px"><div class="spinner"></div></div></div>
+      </div>
+
     </div>
   </div>
 
@@ -874,9 +884,17 @@ function updatePill(mode){
   const el  = document.getElementById('core-status');
   const dot = document.getElementById('status-dot');
   const txt = document.getElementById('status-text');
+
+  if (mode === 'ok') {
+    // Hide when online
+    el.classList.add('hidden');
+    return;
+  }
+
+  // Show only when offline
   el.classList.remove('hidden');
-  dot.className = 'status-dot ' + (mode==='ok' ? 'ok' : 'err');
-  txt.textContent = mode==='ok' ? 'online' : 'offline';
+  dot.className = 'status-dot err';
+  txt.textContent = 'offline';
 }
 
 function thumbSrc(t){
@@ -921,6 +939,13 @@ function updateQueue(tracks){
   if(key === _lastQueueKey) return;
   _lastQueueKey = key;
   const compact = true;
+
+  // Update queue count badge on home
+  const countEl = document.getElementById('home-queue-count');
+  if(countEl) countEl.textContent = (tracks && tracks.length)
+    ? tracks.length + ' track' + (tracks.length !== 1 ? 's' : '')
+    : '';
+
   if(!tracks||!tracks.length){
     list.innerHTML=`<div class="empty-state" style="padding:20px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><p>Queue is empty</p></div>`;
     return;
@@ -979,20 +1004,23 @@ async function doSearch(){
   const q = document.getElementById('search-input').value.trim();
   if(!q) return;
 
-  // Cancel any previous in-flight search
   if(_searchAbort){ _searchAbort.abort(); _searchAbort = null; }
 
   const results = document.getElementById('search-results');
   results.innerHTML = '<div class="loading-row"><div class="spinner"></div> Searching…</div>';
 
-  // Section containers — rendered once, results appended as they stream in
   let libSection  = null;
   let ytSection   = null;
   let ytCount     = 0;
   let libDone     = false;
+  let clearedSpinner = false;  // replaces firstContent — cleared ONCE
 
   _searchAbort = new AbortController();
   const signal = _searchAbort.signal;
+
+  function _clearSpinnerOnce(){
+    if(!clearedSpinner){ results.innerHTML = ''; clearedSpinner = true; }
+  }
 
   try {
     const resp = await fetch('/api/search?q=' + encodeURIComponent(q), { signal });
@@ -1002,21 +1030,16 @@ async function doSearch(){
     const dec    = new TextDecoder();
     let   buf    = '';
 
-    results.innerHTML = ''; // clear spinner once stream begins
-
     while(true){
       const { done, value } = await reader.read();
       if(done) break;
 
       buf += dec.decode(value, { stream: true });
-
-      // SSE messages are separated by double newline
       const messages = buf.split('\n\n');
-      buf = messages.pop(); // keep incomplete last chunk
+      buf = messages.pop();
 
       for(const msg of messages){
         if(!msg.trim()) continue;
-        // Parse "event: X\ndata: Y"
         let event = 'result', dataStr = '';
         for(const line of msg.split('\n')){
           if(line.startsWith('event:')) event = line.slice(6).trim();
@@ -1029,6 +1052,7 @@ async function doSearch(){
 
         if(event === 'library'){
           const tracks = payload.tracks || [];
+          _clearSpinnerOnce();  // always clear spinner when library responds
           if(tracks.length){
             libSection = document.createElement('div');
             libSection.innerHTML = '<div class="section-label">IN YOUR LIBRARY</div>';
@@ -1038,15 +1062,10 @@ async function doSearch(){
             });
           }
           libDone = true;
-          // If no library results and no YT section yet, show YouTube heading
-          if(!tracks.length){
-            ytSection = document.createElement('div');
-            results.appendChild(ytSection);
-          }
         }
 
         if(event === 'result'){
-          // Create YouTube section on first result
+          _clearSpinnerOnce();
           if(!ytSection){
             ytSection = document.createElement('div');
             if(libDone){
@@ -1057,24 +1076,23 @@ async function doSearch(){
           }
           ytCount++;
           ytSection.insertAdjacentHTML('beforeend', trackRowHTML(payload, false));
-          // Animate in
           const rows = ytSection.querySelectorAll('.track-row');
           const last = rows[rows.length - 1];
           if(last){ last.style.animation = 'fadeIn 0.15s ease'; }
         }
 
         if(event === 'done'){
+          _clearSpinnerOnce(); // clear spinner even if no results
           if(ytCount === 0 && !libSection){
             results.innerHTML = '<div class="empty-state"><p>No results.</p></div>';
           } else if(ytCount === 0 && ytSection){
-            // Remove the empty YouTube section heading
             ytSection.remove();
           }
         }
       }
     }
   } catch(e){
-    if(e.name === 'AbortError') return; // cancelled by new search — normal
+    if(e.name === 'AbortError') return;
     results.innerHTML = '<p style="color:var(--danger);padding:16px;font-size:13px">Search failed — ' + esc(e.message) + '</p>';
   }
 }
@@ -1131,7 +1149,7 @@ function trackRowHTML(t,inLibrary,opts={}){
     <div class="track-actions">${actions}</div>
   </div>`;
 }
-async function addToQueue(tid,fp,name){try{await API.queueAdd(tid,fp,name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast('Error: '+e.message);}}
+async function addToQueue(tid,fp,name){try{await API.queueAdd(tid,fp,name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
 async function downloadAndQueue(tid,name,thumb){
   try{
     const r=await API.startDownload(tid,name,thumb);
@@ -1515,6 +1533,17 @@ function _updateMonitorUI(){
     document.getElementById('thr-val').textContent = m.threshold.toFixed(4);
   }
 
+  // Sync home page level bar + RMS readout
+  const hlf = document.getElementById('home-level-fill');
+  const htl = document.getElementById('home-thr-line');
+  const hrv = document.getElementById('home-rms-val');
+  if(hlf || htl || hrv){
+    const BAR_MAX_H = m.maxThreshold || 0.1;
+    if(hlf) hlf.style.width = Math.min(m.rms / BAR_MAX_H * 100, 100) + '%';
+    if(htl) htl.style.left  = Math.min(m.threshold / BAR_MAX_H * 100, 100) + '%';
+    if(hrv) hrv.textContent = 'RMS ' + (m.rms || 0).toFixed(4);
+  }
+
   // ── Home mini-viz chip — always update regardless of current tab ──
   const hChip = document.getElementById('home-chip-rec');
   const hTxt  = document.getElementById('home-chip-rec-txt');
@@ -1582,7 +1611,7 @@ async function loadRecordings(){
     list.innerHTML=recs.length?recs.map(r=>trackRowHTML(r,false,{isRecording:true})).join(''):'<div class="empty-state"><p>No recordings yet.</p></div>';
   }catch(e){list.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
 }
-async function queueRecording(name){try{await API.queueRecording(name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast('Error: '+e.message);}}
+async function queueRecording(name){try{await API.queueRecording(name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
 async function confirmDeleteRecording(name){
   if(!confirm(`Delete "${name}"?`))return;
   try{await API.deleteRecording(name);toast('Deleted ✓');loadRecordings();}catch(e){toast('Delete failed');}

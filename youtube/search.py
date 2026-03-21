@@ -413,21 +413,21 @@ async def _search_ytdlp(query: str, max_results: int) -> list[dict]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def make_cache_key(query: str, max_results: int, api_key: str) -> str:
-    """
-    Canonical cache key. Exported so the route can check the cache and
-    inflight registry without calling search(), avoiding duplicate work.
-    """
-    prefix = "api" if api_key.strip() else "ytdlp"
-    return f"{prefix}:{query.lower().strip()}:{max_results}"
+def _normalize_query(query: str) -> str:
+    """Strip symbols that don't contribute to search meaning."""
+    return re.sub(r'[^\w\s\-.,&\'():]', '', query).lower().strip()
 
+def make_cache_key(query: str, max_results: int, api_key: str) -> str:
+    prefix = "api" if api_key.strip() else "ytdlp"
+    return f"{prefix}:{_normalize_query(query)}:{max_results}"
 
 async def search(query: str, max_results: int = 10) -> list[dict]:
     """
     Search YouTube. API v3 if key configured, yt-dlp otherwise.
     Checks exact cache then prefix cache before hitting the network.
-    Never raises — returns [] on any failure.
     """
+    query = _normalize_query(query)
+
     api_key   = cfg("youtube_api_key", "").strip()
     prefix    = "api" if api_key else "ytdlp"
     cache_key = make_cache_key(query, max_results, api_key)
@@ -435,12 +435,13 @@ async def search(query: str, max_results: int = 10) -> list[dict]:
     # Exact hit
     cached = _cache_get(cache_key)
     if cached is not None:
-        logger.debug(f"Cache hit ({prefix}): {query!r}")
+        logger.info(f"Search complete (CACHE hit {prefix}): {len(cached)} results for {query!r}")
         return cached
 
     # Prefix hit — longer query already cached, filter it down
     prefix_hit = _prefix_cache_lookup(query, max_results, prefix)
     if prefix_hit is not None:
+        logger.info(f"Search complete (used PREFIX CACHE {prefix}): {len(prefix_hit)} results for {query!r}")
         return prefix_hit
 
     # Miss — run the search
@@ -459,6 +460,8 @@ async def search(query: str, max_results: int = 10) -> list[dict]:
             return results
     else:
         results = await _search_ytdlp(query, max_results)
+
+    logger.info(f"Search complete (using {prefix}): {len(results)} results for {query!r}")
 
     if results:
         _cache_set(cache_key, results)
