@@ -17,6 +17,10 @@ def setup_logging() -> None:
     root = logging.getLogger()
     if root.handlers:
         return
+    
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    
     root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

@@ -19,6 +19,7 @@ from downloads.manager import init_manager, get_manager
 from utils.event_poller import get_poller
 from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
+from youtube.search import close_client as close_search_client
 
 from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings
 
@@ -29,14 +30,13 @@ DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ---- Startup ----
+    # ── Startup ───────────────────────────────────────────────────────
     logger.info("rolfsound-control starting up")
 
     cfg.load()
     database.init(cfg.get("database_path", "./db/library.db"))
 
-    # Reconcile music directory with DB — picks up manually added files
-    # and tracks downloaded before the DB existed
+    # Reconcile music directory with DB
     music_dir = cfg.get("music_directory", "./music")
     conn = database.get_connection()
     try:
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     finally:
         conn.close()
 
-    # Clean up temp files from any previous crashed downloads
+    # Clean up temp files from previous crashed downloads
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
     # Init download manager
@@ -63,9 +63,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # ---- Shutdown ----
+    # ── Shutdown ──────────────────────────────────────────────────────
     poller.stop()
     manager.stop()
+    await close_search_client()   # close persistent httpx client cleanly
     logger.info("rolfsound-control stopped")
 
 
@@ -96,14 +97,14 @@ def create_app() -> FastAPI:
     )
 
     # API routes
-    app.include_router(search.router, prefix="/api")
-    app.include_router(library.router, prefix="/api")
-    app.include_router(queue.router, prefix="/api")
-    app.include_router(playback.router, prefix="/api")
-    app.include_router(history.router, prefix="/api")
-    app.include_router(settings.router, prefix="/api")
-    app.include_router(downloads.router, prefix="/api")
-    app.include_router(monitor.router, prefix="/api")
+    app.include_router(search.router,     prefix="/api")
+    app.include_router(library.router,    prefix="/api")
+    app.include_router(queue.router,      prefix="/api")
+    app.include_router(playback.router,   prefix="/api")
+    app.include_router(history.router,    prefix="/api")
+    app.include_router(settings.router,   prefix="/api")
+    app.include_router(downloads.router,  prefix="/api")
+    app.include_router(monitor.router,    prefix="/api")
     app.include_router(recordings.router, prefix="/api")
 
     # Serve local thumbnails stored alongside music files

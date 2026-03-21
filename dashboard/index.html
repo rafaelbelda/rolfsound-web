@@ -625,7 +625,12 @@
 
   <!-- SEARCH -->
   <div class="page" id="page-search">
-    <div class="page-header"><div class="page-title">Search</div><div class="page-subtitle">Library + YouTube</div></div>
+    <div class="page-header"><div class="page-title">Search</div><div class="page-subtitle">Library + YouTube</div>
+    <div id="api-key-nudge" style="display:none;margin-bottom:16px;padding:10px 14px;background:rgba(29,185,84,0.08);border:1px solid rgba(29,185,84,0.2);border-radius:var(--radius-sm);font-size:12px;color:var(--text-mid);align-items:center;gap:10px">
+      <svg style="width:14px;height:14px;flex-shrink:0;color:var(--accent)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>Add a <strong>YouTube API key</strong> in <button onclick="navigate('settings')" style="color:var(--accent);font-weight:700;font-size:12px;text-decoration:underline">Settings</button> for faster, more reliable search.</span>
+      <button onclick="dismissNudge()" style="margin-left:auto;color:var(--text-dim);font-size:18px;line-height:1" title="Dismiss">×</button>
+    </div></div>
     <div class="search-box">
       <input type="search" class="search-input" id="search-input" placeholder="Artist, song, album…" autocomplete="off">
       <button class="btn btn-primary" onclick="doSearch()">Go</button>
@@ -633,20 +638,28 @@
     <div id="search-results"></div>
   </div>
 
-  <!-- LIBRARY -->
+<!-- LIBRARY -->
   <div class="page" id="page-library">
-    <div class="page-header">
-      <div class="page-title">Library</div>
-      <div class="page-subtitle" id="lib-subtitle">Loading…</div>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      <button class="btn btn-ghost" style="font-size:12px;padding:8px 14px" onclick="scanLibrary()" id="scan-btn">
-        <svg style="width:13px;height:13px;display:inline;vertical-align:middle;margin-right:5px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-        Scan folder
+    <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <div class="page-title">Library</div>
+        <div class="page-subtitle" id="lib-subtitle">Loading…</div>
+      </div>
+      <button id="scan-btn" onclick="scanLibrary()" title="Refresh library"
+              style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;
+                     justify-content:center;background:var(--surface);border:1px solid var(--border);
+                     color:var(--text-dim);flex-shrink:0;margin-top:6px;transition:all var(--t)">
+        <svg id="scan-icon" style="width:14px;height:14px" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
       </button>
     </div>
     <div id="library-list"><div class="loading-row"><div class="spinner"></div></div></div>
   </div>
+
+  <!-- MONITOR -->
 
   <!-- MONITOR -->
   <div class="page" id="page-monitor">
@@ -802,7 +815,8 @@ function navigate(page) {
   // ── Start what the new page needs ───────────────────────────────
   if(page === 'home')    { _startHomeVizPoll(); }
   if(page === 'monitor') { startMonitor(); loadRecordings(); }
-  if(page === 'library') { loadLibrary(); }
+  if(page === 'search')  { _checkApiKeyNudge(); }
+  if(page === 'library') { loadLibrary(true); }
   if(page === 'history') { loadHistory(); }
   if(page === 'settings'){ loadSettings(); }
 }
@@ -826,6 +840,7 @@ const API={
   queueRemove(p) {return this.fetch('/queue/remove',{method:'POST',body:JSON.stringify({position:p})});},
   queueMove(f,t) {return this.fetch('/queue/move',  {method:'POST',body:JSON.stringify({from_pos:f,to_pos:t})});},
   search(q)      {return this.fetch('/search?q='+encodeURIComponent(q));},  // kept for library-only use
+  library()      {return this.fetch('/library');},
   scanLibrary()  {return this.fetch('/library/scan',{method:'POST',body:'{}'});},
   history(n=50)  {return this.fetch('/history?limit='+n);},
   deleteTrack(id){return this.fetch('/library/'+id,{method:'DELETE'});},
@@ -1129,30 +1144,35 @@ async function downloadAndQueue(tid,name,thumb){
    LIBRARY
 ================================================================ */
 async function scanLibrary(){
-  const btn = document.getElementById('scan-btn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Scanning…'; }
+  const btn=document.getElementById('scan-btn');
+  const icon=document.getElementById('scan-icon');
+  if(btn) btn.disabled=true;
+  if(icon) icon.style.animation='spin 0.6s linear infinite';
   try{
-    const r = await API.scanLibrary();
-    const msg = r.added > 0 ? `Found ${r.added} new track${r.added!==1?'s':''}` : 'Already up to date';
+    const r=await API.scanLibrary();
+    const msg=r.added>0?`Found ${r.added} new track${r.added!==1?'s':''}`:'Already up to date';
     toast(msg);
-    if(r.added > 0) loadLibrary();
+    if(r.added>0) loadLibrary();
   }catch(e){ toast('Scan failed'); }
   finally{
-    if(btn){
-      btn.disabled = false;
-      btn.innerHTML = '<svg style="width:13px;height:13px;display:inline;vertical-align:middle;margin-right:5px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Scan folder';
-    }
+    if(btn) btn.disabled=false;
+    if(icon) icon.style.animation='';
   }
 }
 
-async function loadLibrary(){
+async function loadLibrary(autoScan=false){
   const list=document.getElementById('library-list'),sub=document.getElementById('lib-subtitle');
   list.innerHTML='<div class="loading-row"><div class="spinner"></div></div>';
   try{
+    // Auto-scan on first open so newly downloaded files are always visible
+    if(autoScan){ await API.scanLibrary().catch(()=>{}); }
     const d=await API.library(),tracks=d.tracks||[];
     sub.textContent=`${tracks.length} track${tracks.length!==1?'s':''}`;
-    list.innerHTML=tracks.length?tracks.map(t=>trackRowHTML(t,true)).join(''):'<div class="empty-state"><p>Library is empty.</p></div>';
-  }catch(e){list.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
+    list.innerHTML=tracks.length?tracks.map(t=>trackRowHTML(t,true)).join(''):'<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><p>No tracks yet. Download something from Search.</p></div>';
+  }catch(e){
+    console.error('loadLibrary failed:',e);
+    list.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load library</p>';
+  }
 }
 async function confirmDeleteTrack(id){
   if(!confirm('Remove from library?'))return;
@@ -1596,12 +1616,14 @@ const SETTINGS_SCHEMA=[
     {key:'core_url',label:'Core URL',desc:'Address of rolfsound-core',type:'text'},
     {key:'server_port',label:'Server Port',type:'number'},
   ]},
+  {group:'YouTube',items:[
+    {key:'youtube_api_key',label:'YouTube Data API Key',desc:'console.cloud.google.com · Enable "YouTube Data API v3" · Free: ~100 searches/day',type:'password'},
+    {key:'max_search_results',label:'Max Search Results',type:'number'},
+  ]},
   {group:'Music',items:[
     {key:'music_directory',label:'Music Directory',type:'text'},
     {key:'recordings_directory',label:'Recordings Directory',desc:'Path to rolfsound-core recordings folder',type:'text'},
-    {key:'download_audio_format',label:'Audio Format',type:'text'},
-    {key:'download_quality',label:'Quality (kbps)',desc:'Use "0" for best VBR (recommended)',type:'text'},
-    {key:'max_search_results',label:'Max Search Results',type:'number'},
+    {key:'download_audio_format',label:'Audio Format',desc:'webm = native Opus stream, best quality, no transcoding',type:'text'},
   ]},
   {group:'Cleanup',items:[
     {key:'cleanup_enabled',label:'Auto Cleanup',type:'toggle'},
@@ -1609,7 +1631,7 @@ const SETTINGS_SCHEMA=[
     {key:'cleanup_days',label:'Older Than (days)',type:'number'},
   ]},
   {group:'Access',items:[
-    {key:'allow_guest_queue_control',label:'Guest Queue Control',type:'toggle'},
+    {key:'allow_guest_queue_control',label:'Guest Queue Control (COMING SOON)',type:'toggle'},
   ]},
 ];
 async function loadSettings(){
@@ -1623,6 +1645,7 @@ async function loadSettings(){
         ${g.items.map(item=>{
           const v=data[item.key];
           if(item.type==='toggle')return `<div class="settings-row"><div><div class="settings-label">${item.label}</div>${item.desc?`<div class="settings-desc">${item.desc}</div>`:''}</div><div class="toggle ${v?'on':''}" data-key="${item.key}" onclick="toggleSetting(this)"></div></div>`;
+          if(item.type==='password')return `<div class="settings-row"><div style="flex:1;min-width:0"><div class="settings-label">${item.label}</div>${item.desc?`<div class="settings-desc">${item.desc}</div>`:''}</div><div style="display:flex;gap:6px;align-items:center"><input class="settings-input" type="password" id="pw-${item.key}" value="${esc(String(v??''))}" data-key="${item.key}" onchange="updateSettingVal(this)" style="min-width:160px"><button onclick="togglePwVisibility('pw-${item.key}')" style="color:var(--text-dim);font-size:11px;padding:4px 8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm)" title="Show/hide">👁</button></div></div>`;
           return `<div class="settings-row"><div><div class="settings-label">${item.label}</div>${item.desc?`<div class="settings-desc">${item.desc}</div>`:''}</div><input class="settings-input" type="${item.type==='number'?'number':'text'}" value="${esc(String(v??''))}" data-key="${item.key}" onchange="updateSettingVal(this)"></div>`;
         }).join('')}
       </div>`).join('');
@@ -1635,6 +1658,9 @@ async function saveSettings(){try{await API.saveSettings(S.settingsData);toast('
 /* ================================================================
    UTILS
 ================================================================ */
+function togglePwVisibility(id){const el=document.getElementById(id);if(el)el.type=el.type==='password'?'text':'password';}
+function dismissNudge(){sessionStorage.setItem('nudge_dismissed','1');const el=document.getElementById('api-key-nudge');if(el)el.style.display='none';}
+function _checkApiKeyNudge(){if(sessionStorage.getItem('nudge_dismissed'))return;API.getSettings().then(s=>{if(!s.youtube_api_key){const el=document.getElementById('api-key-nudge');if(el)el.style.display='flex';}}).catch(()=>{});}
 function fmtTime(s){s=Math.floor(s||0);return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
 function fmtBytes(b){if(!b)return '';if(b<1048576)return (b/1024).toFixed(0)+' KB';return (b/1048576).toFixed(1)+' MB';}
 function fmtDate(ts){

@@ -14,19 +14,24 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 _DEFAULTS = {
-    "core_url": "http://localhost:8765",
-    "server_port": 8766,
-    "music_directory": "./music",
-    "recordings_directory": "./recordings",
-    "database_path": "./db/library.db",
-    "download_temp_directory": "./cache",
-    "max_search_results": 10,
-    "download_audio_format": "opus",   # native stream, no re-encode
-    "cleanup_enabled": True,
-    "cleanup_min_streams": 3,
-    "cleanup_days": 30,
-    "download_quality": "192",
+    "core_url":                  "http://localhost:8765",
+    "server_port":               8766,
+    "music_directory":           "./music",
+    "recordings_directory":      "./recordings",
+    "database_path":             "./db/library.db",
+    "download_temp_directory":   "./cache",
+    "max_search_results":        10,
+    "download_audio_format":     "webm",   # native Opus stream, no transcode
+    "cleanup_enabled":           True,
+    "cleanup_min_streams":       3,
+    "cleanup_days":              30,
     "allow_guest_queue_control": True,
+    # YouTube Data API v3 key — enables fast reliable search.
+    # Leave empty to use yt-dlp as fallback.
+    # Get a free key at: console.cloud.google.com
+    # Enable "YouTube Data API v3", create an API key, paste it here.
+    # Free quota: 10,000 units/day (~100 searches/day at 100 units each).
+    "youtube_api_key":           "",
 }
 
 _config: dict = {}

@@ -46,6 +46,10 @@ out/
 *.jpg
 *.mp3
 *.db
+*.ogg
+*.webm
+*.wav
+*.m4a
 library.*
 
 music/
