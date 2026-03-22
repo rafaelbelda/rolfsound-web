@@ -12,6 +12,7 @@ from typing import Callable
 
 from youtube import ytdlp
 from utils.config import get
+from utils.path_utils import sanitize_path
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,6 @@ class DownloadManager:
             )
 
         with self._lock:
-            # Don't re-add if already in memory queue
             if any(j["track_id"] == track_id for j in self._queue):
                 return False
             self._queue.append({
@@ -102,8 +102,8 @@ class DownloadManager:
     def _run_download(self, job: dict) -> None:
         from db import database
 
-        track_id = job["track_id"]
-        title = job.get("title", "")
+        track_id  = job["track_id"]
+        title     = job.get("title", "")
         thumbnail = job.get("thumbnail", "")
 
         self._current = job
@@ -111,7 +111,7 @@ class DownloadManager:
 
         output_dir   = get("music_directory", "./music")
         temp_dir     = get("download_temp_directory", "./cache")
-        audio_format = get("download_audio_format", "opus")  # opus = native, no re-encode
+        audio_format = get("download_audio_format", "opus")
 
         def update_progress(pct: int, status: str):
             conn = database.get_connection()
@@ -134,16 +134,25 @@ class DownloadManager:
         conn = database.get_connection()
         try:
             if filepath:
-                # Fetch metadata
-                meta = ytdlp.get_metadata(track_id) or {}
+                # FIX: sanitize the path before it ever touches the DB.
+                # ytdlp.download() returns an absolute path via Path.resolve(),
+                # but on Windows the backslashes in that string can be
+                # misinterpreted as escape sequences (\r, \U, \D, \G …) at
+                # any subsequent string boundary (json, logging, SQLite).
+                # Storing forward slashes eliminates the corruption at source.
+                filepath = sanitize_path(filepath)
+
+                meta         = ytdlp.get_metadata(track_id) or {}
                 remote_thumb = meta.get("thumbnail") or thumbnail
 
-                # Save thumbnail locally as music/<id>.jpg
                 local_thumb = ytdlp.download_thumbnail(
                     track_id=track_id,
                     thumbnails_dir=output_dir,
                     thumbnail_url=remote_thumb,
                 )
+                # Sanitize thumbnail path for the same reason.
+                if local_thumb:
+                    local_thumb = sanitize_path(local_thumb)
 
                 database.insert_track(conn, {
                     "id":             track_id,
@@ -159,7 +168,7 @@ class DownloadManager:
                 })
                 database.update_download_progress(conn, track_id, 100, "complete")
                 conn.commit()
-                logger.info(f"Download complete: {track_id}")
+                logger.info(f"Download complete: {track_id} → {filepath}")
 
                 for cb in self._on_complete_callbacks:
                     try:

@@ -719,6 +719,7 @@
 ================================================================ */
 const S = {
   page:'home', status:null, playing:false, paused:false, currentId:null,
+  positionAtUpdate:0, positionUpdatedAt:0, duration:0,
   settingsData:{},
   mon:{
     rms:0, threshold:0.015, autoRecord:false, recording:false,
@@ -767,7 +768,7 @@ const API={
   skip()         {return this.fetch('/skip',  {method:'POST',body:'{}'});},
   skipBack()     {return this.fetch('/queue/previous',{method:'POST',body:'{}'});},
   seek(p)        {return this.fetch('/seek',  {method:'POST',body:JSON.stringify({position:p})});},
-  queueAdd(t,f,n){return this.fetch('/queue/add',   {method:'POST',body:JSON.stringify({track_id:t,filepath:f,title:n})});},
+  queueAdd(t,f,n,th=''){return this.fetch('/queue/add',{method:'POST',body:JSON.stringify({track_id:t,filepath:f,title:n,thumbnail:th})});},
   queueRemove(p) {return this.fetch('/queue/remove',{method:'POST',body:JSON.stringify({position:p})});},
   queueMove(f,t) {return this.fetch('/queue/move',  {method:'POST',body:JSON.stringify({from_pos:f,to_pos:t})});},
   search(q)      {return this.fetch('/search?q='+encodeURIComponent(q));},  // kept for library-only use
@@ -835,18 +836,65 @@ function updateNowPlaying(s){
     document.getElementById('np-title').textContent=s.title||s.track_id;
     document.getElementById('np-artist').textContent=s.artist||'';
     document.getElementById('home-subtitle').textContent=playing?'▶ now playing':(paused?'⏸ paused':'–');
-    const pos=s.position||0,tot=s.duration||0;
-    document.getElementById('progress-fill').style.width=tot>0?(pos/tot*100)+'%':'0%';
-    document.getElementById('prog-current').textContent=fmtTime(pos);
-    document.getElementById('prog-duration').textContent=fmtTime(tot);
-  }else{
+ 
+    // Store server-reported position + the timestamp it was sampled.
+    // _tickProgress() uses these to dead-reckon between polls.
+    S.positionAtUpdate  = s.position  || 0;
+    S.positionUpdatedAt = s.position_updated_at || (Date.now() / 1000);
+    S.duration          = s.duration  || 0;
+ 
+    // Update thumbnail
+    const thumbWrap = document.getElementById('np-thumb-wrap');
+    if(thumbWrap && s.thumbnail){
+      const src = thumbSrc(s.thumbnail);
+      if(src){
+        // Replace placeholder svg with an actual img, or update existing
+        let img = thumbWrap.querySelector('img');
+        if(!img){
+          thumbWrap.innerHTML = '';
+          img = document.createElement('img');
+          img.className = 'np-thumb';
+          thumbWrap.appendChild(img);
+        }
+        if(img.dataset.src !== src){ img.src = src; img.dataset.src = src; }
+      }
+    } else if(thumbWrap && !s.thumbnail){
+      // Restore placeholder if no thumbnail
+      if(!thumbWrap.querySelector('svg')){
+        thumbWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
+      }
+    }
+ 
+    // Update duration display immediately from server value
+    document.getElementById('prog-duration').textContent = fmtTime(S.duration);
+  } else {
+    S.currentId = null;
+    S.positionAtUpdate = 0; S.positionUpdatedAt = 0; S.duration = 0;
     document.getElementById('np-title').textContent='Nothing playing';
     document.getElementById('np-artist').textContent='—';
     document.getElementById('home-subtitle').textContent='queue is empty';
     document.getElementById('progress-fill').style.width='0%';
     document.getElementById('prog-current').textContent='0:00';
     document.getElementById('prog-duration').textContent='0:00';
+    // Restore thumbnail placeholder
+    const thumbWrap = document.getElementById('np-thumb-wrap');
+    if(thumbWrap && !thumbWrap.querySelector('svg')){
+      thumbWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
+    }
   }
+}
+ 
+// Dead-reckons position between status polls.
+// Called from rAF loop — updates progress fill + current time display.
+// Clamps to duration, stops advancing when paused/idle.
+function _tickProgress(){
+  requestAnimationFrame(_tickProgress);
+  if(!S.playing || S.paused || !S.duration) return;
+  const elapsed = Date.now() / 1000 - S.positionUpdatedAt;
+  const pos     = Math.min(S.positionAtUpdate + elapsed, S.duration);
+  const pct     = S.duration > 0 ? (pos / S.duration * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('prog-current').textContent  = fmtTime(pos);
 }
 
 // Dirty-check key for the queue — avoid full re-render when nothing changed
@@ -1027,7 +1075,13 @@ document.addEventListener('DOMContentLoaded',()=>{
   i.addEventListener('keydown', e => {
     if(e.key === 'Enter'){ clearTimeout(_debounce); doSearch(); }
   });
+  
+  document.getElementById('search-results').addEventListener('click', e => {
+    const btn = e.target.closest('[data-dl-id]');
+    if(btn) downloadAndQueue(btn.dataset.dlId, btn.dataset.dlTitle, btn.dataset.dlThumb);
+  });
 });
+
 
 /* ================================================================
    SHARED TRACK ROW
@@ -1057,11 +1111,11 @@ function trackRowHTML(t,inLibrary,opts={}){
     <a class="btn-icon" href="/api/recordings/${encodeURIComponent(t.name)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteRecording('${escQ(t.name)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else if(inLibrary){
-    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}')" title="Add to queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Add to queue"></button>
     <a class="btn-icon" href="/api/library/${esc(t.id)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteTrack('${esc(t.id)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else{
-    actions=`<button class="btn-icon" onclick="downloadAndQueue('${esc(t.id)}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>`;
+    actions=`<button class="btn-icon" data-dl-id="${esc(t.id)}" data-dl-title="${esc(t.title||'')}" data-dl-thumb="${esc(t.thumbnail||'')}" title="Download">↓`;
   }
 
   return `<div class="track-row">
@@ -1070,7 +1124,7 @@ function trackRowHTML(t,inLibrary,opts={}){
     <div class="track-actions">${actions}</div>
   </div>`;
 }
-async function addToQueue(tid,fp,name){try{await API.queueAdd(tid,fp,name);toast('Added');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
+async function addToQueue(tid,fp,name,thumb=''){try{await API.queueAdd(tid,fp,name,thumb);toast('Added');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
 async function downloadAndQueue(tid,name,thumb){
   try{
     const r=await API.startDownload(tid,name,thumb);
@@ -1790,6 +1844,7 @@ document.addEventListener('visibilitychange', () => {
 // Start everything on load
 pollStatus();
 _startStatusPoll();
+_tickProgress()
 // Home is the default active page — start canvas + poll
 document.addEventListener('DOMContentLoaded', () => {
   startHomeViz();       // create canvas instance

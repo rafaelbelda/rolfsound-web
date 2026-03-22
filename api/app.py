@@ -37,7 +37,6 @@ async def lifespan(app: FastAPI):
     cfg.load()
     database.init(cfg.get("database_path", "./db/library.db"))
 
-    # Reconcile music directory with DB
     music_dir = cfg.get("music_directory", "./music")
     conn = database.get_connection()
     try:
@@ -47,19 +46,15 @@ async def lifespan(app: FastAPI):
     finally:
         conn.close()
 
-    # Clean up temp files from previous crashed downloads
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
-    # Init download manager
     manager = init_manager(database.get_connection)
     manager.start()
 
-    # Start event poller
     poller = get_poller()
     _register_event_handlers(poller)
     poller.start()
 
-    # Start cleanup scheduler
     start_cleanup_scheduler(database.get_connection)
 
     yield
@@ -67,7 +62,7 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ──────────────────────────────────────────────────────
     poller.stop()
     manager.stop()
-    await close_search_client()   # close persistent httpx client cleanly
+    await close_search_client()
     logger.info("rolfsound-control stopped")
 
 
@@ -87,20 +82,14 @@ def _register_event_handlers(poller):
             conn.close()
 
     def on_track_finished(data):
-        """
-        Fix: when a track_finished event arrives, ensure the track exists in the
-        DB so history tracking works even for recordings that were never scanned.
-        """
         filepath = data.get("filepath", "")
         track_id = data.get("track_id", "")
         if not filepath or not track_id:
-            logger.debug(f"track_finished: {data}")
             return
         conn = db.get_connection()
         try:
             existing = db.get_track(conn, track_id)
             if not existing and os.path.exists(filepath):
-                # Auto-insert so history works without a manual library scan
                 db.insert_track(conn, {
                     "id":             track_id,
                     "title":          os.path.basename(filepath),
@@ -126,19 +115,24 @@ def _register_event_handlers(poller):
 
 def _enrich_status(raw: dict) -> dict:
     """
-    Fix: reshape core's /status response so the dashboard's updateNowPlaying()
-    gets the flat keys it reads: state, track_id, title, artist, position, duration.
+    Reshape core's /status for the dashboard.
 
-    Core returns everything nested under raw["playback"] and raw["queue"].
-    The dashboard JS reads top-level keys only.
+    Core returns nested playback/queue dicts. The dashboard JS reads
+    flat top-level keys: state, track_id, title, artist, thumbnail,
+    position, duration, position_updated_at, queue (flat array).
 
-    Also looks up the currently-playing filepath in the SQLite library to attach
-    real title / artist / thumbnail metadata.
+    Metadata resolution order for now-playing track:
+      1. DB lookup by file_path (most authoritative — has artist etc.)
+      2. now_playing block from core (has thumbnail from queue dict)
+      3. Filename fallback
+
+    This layering means recordings and edge cases always get something
+    reasonable, and DB-tracked tracks get full metadata.
     """
     pb = raw.get("playback", {})
-    q  = raw.get("queue", {})
+    q  = raw.get("queue",    {})
 
-    # Derive state string
+    # ── Playback state ────────────────────────────────────────────────
     if pb.get("playing"):
         state = "playing"
     elif pb.get("paused"):
@@ -148,13 +142,13 @@ def _enrich_status(raw: dict) -> dict:
 
     current_filepath = pb.get("current_track", "")
 
-    # Default metadata from the filepath itself
+    # ── Metadata: start with filename defaults ────────────────────────
     title     = os.path.basename(current_filepath) if current_filepath else ""
     artist    = ""
     thumbnail = ""
-    track_id  = ""
+    track_id  = os.path.basename(current_filepath) if current_filepath else ""
 
-    # Try to enrich from DB using filepath
+    # ── Layer 1: DB lookup by filepath (most authoritative) ───────────
     if current_filepath:
         try:
             conn = database.get_connection()
@@ -164,38 +158,58 @@ def _enrich_status(raw: dict) -> dict:
                     (current_filepath,)
                 ).fetchone()
                 if row:
-                    track_id  = row["id"]  or os.path.basename(current_filepath)
-                    title     = row["title"]     or title
-                    artist    = row["artist"]    or ""
-                    thumbnail = row["thumbnail"] or ""
-                else:
-                    # No DB record — use filename as track_id
-                    track_id = os.path.basename(current_filepath)
+                    track_id  = row["id"]        or track_id
+                    title     = row["title"]      or title
+                    artist    = row["artist"]     or ""
+                    thumbnail = row["thumbnail"]  or ""
             finally:
                 conn.close()
         except Exception as e:
             logger.debug(f"Status enrichment DB lookup failed: {e}")
-            track_id = os.path.basename(current_filepath)
 
-    # Reshape queue tracks — pass thumbnail through
+    # ── Layer 2: now_playing from core (queue metadata fallback) ──────
+    # Used when the DB lookup misses — e.g. recordings not in the DB,
+    # or a track whose file_path stored in the DB doesn't match exactly.
+    # Core's now_playing block is built from the queue dict which always
+    # has the thumbnail that was passed in at queue-add time.
+    np = pb.get("now_playing", {})
+    if np:
+        if not track_id or track_id == os.path.basename(current_filepath):
+            track_id = np.get("track_id") or track_id
+        if not title or title == os.path.basename(current_filepath):
+            title    = np.get("title")    or title
+        if not thumbnail:
+            thumbnail = np.get("thumbnail") or ""
+
+    # ── Queue: reshape to flat array, preserve current_index ──────────
+    # Dashboard updateQueue() receives the flat array.
+    # current_index is preserved so the web layer can highlight
+    # the active track and resolve metadata if needed.
     queue_tracks = []
     for t in q.get("tracks", []):
         queue_tracks.append({
-            "track_id":  t.get("track_id", ""),
-            "title":     t.get("title", ""),
+            "track_id":  t.get("track_id",  ""),
+            "title":     t.get("title",     ""),
             "thumbnail": t.get("thumbnail", ""),
-            "artist":    t.get("artist", ""),
-            "filepath":  t.get("filepath", ""),
+            "artist":    t.get("artist",    ""),
+            "filepath":  t.get("filepath",  ""),
         })
 
-    raw["state"]    = state
-    raw["track_id"] = track_id
-    raw["title"]    = title
-    raw["artist"]   = artist
-    raw["thumbnail"]= thumbnail
-    raw["position"] = pb.get("position_s", 0)
-    raw["duration"] = pb.get("duration_s", 0)
-    raw["queue"]    = queue_tracks
+    # ── Write flat keys the dashboard reads ───────────────────────────
+    raw["state"]                = state
+    raw["track_id"]             = track_id
+    raw["title"]                = title
+    raw["artist"]               = artist
+    raw["thumbnail"]            = thumbnail
+    raw["position"]             = pb.get("position_s",          0)
+    raw["duration"]             = pb.get("duration_s",          0)
+    # Forward position_updated_at so the dashboard can dead-reckon
+    # the progress slider between polls without server round-trips.
+    # Formula: display_pos = position + (Date.now()/1000 - position_updated_at)
+    raw["position_updated_at"]  = pb.get("position_updated_at", time.time())
+    raw["volume"]               = pb.get("volume",              1.0)
+    raw["queue"]                = queue_tracks
+    raw["queue_current_index"]  = q.get("current_index", -1)
 
     return raw
 
@@ -207,7 +221,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # API routes
     app.include_router(search.router,     prefix="/api")
     app.include_router(library.router,    prefix="/api")
     app.include_router(queue.router,      prefix="/api")
@@ -218,12 +231,10 @@ def create_app() -> FastAPI:
     app.include_router(monitor.router,    prefix="/api")
     app.include_router(recordings.router, prefix="/api")
 
-    # Serve local thumbnails stored alongside music files
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)
     app.mount("/thumbs", StaticFiles(directory=music_dir), name="thumbs")
 
-    # Status endpoint — reshaped for the dashboard
     @app.get("/api/status")
     async def get_status():
         from utils import core_client
@@ -235,12 +246,10 @@ def create_app() -> FastAPI:
             )
         return _enrich_status(raw)
 
-    # Serve dashboard static files
     static_dir = DASHBOARD_DIR / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    # Serve dashboard SPA for all non-API routes
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_dashboard(full_path: str):
         index = DASHBOARD_DIR / "index.html"
