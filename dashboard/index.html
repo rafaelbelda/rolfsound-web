@@ -165,7 +165,7 @@
     .np-artist { font-size: 12px; color: var(--text-mid); }
     .np-progress { margin-bottom: 14px; }
     .progress-track { height: 3px; background: var(--bg2); border-radius: 2px; cursor: pointer; margin-bottom: 6px; }
-    .progress-fill  { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.5s linear; }
+    .progress-fill  { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; }
     .progress-times { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
     .np-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
     .ctrl-btn {
@@ -179,9 +179,10 @@
     .ctrl-btn-primary {
       width: 56px; height: 56px; background: var(--accent); color: var(--bg);
       border-radius: 50%; display: flex; align-items: center; justify-content: center;
-      transition: transform var(--t), background var(--t);
+      transition: background var(--t);
     }
-    .ctrl-btn-primary:hover { background: var(--accent-hi); transform: scale(1.05); }
+    .ctrl-btn-primary:hover { background: var(--accent-hi); }
+    .ctrl-btn-primary:hover { background: var(--accent-hi); }
     .ctrl-btn-primary:active { transform: scale(0.95); }
     .ctrl-btn-primary svg { width: 22px; height: 22px; stroke-width: 2; }
 
@@ -520,14 +521,14 @@
         </div>
 
         <div class="np-controls">
-          <button class="ctrl-btn" onclick="API.skipBack()">
+          <button class="ctrl-btn" onclick="skipBack()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
           </button>
           <button class="ctrl-btn-primary" onclick="togglePlayPause()">
             <svg id="play-icon"  viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
             <svg id="pause-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display:none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
           </button>
-          <button class="ctrl-btn" onclick="API.skip()">
+          <button class="ctrl-btn" onclick="skipForward()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
           </button>
         </div>
@@ -719,7 +720,12 @@
 ================================================================ */
 const S = {
   page:'home', status:null, playing:false, paused:false, currentId:null,
-  positionAtUpdate:0, positionUpdatedAt:0, duration:0,
+  // Slider state — managed exclusively by _applyServerState() and user actions.
+  // sliderAnchorMs=0 means frozen (paused/idle). >0 means actively advancing.
+  sliderPos:0, sliderAnchorMs:0, duration:0,
+  // When >Date.now(), polls must not touch sliderPos/playing/paused/icon.
+  // Set after every user action to prevent stale polls overwriting optimistic UI.
+  _guardUntilMs:0,
   settingsData:{},
   mon:{
     rms:0, threshold:0.015, autoRecord:false, recording:false,
@@ -826,75 +832,102 @@ function thumbSrc(t){
 }
 
 function updateNowPlaying(s){
-  const playing=s.state==='playing', paused=s.state==='paused';
-  S.playing=playing; S.paused=paused;
-  document.getElementById('play-icon').style.display =playing?'none':'block';
-  document.getElementById('pause-icon').style.display=playing?'block':'none';
+  const guarded = Date.now() < S._guardUntilMs;
+
+  // Always update logic state so other code can read it.
+  // But when guarded (user just clicked something), skip icon + slider —
+  // the optimistic values are more correct than this stale poll.
+  if(!guarded){
+    S.playing = s.state === 'playing';
+    S.paused  = s.state === 'paused';
+    _setPlayIcon(S.playing);
+  }
+
   document.getElementById('np-state').textContent=(s.state||'idle').toUpperCase();
+
   if(s.track_id){
     S.currentId=s.track_id;
     document.getElementById('np-title').textContent=s.title||s.track_id;
     document.getElementById('np-artist').textContent=s.artist||'';
-    document.getElementById('home-subtitle').textContent=playing?'▶ now playing':(paused?'⏸ paused':'–');
- 
-    // Store server-reported position + the timestamp it was sampled.
-    // _tickProgress() uses these to dead-reckon between polls.
-    S.positionAtUpdate  = s.position  || 0;
-    S.positionUpdatedAt = s.position_updated_at || (Date.now() / 1000);
-    S.duration          = s.duration  || 0;
- 
-    // Update thumbnail
+    document.getElementById('home-subtitle').textContent=
+      s.state==='playing'?'now playing':(s.state==='paused'?'⏸ paused':'–');
+
+    // Only update slider when not guarded AND duration is real (>0).
+    // Never overwrite the slider when paused — pos is frozen and correct.
+    // Never overwrite when duration=0 (core mid-track-change window).
+    if(!guarded && (s.duration||0) > 0){
+      S.duration = s.duration;
+      if(s.state === 'playing'){
+        // Anchor to browser clock NOW (not server's position_updated_at —
+        // that timestamp already has RTT baked in and causes a jump every poll).
+        S.sliderPos      = s.position || 0;
+        S.sliderAnchorMs = Date.now();
+      } else if(s.state !== 'playing' && S.sliderAnchorMs > 0){
+        // Transition into paused/idle: freeze at dead-reckoned position.
+        S.sliderPos      = Math.min(S.sliderPos + (Date.now()-S.sliderAnchorMs)/1000, S.duration);
+        S.sliderAnchorMs = 0;
+      }
+      // If already paused (anchorMs==0): do NOT touch sliderPos — it's frozen correctly.
+    }
+
     const thumbWrap = document.getElementById('np-thumb-wrap');
     if(thumbWrap && s.thumbnail){
       const src = thumbSrc(s.thumbnail);
       if(src){
-        // Replace placeholder svg with an actual img, or update existing
         let img = thumbWrap.querySelector('img');
-        if(!img){
-          thumbWrap.innerHTML = '';
-          img = document.createElement('img');
-          img.className = 'np-thumb';
-          thumbWrap.appendChild(img);
-        }
-        if(img.dataset.src !== src){ img.src = src; img.dataset.src = src; }
+        if(!img){ thumbWrap.innerHTML=''; img=document.createElement('img'); img.className='np-thumb'; thumbWrap.appendChild(img); }
+        if(img.dataset.src !== src){ img.src=src; img.dataset.src=src; }
       }
-    } else if(thumbWrap && !s.thumbnail){
-      // Restore placeholder if no thumbnail
-      if(!thumbWrap.querySelector('svg')){
-        thumbWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
-      }
+    } else if(thumbWrap && !s.thumbnail && !thumbWrap.querySelector('svg')){
+      thumbWrap.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
     }
- 
-    // Update duration display immediately from server value
+
     document.getElementById('prog-duration').textContent = fmtTime(S.duration);
   } else {
-    S.currentId = null;
-    S.positionAtUpdate = 0; S.positionUpdatedAt = 0; S.duration = 0;
+    S.currentId=null; S.duration=0; S.sliderPos=0; S.sliderAnchorMs=0;
     document.getElementById('np-title').textContent='Nothing playing';
     document.getElementById('np-artist').textContent='—';
     document.getElementById('home-subtitle').textContent='queue is empty';
     document.getElementById('progress-fill').style.width='0%';
     document.getElementById('prog-current').textContent='0:00';
     document.getElementById('prog-duration').textContent='0:00';
-    // Restore thumbnail placeholder
-    const thumbWrap = document.getElementById('np-thumb-wrap');
-    if(thumbWrap && !thumbWrap.querySelector('svg')){
-      thumbWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
-    }
+    const thumbWrap=document.getElementById('np-thumb-wrap');
+    if(thumbWrap&&!thumbWrap.querySelector('svg'))
+      thumbWrap.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>';
   }
 }
  
-// Dead-reckons position between status polls.
-// Called from rAF loop — updates progress fill + current time display.
-// Clamps to duration, stops advancing when paused/idle.
+// _setPlayIcon: single owner of the play/pause button DOM.
+// Called only from togglePlayPause (optimistic) and updateNowPlaying (when not guarded).
+function _setPlayIcon(isPlaying){
+  const pi=document.getElementById('play-icon');
+  const pa=document.getElementById('pause-icon');
+  if(!pi||!pa) return;
+  pi.style.display = isPlaying ? 'none'  : 'block';
+  pa.style.display = isPlaying ? 'block' : 'none';
+}
+
+// _tickProgress: RTT-free dead-reckoning slider at 60fps.
+// - When playing: pos advances from sliderPos using browser clock (no server RTT).
+// - When paused/idle (sliderAnchorMs=0): pos is exactly sliderPos — no movement at all.
+// - DOM writes skipped when value hasn't changed to avoid layout thrash.
+let _rafPos = -1, _rafTime = '';
 function _tickProgress(){
   requestAnimationFrame(_tickProgress);
-  if(!S.playing || S.paused || !S.duration) return;
-  const elapsed = Date.now() / 1000 - S.positionUpdatedAt;
-  const pos     = Math.min(S.positionAtUpdate + elapsed, S.duration);
-  const pct     = S.duration > 0 ? (pos / S.duration * 100) : 0;
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('prog-current').textContent  = fmtTime(pos);
+  if(!S.duration){ return; }
+  const pos = S.sliderAnchorMs > 0
+    ? Math.min(S.sliderPos + (Date.now() - S.sliderAnchorMs) / 1000, S.duration)
+    : S.sliderPos;
+  const pct  = Math.round(pos / S.duration * 1000) / 10;
+  const tstr = fmtTime(pos);
+  if(pct !== _rafPos){
+    _rafPos = pct;
+    document.getElementById('progress-fill').style.width = pct + '%';
+  }
+  if(tstr !== _rafTime){
+    _rafTime = tstr;
+    document.getElementById('prog-current').textContent = tstr;
+  }
 }
 
 // Dirty-check key for the queue — avoid full re-render when nothing changed
@@ -907,6 +940,26 @@ function updateQueue(tracks){
   const key = (tracks||[]).map(t=>t.track_id).join(',') + '|' + S.currentId;
   if(key === _lastQueueKey) return;
   _lastQueueKey = key;
+
+  // If the queue just went from empty to having tracks and nothing is playing,
+  // update the now-playing display to preview the first track (no auto-play).
+  if(tracks && tracks.length && !S.currentId && S.status && S.status.queue_current_index === 0){
+    const first = tracks[0];
+    document.getElementById('np-title').textContent = first.title || first.track_id || 'Unknown';
+    document.getElementById('np-artist').textContent = first.artist || '';
+    document.getElementById('home-subtitle').textContent = 'press play to start';
+    const thumbWrap = document.getElementById('np-thumb-wrap');
+    if(thumbWrap && first.thumbnail){
+      const src = thumbSrc(first.thumbnail);
+      if(src){
+        thumbWrap.innerHTML = '';
+        const img = document.createElement('img');
+        img.className = 'np-thumb'; img.src = src;
+        thumbWrap.appendChild(img);
+      }
+    }
+  }
+
   const compact = true;
 
   // Update queue count badge on home
@@ -934,9 +987,70 @@ function updateQueue(tracks){
    PLAYBACK
 ================================================================ */
 async function togglePlayPause(){
-  try{S.playing?await API.pause():await API.play();setTimeout(pollStatus,300);}
-  catch(e){toast('Core unavailable');}
+  // Guard: block polls from overwriting our optimistic state for 1200ms.
+  // This covers the full round-trip to core + one poll cycle.
+  S._guardUntilMs = Date.now() + 1200;
+
+  if(S.playing && !S.paused){
+    // Currently playing → pause optimistically.
+    // Freeze slider at current dead-reckoned position.
+    S.sliderPos      = Math.min(S.sliderPos + (Date.now()-S.sliderAnchorMs)/1000, S.duration||0);
+    S.sliderAnchorMs = 0;
+    S.playing = false; S.paused = true;
+    _setPlayIcon(false);
+    try{ await API.pause(); } catch(e){ toast('Core unavailable'); }
+
+  } else if(S.paused){
+    // Paused → resume: re-anchor slider from frozen position.
+    S.sliderAnchorMs = Date.now();
+    S.playing = true; S.paused = false;
+    _setPlayIcon(true);
+    try{ await API.play(); } catch(e){ toast('Core unavailable'); }
+
+  } else {
+    // Idle → play: need something in queue.
+    if(!S.status?.queue?.length){ S._guardUntilMs=0; toast('Queue is empty'); return; }
+    S.sliderAnchorMs = Date.now();
+    S.playing = true; S.paused = false;
+    _setPlayIcon(true);
+    try{ await API.play(); } catch(e){ toast('Core unavailable'); }
+  }
+
+  setTimeout(pollStatus, 500);
 }
+
+async function skipForward(){
+  S._guardUntilMs = Date.now() + 1500;
+  try{ await API.skip(); setTimeout(pollStatus,500); }
+  catch(e){ toast('Core unavailable'); }
+}
+
+async function skipBack(){
+  // Try core's queue/previous first.
+  // If core returns an error or there's nothing to go back to,
+  // fall back to finding the previous item in the known queue ourselves
+  // and playing it directly — this works regardless of core's history state.
+  S._guardUntilMs = Date.now() + 1500;
+  const queue   = S.status?.queue || [];
+  const curIdx  = S.status?.queue_current_index ?? -1;
+  try{
+    await API.skipBack();
+    setTimeout(pollStatus, 500);
+  } catch(e){
+    // Core returned error — attempt client-side fallback.
+    const prevIdx = curIdx > 0 ? curIdx - 1 : queue.length - 1;
+    if(queue[prevIdx]){
+      const t = queue[prevIdx];
+      try{
+        await API.fetch('/play', {method:'POST', body:JSON.stringify({
+          track_id: t.track_id, filepath: t.filepath||''
+        })});
+        setTimeout(pollStatus, 500);
+      } catch(e2){ toast('Core unavailable'); }
+    }
+  }
+}
+
 async function removeFromQueue(p){
   try{await API.queueRemove(p);toast('Removed');setTimeout(pollStatus,200);}
   catch(e){toast('Error');}
@@ -945,9 +1059,13 @@ async function removeFromQueue(p){
 document.addEventListener('DOMContentLoaded',()=>{
   const t=document.getElementById('progress-track');
   t&&t.addEventListener('click',async e=>{
-    if(!S.status?.duration)return;
-    const r=t.getBoundingClientRect();
-    try{await API.seek(((e.clientX-r.left)/r.width)*S.status.duration);setTimeout(pollStatus,200);}catch(e){}
+    if(!S.duration) return;
+    const r   = t.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(((e.clientX-r.left)/r.width)*S.duration, S.duration));
+    S._guardUntilMs  = Date.now() + 1200;
+    S.sliderPos      = pos;
+    S.sliderAnchorMs = (S.playing && !S.paused) ? Date.now() : 0;
+    try{ await API.seek(pos); setTimeout(pollStatus,500); }catch(e){}
   });
 });
 
@@ -1111,7 +1229,7 @@ function trackRowHTML(t,inLibrary,opts={}){
     <a class="btn-icon" href="/api/recordings/${encodeURIComponent(t.name)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteRecording('${escQ(t.name)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else if(inLibrary){
-    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Add to queue"></button>
+    actions=`<button class="btn-icon primary" onclick="addToQueue('${esc(t.id)}','${esc(t.file_path||'')}','${escQ(t.title||'')}','${esc(t.thumbnail||'')}')" title="Add to queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     <a class="btn-icon" href="/api/library/${esc(t.id)}/download" download title="Download file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a>
     <button class="btn-icon" onclick="confirmDeleteTrack('${esc(t.id)}')" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg></button>`;
   }else{

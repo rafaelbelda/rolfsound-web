@@ -1,15 +1,10 @@
 # db/database.py
-"""
-SQLite database setup and helpers for rolfsound-control.
-"""
-
 import sqlite3
 import logging
 from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
 _db_path: str = "./db/library.db"
 
 
@@ -39,7 +34,6 @@ def _connect():
 
 
 def get_connection():
-    """Return a persistent connection for use in request handlers."""
     conn = sqlite3.connect(_db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -47,7 +41,7 @@ def get_connection():
     return conn
 
 
-def _create_tables(conn: sqlite3.Connection) -> None:
+def _create_tables(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tracks (
             id              TEXT PRIMARY KEY,
@@ -61,14 +55,12 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             streams         INTEGER DEFAULT 0,
             source          TEXT
         );
-
         CREATE TABLE IF NOT EXISTS history (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             track_id        TEXT,
             played_at       INTEGER,
             duration_played INTEGER
         );
-
         CREATE TABLE IF NOT EXISTS downloads (
             track_id    TEXT PRIMARY KEY,
             status      TEXT,
@@ -78,24 +70,19 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             thumbnail   TEXT
         );
     """)
-    # Safe migration: add published_date to existing databases that predate this column
     try:
         conn.execute("ALTER TABLE tracks ADD COLUMN published_date INTEGER")
         logger.info("Migrated tracks table: added published_date column")
     except sqlite3.OperationalError:
-        pass  # column already exists — normal on fresh or already-migrated DBs
+        pass
 
 
-# ---- Track helpers ----
-
-def get_track(conn, track_id: str) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM tracks WHERE id = ?", (track_id,)
-    ).fetchone()
+def get_track(conn, track_id):
+    row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
     return dict(row) if row else None
 
 
-def insert_track(conn, track: dict) -> None:
+def insert_track(conn, track):
     conn.execute("""
         INSERT OR REPLACE INTO tracks
             (id, title, artist, duration, thumbnail, file_path,
@@ -117,88 +104,49 @@ def insert_track(conn, track: dict) -> None:
     })
 
 
-def get_all_track_ids(conn) -> set[str]:
-    """Return the set of all track IDs in the library. Used for fast dedup in search."""
+def get_all_track_ids(conn):
     rows = conn.execute("SELECT id FROM tracks").fetchall()
     return {row["id"] for row in rows}
 
 
-def scan_and_reconcile(conn, music_dir: str) -> int:
-    """
-    Walk the music directory and insert any audio files not already in the DB.
-    Returns the number of new tracks added.
-
-    This handles:
-    - Tracks downloaded before the DB existed
-    - Tracks added manually to the music directory
-    - Tracks whose DB record was accidentally deleted
-
-    Title is inferred from filename. artwork/metadata stay empty until
-    the track is played (stream counter update) or manually refreshed.
-    """
+def scan_and_reconcile(conn, music_dir):
     import time as _time
     from youtube.ytdlp import AUDIO_EXTENSIONS
-
     music_path = Path(music_dir)
     if not music_path.exists():
         return 0
-
     added = 0
     for f in music_path.iterdir():
         if f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
-        # Skip thumbnail files
         if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
             continue
-
-        track_id = f.stem  # YouTube ID is the filename stem
+        track_id = f.stem
         existing = conn.execute(
-            "SELECT id FROM tracks WHERE id = ? OR file_path = ?",
-            (track_id, str(f))
+            "SELECT id FROM tracks WHERE id = ? OR file_path = ?", (track_id, str(f))
         ).fetchone()
-
         if existing:
             continue
-
-        # Check if there's a local thumbnail alongside the file
         thumb = None
         for ext in (".jpg", ".jpeg", ".png"):
             candidate = music_path / f"{f.stem}{ext}"
             if candidate.exists():
                 thumb = str(candidate)
                 break
-
         conn.execute("""
             INSERT OR IGNORE INTO tracks
                 (id, title, artist, duration, thumbnail, file_path,
                  date_added, published_date, streams, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            track_id,
-            f.stem,   # use filename as title until metadata is fetched
-            "",
-            None,
-            thumb,
-            str(f),
-            int(_time.time()),
-            None,
-            0,
-            "local",
-        ))
+        """, (track_id, f.stem, "", None, thumb, str(f), int(_time.time()), None, 0, "local"))
         added += 1
         logger.info(f"Library scan: added {f.name}")
-
     if added:
         conn.commit()
     return added
 
 
-def search_tracks(conn, query: str, limit: int = 50) -> list[dict]:
-    """
-    Filter tracks by title or artist.
-    Uses SQL LIKE for ASCII (fast path). Falls back to Python lower()
-    for non-ASCII characters that SQLite LOWER() can miss.
-    """
+def search_tracks(conn, query, limit=50):
     pattern = f"%{query}%"
     rows = conn.execute("""
         SELECT * FROM tracks
@@ -207,8 +155,6 @@ def search_tracks(conn, query: str, limit: int = 50) -> list[dict]:
         LIMIT ?
     """, (pattern, pattern, limit)).fetchall()
     results = [dict(r) for r in rows]
-
-    # Python fallback for non-ASCII (accents, CJK, etc.)
     if not results:
         q_lower = query.lower()
         all_rows = conn.execute(
@@ -219,37 +165,36 @@ def search_tracks(conn, query: str, limit: int = 50) -> list[dict]:
             if q_lower in (r["title"] or "").lower()
             or q_lower in (r["artist"] or "").lower()
         ][:limit]
-
     return results
 
 
-def increment_streams(conn, track_id: str) -> None:
-    conn.execute(
-        "UPDATE tracks SET streams = streams + 1 WHERE id = ?", (track_id,)
-    )
+def increment_streams(conn, track_id):
+    conn.execute("UPDATE tracks SET streams = streams + 1 WHERE id = ?", (track_id,))
 
 
-def list_tracks(conn) -> list[dict]:
-    rows = conn.execute(
-        "SELECT * FROM tracks ORDER BY date_added DESC"
-    ).fetchall()
+def list_tracks(conn):
+    rows = conn.execute("SELECT * FROM tracks ORDER BY date_added DESC").fetchall()
     return [dict(r) for r in rows]
 
 
-def delete_track(conn, track_id: str) -> None:
+def delete_track(conn, track_id):
+    """
+    Remove a track from the library and purge its download record.
+    Without purging downloads, enqueue() finds status='complete' and
+    refuses to re-download after deletion.
+    """
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+    conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
 
 
-# ---- History helpers ----
-
-def add_history(conn, track_id: str, played_at: int, duration_played: int = 0) -> None:
-    conn.execute("""
-        INSERT INTO history (track_id, played_at, duration_played)
-        VALUES (?, ?, ?)
-    """, (track_id, played_at, duration_played))
+def add_history(conn, track_id, played_at, duration_played=0):
+    conn.execute(
+        "INSERT INTO history (track_id, played_at, duration_played) VALUES (?, ?, ?)",
+        (track_id, played_at, duration_played)
+    )
 
 
-def get_history(conn, limit: int = 50) -> list[dict]:
+def get_history(conn, limit=50):
     rows = conn.execute("""
         SELECT h.*, t.title, t.artist, t.thumbnail, t.duration
         FROM history h
@@ -260,44 +205,34 @@ def get_history(conn, limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# ---- Download helpers ----
-
-def upsert_download(conn, track_id: str, status: str, progress: int = 0,
-                    started_at: int = 0, title: str = "", thumbnail: str = "") -> None:
+def upsert_download(conn, track_id, status, progress=0, started_at=0, title="", thumbnail=""):
     conn.execute("""
         INSERT OR REPLACE INTO downloads (track_id, status, progress, started_at, title, thumbnail)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (track_id, status, progress, started_at, title, thumbnail))
 
 
-def get_download(conn, track_id: str) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM downloads WHERE track_id = ?", (track_id,)
-    ).fetchone()
+def get_download(conn, track_id):
+    row = conn.execute("SELECT * FROM downloads WHERE track_id = ?", (track_id,)).fetchone()
     return dict(row) if row else None
 
 
-def list_downloads(conn) -> list[dict]:
-    rows = conn.execute(
-        "SELECT * FROM downloads ORDER BY started_at DESC"
-    ).fetchall()
+def list_downloads(conn):
+    rows = conn.execute("SELECT * FROM downloads ORDER BY started_at DESC").fetchall()
     return [dict(r) for r in rows]
 
 
-def update_download_progress(conn, track_id: str, progress: int, status: str) -> None:
+def update_download_progress(conn, track_id, progress, status):
     conn.execute(
         "UPDATE downloads SET progress = ?, status = ? WHERE track_id = ?",
         (progress, status, track_id)
     )
 
 
-# ---- Cleanup ----
-
-def cleanup_unused_tracks(conn, min_streams: int, days: int) -> list[dict]:
+def cleanup_unused_tracks(conn, min_streams, days):
     import time
     cutoff = int(time.time()) - (days * 86400)
     rows = conn.execute("""
-        SELECT * FROM tracks
-        WHERE streams < ? AND date_added < ?
+        SELECT * FROM tracks WHERE streams < ? AND date_added < ?
     """, (min_streams, cutoff)).fetchall()
     return [dict(r) for r in rows]

@@ -21,6 +21,7 @@ from utils.event_poller import get_poller
 from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
 from youtube.search import close_client as close_search_client
+from utils import core_client
 
 from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings
 
@@ -57,12 +58,17 @@ async def lifespan(app: FastAPI):
 
     start_cleanup_scheduler(database.get_connection)
 
+    # Initialise persistent HTTP client for core communication.
+    # This eliminates ~400-500ms TCP setup overhead on every API call.
+    core_client.init_client()
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────
     poller.stop()
     manager.stop()
     await close_search_client()
+    await core_client.close_client()
     logger.info("rolfsound-control stopped")
 
 
@@ -116,23 +122,10 @@ def _register_event_handlers(poller):
 def _enrich_status(raw: dict) -> dict:
     """
     Reshape core's /status for the dashboard.
-
-    Core returns nested playback/queue dicts. The dashboard JS reads
-    flat top-level keys: state, track_id, title, artist, thumbnail,
-    position, duration, position_updated_at, queue (flat array).
-
-    Metadata resolution order for now-playing track:
-      1. DB lookup by file_path (most authoritative — has artist etc.)
-      2. now_playing block from core (has thumbnail from queue dict)
-      3. Filename fallback
-
-    This layering means recordings and edge cases always get something
-    reasonable, and DB-tracked tracks get full metadata.
     """
     pb = raw.get("playback", {})
     q  = raw.get("queue",    {})
 
-    # ── Playback state ────────────────────────────────────────────────
     if pb.get("playing"):
         state = "playing"
     elif pb.get("paused"):
@@ -142,13 +135,11 @@ def _enrich_status(raw: dict) -> dict:
 
     current_filepath = pb.get("current_track", "")
 
-    # ── Metadata: start with filename defaults ────────────────────────
     title     = os.path.basename(current_filepath) if current_filepath else ""
     artist    = ""
     thumbnail = ""
     track_id  = os.path.basename(current_filepath) if current_filepath else ""
 
-    # ── Layer 1: DB lookup by filepath (most authoritative) ───────────
     if current_filepath:
         try:
             conn = database.get_connection()
@@ -167,11 +158,6 @@ def _enrich_status(raw: dict) -> dict:
         except Exception as e:
             logger.debug(f"Status enrichment DB lookup failed: {e}")
 
-    # ── Layer 2: now_playing from core (queue metadata fallback) ──────
-    # Used when the DB lookup misses — e.g. recordings not in the DB,
-    # or a track whose file_path stored in the DB doesn't match exactly.
-    # Core's now_playing block is built from the queue dict which always
-    # has the thumbnail that was passed in at queue-add time.
     np = pb.get("now_playing", {})
     if np:
         if not track_id or track_id == os.path.basename(current_filepath):
@@ -181,10 +167,6 @@ def _enrich_status(raw: dict) -> dict:
         if not thumbnail:
             thumbnail = np.get("thumbnail") or ""
 
-    # ── Queue: reshape to flat array, preserve current_index ──────────
-    # Dashboard updateQueue() receives the flat array.
-    # current_index is preserved so the web layer can highlight
-    # the active track and resolve metadata if needed.
     queue_tracks = []
     for t in q.get("tracks", []):
         queue_tracks.append({
@@ -195,7 +177,6 @@ def _enrich_status(raw: dict) -> dict:
             "filepath":  t.get("filepath",  ""),
         })
 
-    # ── Write flat keys the dashboard reads ───────────────────────────
     raw["state"]                = state
     raw["track_id"]             = track_id
     raw["title"]                = title
@@ -203,9 +184,6 @@ def _enrich_status(raw: dict) -> dict:
     raw["thumbnail"]            = thumbnail
     raw["position"]             = pb.get("position_s",          0)
     raw["duration"]             = pb.get("duration_s",          0)
-    # Forward position_updated_at so the dashboard can dead-reckon
-    # the progress slider between polls without server round-trips.
-    # Formula: display_pos = position + (Date.now()/1000 - position_updated_at)
     raw["position_updated_at"]  = pb.get("position_updated_at", time.time())
     raw["volume"]               = pb.get("volume",              1.0)
     raw["queue"]                = queue_tracks
@@ -237,7 +215,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     async def get_status():
-        from utils import core_client
         raw = await core_client.get_status()
         if raw is None:
             return JSONResponse(
