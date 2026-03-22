@@ -9,14 +9,14 @@ AUDIO FORMAT
 Default format is WebM/Opus — the native stream YouTube serves.
 No transcoding, no quality loss, smallest possible file size.
 
-Opus at ~130-160kbps is perceptually transparent. Transcoding to MP3
-or Vorbis is lossy-to-lossy: strictly worse quality, no benefit.
-
-NOTE: libsndfile (used by soundfile/sounddevice in rolfsound-core's
-PlaybackService) does not read WebM. Core playback of downloaded tracks
-requires a fix in rolfsound-core to use a decoder that handles Opus
-(e.g. PyAV or ffplay subprocess). Tracked as a known issue.
-Web dashboard playback via FileResponse works — browsers handle WebM.
+PATH HANDLING
+─────────────
+All paths are resolved to absolute before use. This prevents a Windows-specific
+bug where relative paths joined with Path() produce backslash separators
+(e.g. "music\btrack.webm"), and some track IDs start with letters that form
+escape sequences (\b = backspace, \t = tab, \n = newline). When these strings
+are stored in the DB and later logged or passed to av.open(), the escape char
+corrupts the path. Absolute paths have no ambiguous escape sequences.
 
 PUBLIC API
 ──────────
@@ -104,7 +104,12 @@ def download(
     """
     Download audio at maximum quality. Default is native WebM/Opus stream.
     Atomic: downloads to temp path, renames to final on success.
-    Returns final file path or None on failure.
+    Returns final file path (absolute) or None on failure.
+
+    Paths are always resolved to absolute so that:
+    - yt-dlp receives an unambiguous output template
+    - The returned path has no backslash escape sequences (Windows safety)
+    - os.path.exists / av.open work identically on all platforms
     """
     is_native = audio_format in _NATIVE_FORMATS
 
@@ -113,10 +118,14 @@ def download(
         _download_lock.acquire()
 
     try:
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        Path(temp_dir).mkdir(parents=True, exist_ok=True)
+        # Fix: resolve() converts to absolute path, eliminating Windows
+        # backslash + escape-char issues in relative paths like "music\bID.webm"
+        output_path = Path(output_dir).resolve()
+        temp_path   = Path(temp_dir).resolve()
+        output_path.mkdir(parents=True, exist_ok=True)
+        temp_path.mkdir(parents=True, exist_ok=True)
 
-        temp_template = str(Path(temp_dir) / f"{track_id}.tmp.%(ext)s")
+        temp_template = str(temp_path / f"{track_id}.tmp.%(ext)s")
         url           = f"https://www.youtube.com/watch?v={track_id}"
 
         if progress_callback:
@@ -172,19 +181,21 @@ def download(
         if progress_callback:
             progress_callback(90, "processing")
 
-        candidates = list(Path(temp_dir).glob(f"{track_id}.tmp.*"))
+        candidates = list(temp_path.glob(f"{track_id}.tmp.*"))
         if not candidates:
             logger.error(f"Temp file not found for {track_id}")
             return None
 
         temp_file  = candidates[0]
         actual_ext = temp_file.suffix.lstrip(".")
-        final_path = str(Path(output_dir) / f"{track_id}.{actual_ext}")
+        # Fix: final_path is absolute — no relative backslash separator issues
+        final_file = output_path / f"{track_id}.{actual_ext}"
+        final_path = str(final_file)
 
         if actual_ext != audio_format:
             logger.info(f"Actual ext .{actual_ext} differs from .{audio_format} — saving as {final_path}")
 
-        temp_file.rename(final_path)
+        temp_file.rename(final_file)
 
         if progress_callback:
             progress_callback(100, "complete")
@@ -202,8 +213,10 @@ def download(
 
 
 def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -> str | None:
-    dest = str(Path(thumbnails_dir) / f"{track_id}.jpg")
-    Path(thumbnails_dir).mkdir(parents=True, exist_ok=True)
+    # Fix: resolve() for same reason — avoid Windows backslash escape issues
+    thumb_path = Path(thumbnails_dir).resolve()
+    thumb_path.mkdir(parents=True, exist_ok=True)
+    dest = str(thumb_path / f"{track_id}.jpg")
 
     if thumbnail_url:
         try:
@@ -214,7 +227,7 @@ def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -
             logger.warning(f"Direct thumbnail download failed for {track_id}: {e}")
 
     try:
-        tmp = str(Path(thumbnails_dir) / f"{track_id}.thumb")
+        tmp = str(thumb_path / f"{track_id}.thumb")
         cmd = [
             "yt-dlp", "--write-thumbnail", "--skip-download",
             "--convert-thumbnails", "jpg", "--no-call-home",
@@ -222,7 +235,7 @@ def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -
             f"https://www.youtube.com/watch?v={track_id}",
         ]
         subprocess.run(cmd, capture_output=True, timeout=20)
-        candidate = Path(thumbnails_dir) / f"{track_id}.thumb.jpg"
+        candidate = thumb_path / f"{track_id}.thumb.jpg"
         if candidate.exists():
             candidate.rename(dest)
             return dest
@@ -233,7 +246,7 @@ def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -
 
 
 def cleanup_temp_files(temp_dir: str) -> None:
-    temp_path = Path(temp_dir)
+    temp_path = Path(temp_dir).resolve()
     if not temp_path.exists():
         return
     for f in temp_path.glob("*.tmp*"):

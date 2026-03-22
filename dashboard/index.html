@@ -890,7 +890,7 @@ async function togglePlayPause(){
   catch(e){toast('Core unavailable');}
 }
 async function removeFromQueue(p){
-  try{await API.queueRemove(p);toast('Removed ✓');setTimeout(pollStatus,200);}
+  try{await API.queueRemove(p);toast('Removed');setTimeout(pollStatus,200);}
   catch(e){toast('Error');}
 }
 
@@ -1070,7 +1070,7 @@ function trackRowHTML(t,inLibrary,opts={}){
     <div class="track-actions">${actions}</div>
   </div>`;
 }
-async function addToQueue(tid,fp,name){try{await API.queueAdd(tid,fp,name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
+async function addToQueue(tid,fp,name){try{await API.queueAdd(tid,fp,name);toast('Added');setTimeout(pollStatus,200);}catch(e){toast(e.message);}}
 async function downloadAndQueue(tid,name,thumb){
   try{
     const r=await API.startDownload(tid,name,thumb);
@@ -1115,7 +1115,7 @@ async function loadLibrary(autoScan=false){
 }
 async function confirmDeleteTrack(id){
   if(!confirm('Remove from library?'))return;
-  try{await API.deleteTrack(id);toast('Deleted ✓');loadLibrary();}catch(e){toast('Delete failed');}
+  try{await API.deleteTrack(id);toast('Deleted');loadLibrary();}catch(e){toast('Delete failed');}
 }
 /* ================================================================
    MONITOR — visualizer
@@ -1651,10 +1651,10 @@ async function loadRecordings(){
     list.innerHTML=recs.length?recs.map(r=>trackRowHTML(r,false,{isRecording:true})).join(''):'<div class="empty-state"><p>No recordings yet.</p></div>';
   }catch(e){list.innerHTML='<p style="color:var(--danger);padding:16px;font-size:13px">Failed to load</p>';}
 }
-async function queueRecording(name){try{await API.queueRecording(name);toast('Added ✓');setTimeout(pollStatus,200);}catch(e){toast('Error: '+e.message);}}
+async function queueRecording(name){try{await API.queueRecording(name);toast('Added');setTimeout(pollStatus,200);}catch(e){toast('Error: '+e.message);}}
 async function confirmDeleteRecording(name){
   if(!confirm(`Delete "${name}"?`))return;
-  try{await API.deleteRecording(name);toast('Deleted ✓');loadRecordings();}catch(e){toast('Delete failed');}
+  try{await API.deleteRecording(name);toast('Deleted');loadRecordings();}catch(e){toast('Delete failed');}
 }
 
 /* ================================================================
@@ -1722,7 +1722,7 @@ async function loadSettings(){
 }
 function toggleSetting(el){el.classList.toggle('on');S.settingsData[el.dataset.key]=el.classList.contains('on');}
 function updateSettingVal(el){S.settingsData[el.dataset.key]=el.type==='number'?Number(el.value):el.value;}
-async function saveSettings(){try{await API.saveSettings(S.settingsData);toast('Saved ✓');}catch(e){toast('Save failed');}}
+async function saveSettings(){try{await API.saveSettings(S.settingsData);toast('Saved');}catch(e){toast('Save failed');}}
 
 /* ================================================================
    UTILS

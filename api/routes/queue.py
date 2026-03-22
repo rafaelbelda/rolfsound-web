@@ -11,6 +11,7 @@ class AddRequest(BaseModel):
     track_id: str
     filepath: str = ""
     title: str = ""
+    thumbnail: str = ""
     position: int | None = None
 
 
@@ -33,19 +34,27 @@ async def get_queue():
 
 @router.post("/queue/add")
 async def add_to_queue(req: AddRequest):
-    # Resolve filepath from library if not provided
-    if not req.filepath and req.track_id:
+    # Resolve filepath and thumbnail from library if not provided
+    if req.track_id and (not req.filepath or not req.thumbnail):
         from db import database
         conn = database.get_connection()
         try:
             track = database.get_track(conn, req.track_id)
             if track:
-                req.filepath = track.get("file_path", "")
-                req.title = req.title or track.get("title", "")
+                if not req.filepath:
+                    req.filepath  = track.get("file_path", "")
+                if not req.title:
+                    req.title     = track.get("title", "")
+                # Fix: forward thumbnail so queue renders album art
+                if not req.thumbnail:
+                    req.thumbnail = track.get("thumbnail", "")
         finally:
             conn.close()
 
-    result = await core_client.queue_add(req.track_id, req.filepath, req.title, req.position)
+    result = await core_client.queue_add(
+        req.track_id, req.filepath, req.title,
+        thumbnail=req.thumbnail, position=req.position,
+    )
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -70,6 +79,16 @@ async def move_in_queue(req: MoveRequest):
 @router.post("/queue/clear")
 async def clear_queue():
     result = await core_client.queue_clear()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+# Fix: add /queue/previous so the skip-back button in the dashboard works.
+# The dashboard calls API.skipBack() → POST /api/queue/previous.
+@router.post("/queue/previous")
+async def previous_in_queue():
+    result = await core_client.queue_previous()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

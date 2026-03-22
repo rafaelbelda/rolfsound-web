@@ -77,8 +77,12 @@ async def seek(position: float)      -> dict | None: return await _post("/seek",
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
 
-async def queue_add(track_id, filepath, title="", position=None) -> dict | None:
-    p = {"track_id": track_id, "filepath": filepath, "title": title}
+async def queue_add(track_id, filepath, title="", thumbnail="", position=None) -> dict | None:
+    """
+    Add a track to core's queue.
+    thumbnail is forwarded so the dashboard can render album art in the queue.
+    """
+    p = {"track_id": track_id, "filepath": filepath, "title": title, "thumbnail": thumbnail}
     if position is not None:
         p["position"] = position
     return await _post("/queue/add", p)
@@ -86,4 +90,9 @@ async def queue_add(track_id, filepath, title="", position=None) -> dict | None:
 async def queue_remove(position: int) -> dict | None: return await _post("/queue/remove", {"position": position})
 async def queue_move(from_pos, to_pos)-> dict | None: return await _post("/queue/move", {"from": from_pos, "to": to_pos})
 async def queue_clear()               -> dict | None: return await _post("/queue/clear")
+
+# Fix: add queue_previous so the skip-back button in the dashboard works.
+# Matches the POST /queue/previous endpoint now wired in core's api_service.py.
+async def queue_previous()            -> dict | None: return await _post("/queue/previous")
+
 async def is_available()              -> bool:        return await get_status() is not None
