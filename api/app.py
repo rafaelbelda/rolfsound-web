@@ -161,12 +161,12 @@ def _enrich_status(raw: dict) -> dict:
     np = pb.get("now_playing", {})
     if np:
         if not track_id or track_id == os.path.basename(current_filepath):
-            track_id = np.get("track_id") or track_id
-        if not title or title == os.path.basename(current_filepath):
-            title    = np.get("title")    or title
+            track_id  = np.get("track_id")  or track_id
+        if not title   or title   == os.path.basename(current_filepath):
+            title     = np.get("title")     or title
         if not thumbnail:
             thumbnail = np.get("thumbnail") or ""
-
+ 
     queue_tracks = []
     for t in q.get("tracks", []):
         queue_tracks.append({
@@ -178,6 +178,7 @@ def _enrich_status(raw: dict) -> dict:
         })
 
     raw["state"]                = state
+    raw["paused"]               = pb.get("paused", False)
     raw["track_id"]             = track_id
     raw["title"]                = title
     raw["artist"]               = artist
@@ -188,7 +189,7 @@ def _enrich_status(raw: dict) -> dict:
     raw["volume"]               = pb.get("volume",              1.0)
     raw["queue"]                = queue_tracks
     raw["queue_current_index"]  = q.get("current_index", -1)
-
+ 
     return raw
 
 
