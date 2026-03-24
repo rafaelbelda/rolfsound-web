@@ -168,7 +168,7 @@ class DownloadManager:
                 })
                 database.update_download_progress(conn, track_id, 100, "complete")
                 conn.commit()
-                logger.info(f"Download complete: {track_id} → {filepath}")
+                logger.info(f"Download complete: {track_id} -> {filepath}")
 
                 for cb in self._on_complete_callbacks:
                     try:

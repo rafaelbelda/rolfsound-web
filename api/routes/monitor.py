@@ -51,7 +51,7 @@ async def get_monitor():
         "max_threshold":        recorder.get("max_threshold",         0.1),
         "encoder_step":         recorder.get("encoder_step",          0.005),
         "trigger_duration":     recorder.get("trigger_duration",      0.5),   # seconds
-        "stop_seconds":         recorder.get("stop_seconds",          5),     # seconds silence → stop
+        "stop_seconds":         recorder.get("stop_seconds",          5),     # seconds silence -> stop
         "output_dir":           recorder.get("output_dir",            "recordings"),
 
         # ── Monitor config ───────────────────────────────────────────

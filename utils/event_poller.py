@@ -83,7 +83,7 @@ class EventPoller:
         first_id = events[0]["id"]
         if first_id > self._last_event_id + 1 and self._last_event_id > 0:
             logger.warning(
-                f"Event ID gap ({self._last_event_id} → {first_id}) — "
+                f"Event ID gap ({self._last_event_id} -> {first_id}) — "
                 "triggering state refresh."
             )
             self._dispatch("state_refresh", {})

@@ -13,11 +13,11 @@ SSE events:
 FLOW
 ────
   1. Check disconnection early — skip everything if client already gone
-  2. SQLite library search (~1ms) → emit "library"
+  2. SQLite library search (~1ms) -> emit "library"
   3. Check disconnection again  — skip YouTube search if client left
-  4. Exact cache hit             → stream results immediately (no delay)
-  5. Inflight dedup              → await existing Future
-  6. youtube.search.search()     → API or yt-dlp depending on config
+  4. Exact cache hit             -> stream results immediately (no delay)
+  5. Inflight dedup              -> await existing Future
+  6. youtube.search.search()     -> API or yt-dlp depending on config
   7. Emit results, cache, resolve Future
   8. emit "done"
 
@@ -37,7 +37,7 @@ but catches the common case of fast navigation.
 
 INFLIGHT DEDUP
 ──────────────
-_inflight: dict[cache_key → Future[list[dict]]].
+_inflight: dict[cache_key -> Future[list[dict]]].
 Owner runs the search and resolves Future in finally.
 Late arrivals await with asyncio.shield so owner continues
 unaffected if a waiter is cancelled.
@@ -57,7 +57,7 @@ from utils.config import get
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Inflight dedup: cache_key → Future[list[dict]]
+# Inflight dedup: cache_key -> Future[list[dict]]
 _inflight: dict[str, asyncio.Future] = {}
 
 

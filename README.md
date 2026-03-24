@@ -79,13 +79,13 @@ rolfsound-control forwards user actions to these rolfsound-core endpoints:
 Events polled from `GET /events?since={last_id}`:
 
 - `playback_started` / `playback_paused` / `playback_resumed` / `playback_stopped`
-- `track_changed` → increments stream counter + records history
+- `track_changed` -> increments stream counter + records history
 - `track_finished`
 - `queue_add` / `queue_remove` / `queue_move` / `queue_clear`
 
 ## Download Pipeline
 
-1. User selects YouTube result → POST /api/downloads
+1. User selects YouTube result -> POST /api/downloads
 1. yt-dlp downloads to `cache/<id>.tmp.*`
 1. ffmpeg converts to mp3
 1. Atomic rename to `music/<id>.mp3`

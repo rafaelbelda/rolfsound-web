@@ -85,7 +85,7 @@ async def clear_queue():
 
 
 # Fix: add /queue/previous so the skip-back button in the dashboard works.
-# The dashboard calls API.skipBack() → POST /api/queue/previous.
+# The dashboard calls API.skipBack() -> POST /api/queue/previous.
 @router.post("/queue/previous")
 async def previous_in_queue():
     result = await core_client.queue_previous()
