@@ -33,6 +33,10 @@ _DEFAULTS = {
     # Enable "YouTube Data API v3", create an API key, paste it here.
     # Free quota: 10,000 units/day (~100 searches/day at 100 units each).
     "youtube_api_key":           "",
+    # Discogs app credentials — registered once for all Rolfsound devices.
+    # Users never see or touch these; they just click "Connect Discogs account".
+    "discogs_consumer_key":      "",
+    "discogs_consumer_secret":   "",
 }
 
 _config: dict = {}

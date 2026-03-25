@@ -446,56 +446,6 @@
     gap: 10px;
   }
 
-  /* ─── App Credentials ─── */
-  .field-group { margin-bottom: 20px; }
-
-  .field-label {
-    display: block;
-    font-size: 10px;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--gray-500);
-    margin-bottom: 6px;
-  }
-
-  .field-hint {
-    font-size: 11px;
-    color: var(--gray-500);
-    margin-top: 5px;
-    line-height: 1.5;
-  }
-
-  .input-row {
-    display: flex;
-    gap: 8px;
-  }
-
-  input[type="text"],
-  input[type="password"] {
-    flex: 1;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid var(--gray-300);
-    border-radius: 4px;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--black);
-    background: var(--white);
-    outline: none;
-    transition: border-color 0.15s;
-  }
-
-  input:focus { border-color: var(--black); }
-  input::placeholder { color: var(--gray-300); }
-
-  /* ─── Divider ─── */
-  .divider {
-    border: none;
-    border-top: 1px solid var(--gray-100);
-    margin: 32px 0;
-  }
-
   /* ─── Notice ─── */
   .notice {
     display: flex;
@@ -580,36 +530,8 @@
   <main class="main">
     <div class="page-header">
       <h1 class="page-title">Settings</h1>
-      <p class="page-desc">Configure your Discogs account and application credentials.</p>
+      <p class="page-desc">Connect your Discogs account to sync your collection and fetch release metadata.</p>
     </div>
-
-    <!-- App Credentials -->
-    <section class="section">
-      <div class="section-title">App Credentials</div>
-
-      <div class="field-group">
-        <label class="field-label" for="consumer-key">Consumer Key</label>
-        <div class="input-row">
-          <input type="text" id="consumer-key" placeholder="Enter your Discogs consumer key" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="field-hint">From discogs.com/settings/developers — shared across all Rolfsound devices.</div>
-      </div>
-
-      <div class="field-group">
-        <label class="field-label" for="consumer-secret">Consumer Secret</label>
-        <div class="input-row">
-          <input type="password" id="consumer-secret" placeholder="Enter your Discogs consumer secret" autocomplete="off">
-          <button class="btn btn-secondary" onclick="toggleSecret()" id="reveal-btn" style="padding: 0 12px; font-size: 11px;">Show</button>
-        </div>
-        <div class="field-hint">Keep this private. Never share it or include it in client-side logs.</div>
-      </div>
-
-      <div class="btn-actions">
-        <button class="btn btn-primary" onclick="saveCredentials()">Save credentials</button>
-      </div>
-    </section>
-
-    <hr class="divider">
 
     <!-- Discogs Account -->
     <section class="section">
@@ -644,7 +566,7 @@
               </div>
               <div class="connect-step">
                 <div class="step-num">3</div>
-                <div class="step-label">Token saved locally</div>
+                <div class="step-label">Token saved on device</div>
               </div>
             </div>
             <button class="btn btn-primary" onclick="startOAuth()">Connect Discogs account</button>
@@ -705,7 +627,7 @@
       </div>
 
       <div class="notice" style="margin-top: 16px;">
-        Access tokens are stored locally on this device only and are valid indefinitely until manually revoked at
+        Your access token is stored in this device's database and is valid indefinitely until manually revoked at
         <a href="https://www.discogs.com/settings/applications" target="_blank">discogs.com/settings/applications</a>.
       </div>
     </section>
@@ -716,68 +638,23 @@
 <script>
   const app = document.getElementById('app');
 
-  // ─── Credential helpers ───────────────────────────────────────────
-  function getCredentials() {
-    return {
-      consumerKey: localStorage.getItem('rs_consumer_key') || '',
-      consumerSecret: localStorage.getItem('rs_consumer_secret') || '',
-    };
-  }
-
-  function saveCredentials() {
-    const key = document.getElementById('consumer-key').value.trim();
-    const secret = document.getElementById('consumer-secret').value.trim();
-    if (!key || !secret) { alert('Please enter both consumer key and secret.'); return; }
-    localStorage.setItem('rs_consumer_key', key);
-    localStorage.setItem('rs_consumer_secret', secret);
-    showToast('Credentials saved.');
-  }
-
-  function toggleSecret() {
-    const el = document.getElementById('consumer-secret');
-    const btn = document.getElementById('reveal-btn');
-    if (el.type === 'password') { el.type = 'text'; btn.textContent = 'Hide'; }
-    else { el.type = 'password'; btn.textContent = 'Show'; }
-  }
-
   // ─── OAuth flow ───────────────────────────────────────────────────
-  // NOTE: The OAuth handshake MUST run through your local server (e.g. Python/Flask on port 5000).
-  // The frontend calls /api/discogs/request-token → server talks to Discogs → returns authorize URL.
-  // After the user approves, Discogs redirects to /callback → server exchanges for access token →
-  // returns token to frontend → stored in localStorage.
-
   let authWindow = null;
   let authPollInterval = null;
 
   async function startOAuth() {
-    const { consumerKey, consumerSecret } = getCredentials();
-    if (!consumerKey || !consumerSecret) {
-      alert('Enter your Consumer Key and Secret above first.');
-      return;
-    }
-
     setState('connecting');
-
     try {
-      // Step 1: Ask your local server to get a request token from Discogs
-      const res = await fetch('/api/discogs/request-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consumerKey, consumerSecret })
-      });
-
-      if (!res.ok) throw new Error('Could not reach local server.');
-
+      const res = await fetch('/api/discogs/request-token', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
       const { authorizeUrl, oauthToken } = await res.json();
 
-      // Step 2: Show the URL and open Discogs in a new window
       const display = document.getElementById('auth-url-display');
       display.textContent = authorizeUrl.length > 60 ? authorizeUrl.slice(0, 60) + '…' : authorizeUrl;
       display.dataset.fullUrl = authorizeUrl;
 
       openAuthWindow(authorizeUrl);
 
-      // Step 3: Poll your server to check if the user has approved
       authPollInterval = setInterval(async () => {
         try {
           const poll = await fetch(`/api/discogs/token-status?oauthToken=${oauthToken}`);
@@ -809,22 +686,7 @@
   }
 
   function onAuthorized(data) {
-    // Store token locally
-    localStorage.setItem('rs_access_token', data.accessToken);
-    localStorage.setItem('rs_access_secret', data.accessSecret);
-    localStorage.setItem('rs_username', data.username);
-    localStorage.setItem('rs_connected_at', new Date().toISOString());
-
-    // Update UI
-    document.getElementById('display-username').textContent = data.username || '—';
-    document.getElementById('display-url').textContent = `discogs.com/user/${data.username}`;
-    document.getElementById('display-token').textContent = data.accessToken
-      ? data.accessToken.slice(0, 8) + '••••••••' + data.accessToken.slice(-4)
-      : '—';
-    document.getElementById('display-date').textContent = new Date().toLocaleDateString('en-GB', {
-      day: 'numeric', month: 'short', year: 'numeric'
-    });
-
+    populateConnectedUI({ username: data.username, connected_at: data.connected_at, token_hint: null });
     setState('connected');
     if (authWindow) { authWindow.close(); authWindow = null; }
     showToast('Discogs account connected.');
@@ -836,9 +698,7 @@
     btn.disabled = true;
     btn.textContent = 'Testing…';
     try {
-      const res = await fetch('/api/discogs/test', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('rs_access_token')}` }
-      });
+      const res = await fetch('/api/discogs/test');
       const data = await res.json();
       if (data.ok) {
         showToast(`Connection OK — logged in as ${data.username}.`);
@@ -853,14 +713,23 @@
     }
   }
 
-  function disconnect() {
+  async function disconnect() {
     if (!confirm('Disconnect your Discogs account from this device?')) return;
-    ['rs_access_token', 'rs_access_secret', 'rs_username', 'rs_connected_at'].forEach(k => localStorage.removeItem(k));
+    await fetch('/api/discogs/account', { method: 'DELETE' });
     setState('disconnected');
     showToast('Disconnected.');
   }
 
-  // ─── State ───────────────────────────────────────────────────────
+  // ─── UI helpers ───────────────────────────────────────────────────
+  function populateConnectedUI({ username, connected_at, token_hint }) {
+    document.getElementById('display-username').textContent = username || '—';
+    document.getElementById('display-url').textContent = username ? `discogs.com/user/${username}` : '—';
+    document.getElementById('display-token').textContent = token_hint || '••••••••••••';
+    document.getElementById('display-date').textContent = connected_at
+      ? new Date(connected_at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '—';
+  }
+
   function setState(s) { app.dataset.appState = s; }
 
   // ─── Toast ───────────────────────────────────────────────────────
@@ -883,24 +752,17 @@
     }, 3000);
   }
 
-  // ─── Init: restore saved state ───────────────────────────────────
-  (function init() {
-    const creds = getCredentials();
-    if (creds.consumerKey) document.getElementById('consumer-key').value = creds.consumerKey;
-    if (creds.consumerSecret) document.getElementById('consumer-secret').value = creds.consumerSecret;
-
-    const token = localStorage.getItem('rs_access_token');
-    const username = localStorage.getItem('rs_username');
-    const connectedAt = localStorage.getItem('rs_connected_at');
-
-    if (token && username) {
-      document.getElementById('display-username').textContent = username;
-      document.getElementById('display-url').textContent = `discogs.com/user/${username}`;
-      document.getElementById('display-token').textContent = token.slice(0, 8) + '••••••••' + token.slice(-4);
-      document.getElementById('display-date').textContent = connectedAt
-        ? new Date(connectedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-        : '—';
-      setState('connected');
+  // ─── Init: load state from server ────────────────────────────────
+  (async function init() {
+    try {
+      const res = await fetch('/api/discogs/account');
+      const data = await res.json();
+      if (data.connected) {
+        populateConnectedUI(data);
+        setState('connected');
+      }
+    } catch (_) {
+      // server unreachable — stay in disconnected state
     }
   })();
 </script>

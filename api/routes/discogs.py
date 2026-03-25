@@ -2,12 +2,17 @@
 """
 Discogs OAuth 1.0a flow.
 
+App credentials (Consumer Key/Secret) are read from config — users never
+enter them.  The resulting Access Token/Secret are stored in the SQLite DB.
+
 Endpoints
 ---------
-POST /api/discogs/request-token   – get a Discogs request token and return the authorize URL
-GET  /api/discogs/callback        – Discogs redirects here after user approves
-GET  /api/discogs/token-status    – frontend polls this until status == "authorized"
-GET  /api/discogs/test            – verify a stored access token is still valid
+GET    /api/discogs/account        – current connected account (or null)
+DELETE /api/discogs/account        – disconnect (wipes DB record)
+POST   /api/discogs/request-token  – start OAuth: returns authorize URL
+GET    /api/discogs/callback        – Discogs redirects here after approval
+GET    /api/discogs/token-status   – frontend polls until status == "authorized"
+GET    /api/discogs/test           – verify stored token is still valid
 """
 
 import logging
@@ -18,15 +23,16 @@ import uuid
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+
+from db import database
+from utils import config as cfg
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# In-memory store keyed by oauth_token (request token).
-# Each entry:  { request_secret, consumer_key, consumer_secret,
-#               status: "pending"|"authorized"|"failed",
-#               access_token, access_secret, username }
+# Temporary in-memory store for in-flight OAuth handshakes only.
+# Keyed by the Discogs request token (oauth_token).
+# Cleared after the handshake completes (authorized or failed).
 _pending: dict[str, dict] = {}
 
 _REQUEST_TOKEN_URL = "https://api.discogs.com/oauth/request_token"
@@ -61,7 +67,6 @@ def _oauth_header(
     if callback:
         params["oauth_callback"] = callback
 
-    # PLAINTEXT signature:  percent_encode(consumer_secret) & percent_encode(token_secret)
     params["oauth_signature"] = (
         f"{urllib.parse.quote(consumer_secret, safe='')}"
         f"&{urllib.parse.quote(token_secret, safe='')}"
@@ -74,28 +79,71 @@ def _oauth_header(
     return f"OAuth {parts}"
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-
-class RequestTokenBody(BaseModel):
-    consumerKey: str
-    consumerSecret: str
-    callbackUrl: str = ""
-
-
-@router.post("/discogs/request-token")
-async def request_token(body: RequestTokenBody, request: Request):
-    """
-    Ask Discogs for a request token, store it in memory, and return the
-    authorize URL for the frontend to open.
-    """
-    callback = (
-        body.callbackUrl
-        or str(request.base_url).rstrip("/") + "/api/discogs/callback"
+def _consumer():
+    """Return (consumer_key, consumer_secret) from config."""
+    return (
+        cfg.get("discogs_consumer_key",    ""),
+        cfg.get("discogs_consumer_secret", ""),
     )
 
+
+# ── Account endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/discogs/account")
+async def get_account():
+    """Return the stored Discogs account, or null if not connected."""
+    conn = database.get_connection()
+    try:
+        account = database.get_discogs_account(conn)
+    finally:
+        conn.close()
+
+    if not account:
+        return {"connected": False}
+
+    return {
+        "connected":    True,
+        "username":     account["username"],
+        "connected_at": account["connected_at"],
+        # Return a masked token so the UI can display something meaningful
+        "token_hint":   account["access_token"][:8] + "••••••••" + account["access_token"][-4:]
+            if account["access_token"] else None,
+    }
+
+
+@router.delete("/discogs/account")
+async def disconnect():
+    """Remove the stored Discogs account from the database."""
+    conn = database.get_connection()
+    try:
+        database.delete_discogs_account(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+# ── OAuth flow ────────────────────────────────────────────────────────────────
+
+@router.post("/discogs/request-token")
+async def request_token(request: Request):
+    """
+    Step 1 of the OAuth flow.
+    Uses app credentials from config — no user input needed.
+    Returns the Discogs authorize URL for the frontend to open.
+    """
+    consumer_key, consumer_secret = _consumer()
+    if not consumer_key or not consumer_secret:
+        return JSONResponse(
+            {"error": "not_configured", "message": "Discogs app credentials are not set in config."},
+            status_code=500,
+        )
+
+    callback = str(request.base_url).rstrip("/") + "/api/discogs/callback"
+
     header = _oauth_header(
-        consumer_key=body.consumerKey,
-        consumer_secret=body.consumerSecret,
+        consumer_key=consumer_key,
+        consumer_secret=consumer_secret,
         callback=callback,
     )
 
@@ -126,16 +174,14 @@ async def request_token(body: RequestTokenBody, request: Request):
     oauth_token_secret = tokens.get("oauth_token_secret", "")
 
     if not oauth_token:
-        return JSONResponse({"error": "missing_token", "message": "Discogs returned no token"}, status_code=502)
+        return JSONResponse(
+            {"error": "missing_token", "message": "Discogs returned no token"},
+            status_code=502,
+        )
 
     _pending[oauth_token] = {
-        "request_secret":  oauth_token_secret,
-        "consumer_key":    body.consumerKey,
-        "consumer_secret": body.consumerSecret,
-        "status":          "pending",
-        "access_token":    None,
-        "access_secret":   None,
-        "username":        None,
+        "request_secret": oauth_token_secret,
+        "status":         "pending",
     }
 
     authorize_url = f"{_AUTHORIZE_URL}?oauth_token={urllib.parse.quote(oauth_token)}"
@@ -145,8 +191,8 @@ async def request_token(body: RequestTokenBody, request: Request):
 @router.get("/discogs/callback")
 async def oauth_callback(oauth_token: str, oauth_verifier: str):
     """
-    Discogs redirects the user's browser here after they approve access.
-    Exchange the request token + verifier for a permanent access token.
+    Step 2: Discogs redirects the user's browser here after they approve.
+    Exchange the request token + verifier for an access token and save it to the DB.
     """
     flow = _pending.get(oauth_token)
     if not flow:
@@ -157,9 +203,11 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
             status_code=400,
         )
 
+    consumer_key, consumer_secret = _consumer()
+
     header = _oauth_header(
-        consumer_key=flow["consumer_key"],
-        consumer_secret=flow["consumer_secret"],
+        consumer_key=consumer_key,
+        consumer_secret=consumer_secret,
         token=oauth_token,
         token_secret=flow["request_secret"],
         verifier=oauth_verifier,
@@ -198,11 +246,11 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
     access_token   = access_tokens.get("oauth_token", "")
     access_secret  = access_tokens.get("oauth_token_secret", "")
 
-    # Fetch the Discogs username while we have credentials
+    # Fetch the Discogs username
     username = None
     identity_header = _oauth_header(
-        consumer_key=flow["consumer_key"],
-        consumer_secret=flow["consumer_secret"],
+        consumer_key=consumer_key,
+        consumer_secret=consumer_secret,
         token=access_token,
         token_secret=access_secret,
     )
@@ -218,12 +266,19 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
         except Exception as exc:
             logger.warning("Could not fetch Discogs identity: %s", exc)
 
-    flow.update(
-        status="authorized",
-        access_token=access_token,
-        access_secret=access_secret,
-        username=username,
-    )
+    # Persist to database
+    connected_at = int(time.time())
+    conn = database.get_connection()
+    try:
+        database.save_discogs_account(conn, access_token, access_secret, username, connected_at)
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Update in-memory state so the polling endpoint knows it's done
+    flow["status"]       = "authorized"
+    flow["username"]     = username
+    flow["connected_at"] = connected_at
 
     return HTMLResponse("""<!DOCTYPE html>
 <html lang="en">
@@ -266,44 +321,37 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
 
 @router.get("/discogs/token-status")
 async def token_status(oauthToken: str):
-    """Poll endpoint: returns the current status for a pending OAuth flow."""
+    """Poll endpoint: returns the current status for a pending OAuth handshake."""
     flow = _pending.get(oauthToken)
     if not flow:
         return {"status": "not_found"}
     if flow["status"] == "authorized":
         return {
             "status":      "authorized",
-            "accessToken": flow["access_token"],
-            "accessSecret": flow["access_secret"],
-            "username":    flow["username"],
+            "username":    flow.get("username"),
+            "connected_at": flow.get("connected_at"),
         }
     return {"status": flow["status"]}
 
 
 @router.get("/discogs/test")
-async def test_connection(request: Request):
-    """
-    Verify that a stored access token is still accepted by Discogs.
-    The frontend sends:  Authorization: Bearer {access_token}
-    The server looks up the matching flow for the consumer credentials.
-    """
-    bearer = request.headers.get("Authorization", "")
-    access_token = bearer.removeprefix("Bearer ").strip()
-    if not access_token:
-        return JSONResponse({"ok": False, "error": "no_token"}, status_code=400)
+async def test_connection():
+    """Verify the stored access token is still accepted by Discogs."""
+    conn = database.get_connection()
+    try:
+        account = database.get_discogs_account(conn)
+    finally:
+        conn.close()
 
-    flow = next(
-        (f for f in _pending.values() if f.get("access_token") == access_token),
-        None,
-    )
-    if not flow:
-        return JSONResponse({"ok": False, "error": "token_not_found"}, status_code=404)
+    if not account:
+        return JSONResponse({"ok": False, "error": "not_connected"}, status_code=404)
 
+    consumer_key, consumer_secret = _consumer()
     header = _oauth_header(
-        consumer_key=flow["consumer_key"],
-        consumer_secret=flow["consumer_secret"],
-        token=access_token,
-        token_secret=flow["access_secret"],
+        consumer_key=consumer_key,
+        consumer_secret=consumer_secret,
+        token=account["access_token"],
+        token_secret=account["access_secret"],
     )
 
     async with httpx.AsyncClient() as client:

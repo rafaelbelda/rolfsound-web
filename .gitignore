@@ -52,6 +52,8 @@ out/
 *.m4a
 library.*
 
+claude.md
+
 music/
 
 config.json

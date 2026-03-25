@@ -69,6 +69,13 @@ def _create_tables(conn):
             title       TEXT,
             thumbnail   TEXT
         );
+        CREATE TABLE IF NOT EXISTS discogs_account (
+            id           INTEGER PRIMARY KEY CHECK (id = 1),
+            access_token  TEXT NOT NULL,
+            access_secret TEXT NOT NULL,
+            username      TEXT,
+            connected_at  INTEGER
+        );
     """)
     try:
         conn.execute("ALTER TABLE tracks ADD COLUMN published_date INTEGER")
@@ -236,3 +243,22 @@ def cleanup_unused_tracks(conn, min_streams, days):
         SELECT * FROM tracks WHERE streams < ? AND date_added < ?
     """, (min_streams, cutoff)).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Discogs account ───────────────────────────────────────────────────────────
+
+def get_discogs_account(conn):
+    row = conn.execute("SELECT * FROM discogs_account WHERE id = 1").fetchone()
+    return dict(row) if row else None
+
+
+def save_discogs_account(conn, access_token: str, access_secret: str,
+                         username: str | None, connected_at: int) -> None:
+    conn.execute("""
+        INSERT OR REPLACE INTO discogs_account (id, access_token, access_secret, username, connected_at)
+        VALUES (1, ?, ?, ?, ?)
+    """, (access_token, access_secret, username, connected_at))
+
+
+def delete_discogs_account(conn) -> None:
+    conn.execute("DELETE FROM discogs_account WHERE id = 1")
