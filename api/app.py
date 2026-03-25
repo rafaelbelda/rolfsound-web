@@ -23,7 +23,7 @@ from youtube.ytdlp import cleanup_temp_files
 from youtube.search import close_client as close_search_client
 from utils import core_client
 
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +209,7 @@ def create_app() -> FastAPI:
     app.include_router(downloads.router,  prefix="/api")
     app.include_router(monitor.router,    prefix="/api")
     app.include_router(recordings.router, prefix="/api")
+    app.include_router(discogs.router,    prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)
