@@ -215,6 +215,10 @@ def create_app() -> FastAPI:
     Path(music_dir).mkdir(parents=True, exist_ok=True)
     app.mount("/thumbs", StaticFiles(directory=music_dir), name="thumbs")
 
+    static_dir = Path(__file__).parent.parent / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
     @app.get("/api/status")
     async def get_status():
         raw = await core_client.get_status()
@@ -225,15 +229,25 @@ def create_app() -> FastAPI:
             )
         return _enrich_status(raw)
 
-    static_dir = DASHBOARD_DIR / "static"
-    if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_dashboard(full_path: str):
-        index = DASHBOARD_DIR / "index.html"
-        if index.exists():
-            return HTMLResponse(content=index.read_text(encoding="utf-8"))
-        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+        # Remove barras sobrando (ex: "library/" vira "library")
+        path = full_path.strip("/")
+        
+        # Como o seu index.html atual é a página de Settings, 
+        # mapeamos tanto a raiz ("") quanto "settings" para ele.
+        if path == "" or path == "settings":
+            filename = "index.html"
+        else:
+            # Para "/library", busca "library.html". Para "/record", "record.html"
+            filename = f"{path}.html"
+
+        filepath = DASHBOARD_DIR / filename
+        
+        if filepath.exists():
+            return HTMLResponse(content=filepath.read_text(encoding="utf-8"))
+            
+        # Retorna 404 se o arquivo HTML não existir na pasta
+        return HTMLResponse(content=f"<h1>404 - Página '{filename}' não encontrada</h1>", status_code=404)
 
     return app

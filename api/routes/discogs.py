@@ -7,12 +7,21 @@ enter them.  The resulting Access Token/Secret are stored in the SQLite DB.
 
 Endpoints
 ---------
+<<<<<<< Updated upstream
 GET    /api/discogs/account        – current connected account (or null)
 DELETE /api/discogs/account        – disconnect (wipes DB record)
 POST   /api/discogs/request-token  – start OAuth: returns authorize URL
 GET    /api/discogs/callback        – Discogs redirects here after approval
 GET    /api/discogs/token-status   – frontend polls until status == "authorized"
 GET    /api/discogs/test           – verify stored token is still valid
+=======
+POST /api/discogs/request-token   – get a Discogs request token and return the authorize URL
+GET  /api/discogs/callback        – Discogs redirects here after user approves
+GET  /api/discogs/token-status    – frontend polls this until status == "authorized"
+GET  /api/discogs/test            – verify a stored access token is still valid
+GET  /api/discogs/collection      – fetch user collection
+GET  /api/discogs/image           – proxy to bypass CORS for WebGL textures
+>>>>>>> Stashed changes
 """
 
 import logging
@@ -21,11 +30,17 @@ import urllib.parse
 import uuid
 
 import httpx
+<<<<<<< Updated upstream
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from db import database
 from utils import config as cfg
+=======
+from fastapi import APIRouter, Request, Query
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel
+>>>>>>> Stashed changes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -367,3 +382,118 @@ async def test_connection():
             logger.error("Discogs test connection error: %s", exc)
 
     return JSONResponse({"ok": False, "error": "request_failed"}, status_code=502)
+
+
+@router.get("/discogs/collection")
+async def get_collection(
+    request: Request,
+    page: int = 1,
+    per_page: int = 100,
+):
+    """
+    Fetch the authenticated user's Discogs collection.
+    Frontend sends:  Authorization: Bearer {access_token}
+    """
+    bearer       = request.headers.get("Authorization", "")
+    access_token = bearer.removeprefix("Bearer ").strip()
+
+    if not access_token:
+        return JSONResponse({"error": "no_token"}, status_code=401)
+
+    flow = next(
+        (f for f in _pending.values() if f.get("access_token") == access_token),
+        None,
+    )
+    if not flow:
+        return JSONResponse({"error": "token_not_found"}, status_code=404)
+
+    username = flow.get("username")
+    header   = _oauth_header(
+        consumer_key=flow["consumer_key"],
+        consumer_secret=flow["consumer_secret"],
+        token=access_token,
+        token_secret=flow["access_secret"],
+    )
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"https://api.discogs.com/users/{username}/collection/folders/0/releases",
+                headers={"Authorization": header, "User-Agent": _USER_AGENT},
+                params={
+                    "page":       page,
+                    "per_page":   per_page,
+                    "sort":       "added",
+                    "sort_order": "desc",
+                },
+                timeout=20,
+            )
+        except httpx.RequestError as exc:
+            logger.error("Discogs collection fetch error: %s", exc)
+            return JSONResponse({"error": str(exc)}, status_code=502)
+
+    if resp.status_code != 200:
+        logger.error("Discogs collection %d: %s", resp.status_code, resp.text)
+        return JSONResponse({"error": resp.text}, status_code=resp.status_code)
+
+    data     = resp.json()
+    releases = []
+
+    for item in data.get("releases", []):
+        bi = item.get("basic_information", {})
+
+        # Clean artist names (Discogs appends " (2)" etc. for disambiguation)
+        raw_artists = bi.get("artists", [])
+        artist = " / ".join(
+            a.get("name", "").rstrip(" 0123456789").strip("() ").strip()
+            for a in raw_artists
+        ) if raw_artists else "Unknown Artist"
+
+        releases.append({
+            "id":          item.get("id"),
+            "instance_id": item.get("instance_id"),
+            "date_added":  item.get("date_added"),
+            "title":       bi.get("title",  "Unknown Title"),
+            "year":        bi.get("year"),
+            "artist":      artist,
+            "cover":       bi.get("cover_image", ""),
+            "thumb":       bi.get("thumb", ""),
+            "formats":     [f.get("name", "") for f in bi.get("formats", [])],
+            "labels":      [l.get("name", "") for l in bi.get("labels",  [])],
+            "genres":      bi.get("genres", []),
+            "styles":      bi.get("styles", []),
+            "discogs_id":  bi.get("id"),
+        })
+
+    return {
+        "releases":   releases,
+        "pagination": data.get("pagination", {}),
+        "username":   username,
+    }
+
+
+@router.get("/discogs/image")
+async def proxy_image(url: str = Query(...)):
+    """
+    Proxy para buscar imagens do Discogs e contornar o bloqueio de CORS do WebGL.
+    O Discogs exige um User-Agent válido para retornar imagens.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                url, 
+                headers={"User-Agent": _USER_AGENT},
+                timeout=15
+            )
+            
+            if resp.status_code != 200:
+                logger.error("Erro no proxy de imagem (Status %s): %s", resp.status_code, resp.text)
+                return Response(status_code=resp.status_code)
+
+            return Response(
+                content=resp.content, 
+                media_type=resp.headers.get("Content-Type", "image/jpeg")
+            )
+        except Exception as exc:
+            logger.error("Erro ao buscar imagem no proxy: %s", exc)
+            return Response(status_code=502)
