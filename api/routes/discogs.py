@@ -1,7 +1,6 @@
 # api/routes/discogs.py
 """
-Discogs OAuth 1.0a flow - Arquitetura de Banco de Dados.
-As chaves de acesso são persistidas no SQLite via db/database.py.
+Discogs OAuth 1.0a flow - Arquitetura de Banco de Dados com Sync Local.
 """
 
 import logging
@@ -9,9 +8,11 @@ import time
 import urllib.parse
 import uuid
 import httpx
+import os
 
 from db import database
 from utils import config as cfg
+from utils.image_processor import process_release_cover
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -108,87 +109,121 @@ async def disconnect():
     return {"ok": True}
 
 
-# ── Coleção e Imagens (Sincronizados com DB) ────────────────────────────────
+# ── Coleção 3D (Otimizada para Hardware) ────────────────────────────────
 
 @router.get("/discogs/collection")
-async def get_collection(page: int = 1, per_page: int = 50):
-    """Busca a coleção do usuário usando o token persistido no banco."""
+async def get_collection():
+    """
+    Leitura ultra-rápida (1 ms). O front-end chama esta rota.
+    Não há internet envolvida. Apenas lê o SQLite e entrega os dados formatados.
+    """
     conn = database.get_connection()
     try:
-        account = database.get_discogs_account(conn)
+        releases = database.get_discogs_collection(conn)
+        
+        colecao_formatada = []
+        for r in releases:
+            colecao_formatada.append({
+                "title": r["title"],
+                "artist": r["artist"],
+                "cover": r["local_cover_url"], # Caminho local: /static/covers/...
+                "spine_color": r["spine_color"] # Cor HEX já calculada!
+            })
+            
+        return {"releases": colecao_formatada}
     finally:
         conn.close()
 
-    if not account:
-        return JSONResponse({"error": "not_connected"}, status_code=404)
 
-    ck, cs = _consumer()
-    header = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
-
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
-                headers={"Authorization": header, "User-Agent": _USER_AGENT},
-                params={
-                    "page": page,
-                    "per_page": per_page,
-                    "sort": "added",
-                    "sort_order": "desc",
-                },
-                timeout=20
-            )
-            
-            if resp.status_code != 200:
-                return JSONResponse({"error": resp.text}, status_code=resp.status_code)
-
-            data = resp.json()
-            releases = []
-            for item in data.get("releases", []):
-                bi = item.get("basic_information", {})
-                releases.append({
-                    "title": bi.get("title", "Unknown Title"),
-                    "artist": " / ".join([a.get("name", "").rstrip(" 0123456789").strip("() ") for a in bi.get("artists", [])]),
-                    "cover": bi.get("cover_image", ""),
-                    "thumb": bi.get("thumb", "")
-                })
-            
-            return {"releases": releases, "pagination": data.get("pagination", {})}
-            
-        except Exception as exc:
-            logger.error("Erro ao buscar coleção: %s", exc)
-            return JSONResponse({"error": str(exc)}, status_code=502)
-
-
-@router.get("/discogs/image")
-async def proxy_image(url: str = Query(...)):
-    """Proxy de imagem assinado via servidor para evitar CORS no Three.js."""
+@router.post("/discogs/sync")
+async def sync_collection():
+    """
+    Sincronização de Estado Profunda (State Reconciliation).
+    Lê todas as páginas do Discogs, compara com o SQLite, 
+    adiciona os novos (baixando as capas) e destrói os vendidos (limpando o SD).
+    """
     conn = database.get_connection()
     try:
         account = database.get_discogs_account(conn)
-    finally:
-        conn.close()
+        if not account:
+            return JSONResponse({"error": "not_connected"}, status_code=400)
 
-    headers = {"User-Agent": _USER_AGENT}
-    
-    # Assina o download da imagem com o token do banco se existir
-    if account:
         ck, cs = _consumer()
-        headers["Authorization"] = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
+        header = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(url, headers=headers, timeout=15)
-            if resp.status_code != 200:
-                return Response(status_code=resp.status_code)
+        remote_items = {}
+        page = 1
+        total_pages = 1
 
-            return Response(
-                content=resp.content, 
-                media_type=resp.headers.get("Content-Type", "image/jpeg")
-            )
-        except Exception as exc:
-            logger.error("Erro no proxy de imagem: %s", exc)
-            return Response(status_code=502)
+        # 1. VARREDURA COMPLETA NO DISCOGS (Paginando para pegar a coleção inteira)
+        async with httpx.AsyncClient() as client:
+            while page <= total_pages:
+                resp = await client.get(
+                    f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
+                    headers={"Authorization": header, "User-Agent": _USER_AGENT},
+                    params={"page": page, "per_page": 100}, # Puxa de 100 em 100 para ser mais rápido
+                    timeout=30
+                )
+
+                if resp.status_code != 200:
+                    return JSONResponse({"error": resp.text}, status_code=resp.status_code)
+
+                data = resp.json()
+                total_pages = data.get("pagination", {}).get("pages", 1)
+
+                for item in data.get("releases", []):
+                    remote_items[item["id"]] = item
+                
+                page += 1
+
+        # 2. A MATEMÁTICA DOS CONJUNTOS (A Mágica da Conciliação)
+        remote_ids = set(remote_items.keys())
+        local_ids = database.get_all_discogs_ids(conn)
+
+        ids_to_add = remote_ids - local_ids       # O que tem na nuvem, mas não tem aqui.
+        ids_to_remove = local_ids - remote_ids    # O que tem aqui, mas sumiu da nuvem.
+
+        # 3. O CAMINHÃO DE LIXO (Removendo os discos vendidos)
+        for rid in ids_to_remove:
+            # Apaga do Banco de Dados
+            database.delete_discogs_release(conn, rid)
+            
+            # Apaga a imagem física do cartão SD para liberar espaço!
+            file_path = os.path.join("static", "covers", f"{rid}.jpg")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        # 4. O MORDOMO (Baixando os discos novos)
+        for rid in ids_to_add:
+            item = remote_items[rid]
+            bi = item.get("basic_information", {})
+            title = bi.get("title", "Unknown Title")
+            artist = " / ".join([a.get("name", "").rstrip(" 0123456789").strip("() ") for a in bi.get("artists", [])])
+            cover_url = bi.get("cover_image", "")
+
+            if cover_url:
+                processed = await process_release_cover(str(rid), cover_url, {"User-Agent": _USER_AGENT})
+                local_url = processed["local_url"]
+                spine_color = processed["spine_color"]
+            else:
+                local_url = ""
+                spine_color = "#111111"
+
+            database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, int(time.time()))
+        
+        conn.commit()
+        return {
+            "ok": True, 
+            "message": "Sincronização perfeita.",
+            "added": len(ids_to_add),
+            "removed": len(ids_to_remove)
+        }
+        
+    except Exception as exc:
+        logger.error("Erro no sync: %s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=502)
+    finally:
+        conn.close()
 
 
 # ── OAuth Handshake (Fluxo de Conexão) ──────────────────────────────────────
@@ -241,13 +276,11 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
     access_token = ts["oauth_token"]
     access_secret = ts["oauth_token_secret"]
 
-    # Busca o Username antes de salvar
     id_h = _oauth_header(ck, cs, access_token, access_secret)
     async with httpx.AsyncClient() as client:
         id_r = await client.get(_IDENTITY_URL, headers={"Authorization": id_h, "User-Agent": _USER_AGENT})
         username = id_r.json().get("username")
 
-    # SALVA NO BANCO DE DADOS
     conn = database.get_connection()
     try:
         database.save_discogs_account(conn, access_token, access_secret, username, int(time.time()))
@@ -289,3 +322,41 @@ async def test_connection():
     async with httpx.AsyncClient() as client:
         r = await client.get(_IDENTITY_URL, headers={"Authorization": h, "User-Agent": _USER_AGENT})
         return {"ok": r.status_code == 200, "username": account["username"]}
+
+@router.get("/discogs/check-updates")
+async def check_updates():
+    """
+    Ping bidirecional: Detecta tanto compras (adições) quanto vendas (remoções).
+    """
+    conn = database.get_connection()
+    try:
+        account = database.get_discogs_account(conn)
+        if not account:
+            return {"has_updates": False}
+
+        local_count = conn.execute("SELECT COUNT(*) FROM discogs_collection").fetchone()[0]
+
+        ck, cs = _consumer()
+        header = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.discogs.com/users/{account['username']}/collection/folders/0",
+                headers={"Authorization": header, "User-Agent": _USER_AGENT},
+                timeout=10
+            )
+            
+            if resp.status_code == 200:
+                discogs_count = resp.json().get("count", 0)
+                diff = discogs_count - local_count
+                
+                # MÁGICA: Diferente de zero significa que a coleção mudou (pra mais ou pra menos)
+                if diff != 0:
+                    return {"has_updates": True, "diff": diff}
+                    
+        return {"has_updates": False}
+    except Exception as exc:
+        logger.error("Erro no check-updates: %s", exc)
+        return {"has_updates": False}
+    finally:
+        conn.close()

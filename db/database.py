@@ -70,11 +70,21 @@ def _create_tables(conn):
             thumbnail   TEXT
         );
         CREATE TABLE IF NOT EXISTS discogs_account (
-            id           INTEGER PRIMARY KEY CHECK (id = 1),
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
             access_token  TEXT NOT NULL,
             access_secret TEXT NOT NULL,
             username      TEXT,
             connected_at  INTEGER
+        );
+        
+        -- NOVA TABELA: O CACHE 3D INSTANTÂNEO DA COLEÇÃO
+        CREATE TABLE IF NOT EXISTS discogs_collection (
+            release_id      INTEGER PRIMARY KEY,
+            title           TEXT,
+            artist          TEXT,
+            local_cover_url TEXT,
+            spine_color     TEXT,
+            date_added      INTEGER
         );
     """)
     try:
@@ -262,3 +272,52 @@ def save_discogs_account(conn, access_token: str, access_secret: str,
 
 def delete_discogs_account(conn) -> None:
     conn.execute("DELETE FROM discogs_account WHERE id = 1")
+
+
+# ── Discogs Collection ─────────────────────────────
+
+def upsert_discogs_release(conn, release_id: int, title: str, artist: str, 
+                           local_cover_url: str, spine_color: str, date_added: int) -> None:
+    """
+    Insere ou atualiza um disco na coleção local. 
+    Usado pelo nosso 'mordomo' após baixar a imagem e calcular a cor.
+    """
+    conn.execute("""
+        INSERT OR REPLACE INTO discogs_collection 
+        (release_id, title, artist, local_cover_url, spine_color, date_added)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (release_id, title, artist, local_cover_url, spine_color, date_added))
+
+
+def get_discogs_collection(conn) -> list[dict]:
+    """
+    Retorna a coleção inteira para a interface 3D.
+    Como os dados já estão mastigados (cor em HEX e imagem local), a UI carrega instantaneamente.
+    """
+    rows = conn.execute("""
+        SELECT * FROM discogs_collection 
+        ORDER BY date_added DESC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+def get_all_discogs_ids(conn) -> set:
+    """
+    Retorna um 'Set' matemático com todos os IDs locais.
+    Isso permite comparações ultra-rápidas no Python (O(1)).
+    """
+    rows = conn.execute("SELECT release_id FROM discogs_collection").fetchall()
+    return {r["release_id"] for r in rows}
+
+
+def delete_discogs_release(conn, release_id: int) -> None:
+    """
+    Remove o disco da prateleira digital do Rolfsound.
+    """
+    conn.execute("DELETE FROM discogs_collection WHERE release_id = ?", (release_id,))
+
+
+def clear_discogs_collection(conn) -> None:
+    """
+    Útil caso o usuário queira forçar uma sincronização do zero.
+    """
+    conn.execute("DELETE FROM discogs_collection")

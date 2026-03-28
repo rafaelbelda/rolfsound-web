@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rolfsound — Settings</title>
+  
+  <link rel="stylesheet" href="/static/css/global.css">
+  
+  <script type="module" src="/static/js/RolfsoundIsland.js"></script>
+
+  <style>
+    /* ─── CSS ESPECÍFICO DE SETTINGS (Dark Mode & Glassmorphism) ─── */
+    
+    body {
+      overflow-y: auto; /* Permite rolar a página caso as configurações cresçam */
+    }
+
+    /* Esconde o cursor padrão do sistema para o nosso cursor atuar */
+    *, a, button {
+        cursor: none !important;
+    }
+
+    /* Container Centralizado */
+    .settings-container {
+      max-width: 680px;
+      margin: 120px auto 60px; /* Margem no topo para não encostar na Ilha */
+      padding: 0 24px;
+      position: relative;
+      z-index: 10; /* Fica acima do blur de fundo */
+    }
+
+    .page-header {
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .page-title {
+      font-size: 20px;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      margin-bottom: 6px;
+      color: var(--white);
+    }
+
+    .page-desc {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.4);
+      line-height: 1.6;
+    }
+
+    /* ─── Card Principal Estilo Rolfsound ─── */
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.4);
+      margin-bottom: 16px;
+      margin-left: 4px;
+    }
+
+    .glass-card {
+      background: rgba(15, 15, 15, 0.6);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    }
+
+    .glass-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: var(--white);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .brand-logo span {
+      color: var(--black);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-label { font-weight: 500; font-size: 14px; color: var(--white); }
+    .brand-url { font-size: 11px; color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+
+    /* Badges de Status Modernos */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-badge.connected { color: #4ade80; } /* Verde vibrante para tema escuro */
+    .status-badge.connected .status-dot { background: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, 0.5); }
+    
+    .status-badge.disconnected { color: rgba(255, 255, 255, 0.4); }
+    .status-badge.disconnected .status-dot { background: rgba(255, 255, 255, 0.2); }
+    
+    .status-badge.connecting { color: #fbbf24; } /* Amarelo vibrante */
+    .status-badge.connecting .status-dot {
+      background: #fbbf24;
+      animation: pulse 1.2s ease-in-out infinite;
+      box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ─── Corpos do Card ─── */
+    .card-body { padding: 32px 24px; }
+
+    /* Disconnected State */
+    .connect-text {
+      text-align: center;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+      line-height: 1.7;
+      max-width: 380px;
+      margin: 0 auto 24px;
+    }
+
+    .action-center {
+      display: flex;
+      justify-content: center;
+    }
+
+    /* Connecting State */
+    .connecting-url {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.05);
+      padding: 6px 12px;
+      border-radius: 6px;
+      display: inline-block;
+      margin: 12px 0 24px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .cancel-link {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: color 0.2s;
+    }
+    .cancel-link:hover { color: var(--white); }
+
+    /* Connected State */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .info-field label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.4);
+      margin-bottom: 6px;
+    }
+
+    .info-field .value {
+      font-size: 13px;
+      color: var(--white);
+    }
+
+    .info-field .value.mono {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 6px 10px;
+      border-radius: 6px;
+      display: inline-block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .permissions-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 32px;
+    }
+
+    .perm-tag {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(74, 222, 128, 0.1);
+      color: #4ade80;
+      border: 1px solid rgba(74, 222, 128, 0.2);
+    }
+
+    /* ─── Botões Estilo Rolfsound ─── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn:disabled { opacity: 0.4; pointer-events: none; }
+
+    .btn-primary {
+      background: var(--white);
+      color: var(--black);
+    }
+    .btn-primary:hover { background: rgba(255,255,255,0.8); }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--white);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+
+    .btn-danger {
+      background: rgba(220, 38, 38, 0.1);
+      color: #f87171;
+      border-color: rgba(220, 38, 38, 0.2);
+    }
+    .btn-danger:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+
+    .btn-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* ─── Notice ─── */
+    .notice {
+      margin-top: 16px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-left: 3px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.6;
+    }
+
+    .notice a {
+      color: var(--white);
+      text-underline-offset: 3px;
+    }
+
+    /* ─── State visibility ─── */
+    [data-state] { display: none; }
+    #app[data-app-state="disconnected"] [data-state="disconnected"],
+    #app[data-app-state="connecting"]  [data-state="connecting"],
+    #app[data-app-state="connected"]   [data-state="connected"] { display: block; }
+
+    .status-badge { display: none; }
+    #app[data-app-state="disconnected"] .status-badge.disconnected,
+    #app[data-app-state="connecting"]   .status-badge.connecting,
+    #app[data-app-state="connected"]    .status-badge.connected { display: flex; }
+  </style>
+</head>
+<body>
+
+  <div id="cursor-dot"></div>
+
+  <rolfsound-island active-tab="settings"></rolfsound-island>
+
+  <div class="bg-layer active" style="background-color: var(--black);"></div>
+
+  <div id="app" data-app-state="disconnected">
+    <main class="settings-container">
+      
+      <div class="page-header">
+        <h1 class="page-title">Settings</h1>
+        <p class="page-desc">System preferences and integrations for the Rolfsound ecosystem.</p>
+      </div>
+
+      <section class="section">
+        <div class="section-title">Database Integration</div>
+
+        <div class="glass-card">
+          <div class="glass-header">
+            <div class="brand-group">
+              <div class="brand-logo"><span>D</span></div>
+              <div>
+                <div class="brand-label">Discogs API</div>
+                <div class="brand-url">discogs.com</div>
+              </div>
+            </div>
+            <span class="status-badge disconnected"><span class="status-dot"></span>Not connected</span>
+            <span class="status-badge connecting"><span class="status-dot"></span>Connecting</span>
+            <span class="status-badge connected"><span class="status-dot"></span>Connected</span>
+          </div>
+
+          <div data-state="disconnected" class="card-body">
+            <p class="connect-text">Connect your Discogs account to securely sync your physical collection, fetch high-resolution metadata, and manage your library directly from Rolfsound.</p>
+            <div class="action-center">
+              <button class="btn btn-primary hover-target" onclick="startOAuth()">Authenticate via Discogs</button>
+            </div>
+          </div>
+
+          <div data-state="connecting" class="card-body" style="text-align: center;">
+            <p style="font-size: 13px; color: var(--white);">Waiting for your authorisation on Discogs...</p>
+            <div class="connecting-url" id="auth-url-display">discogs.com/oauth/authorize?…</div>
+            <div style="display:flex; gap:16px; justify-content:center; align-items:center">
+              <button class="btn btn-secondary hover-target" onclick="openAuthWindow()">Reopen Window</button>
+              <span class="cancel-link hover-target" onclick="cancelOAuth()">Cancel</span>
+            </div>
+          </div>
+
+          <div data-state="connected" class="card-body">
+            <div class="info-grid">
+              <div class="info-field">
+                <label>Username</label>
+                <div class="value" id="display-username">—</div>
+              </div>
+              <div class="info-field">
+                <label>Profile Link</label>
+                <div class="value" id="display-url">—</div>
+              </div>
+              <div class="info-field">
+                <label>Access Token</label>
+                <div class="value mono" id="display-token" style="width: 100%;">—</div>
+              </div>
+              <div class="info-field">
+                <label>Authorised Since</label>
+                <div class="value" id="display-date">—</div>
+              </div>
+            </div>
+
+            <div class="permissions-row">
+              <span class="perm-tag">Read collection</span>
+              <span class="perm-tag">Write collection</span>
+              <span class="perm-tag">Search database</span>
+            </div>
+
+            <div class="btn-actions">
+              <button class="btn btn-secondary hover-target" onclick="testConnection()" id="test-btn">Test Connection</button>
+              <button class="btn btn-danger hover-target" onclick="disconnect()">Disconnect Device</button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="notice">
+          Your OAuth token is encrypted and stored locally in this machine's environment. It remains valid indefinitely until you manually revoke access via <a href="https://www.discogs.com/settings/applications" target="_blank" class="hover-target">discogs.com/settings/applications</a>.
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script type="module">
+    // 1. Inicia o Motor do Cursor Personalizado
+    import Cursor from '/static/js/Cursor.js';
+    const meuCursor = new Cursor();
+
+    // 2. Lógica do Painel de Settings
+    const app = document.getElementById('app');
+    let authWindow = null;
+    let authPollInterval = null;
+
+    // Tornar as funções globais para o HTML acessá-las
+    window.startOAuth = async function() {
+      setState('connecting');
+      try {
+        const res = await fetch('/api/discogs/request-token', { method: 'POST' });
+        if (!res.ok) throw new Error(await res.text());
+        const { authorizeUrl, oauthToken } = await res.json();
+
+        const display = document.getElementById('auth-url-display');
+        display.textContent = authorizeUrl.length > 50 ? authorizeUrl.slice(0, 50) + '…' : authorizeUrl;
+        display.dataset.fullUrl = authorizeUrl;
+
+        window.openAuthWindow(authorizeUrl);
+
+        authPollInterval = setInterval(async () => {
+          try {
+            const poll = await fetch(`/api/discogs/token-status?oauthToken=${oauthToken}`);
+            const data = await poll.json();
+            if (data.status === 'authorized') {
+              clearInterval(authPollInterval);
+              onAuthorized(data);
+            }
+          } catch (_) {}
+        }, 1500);
+
+      } catch (err) {
+        setState('disconnected');
+        alert('Could not start OAuth flow. Is the Rolfsound backend running?\n\n' + err.message);
+      }
+    };
+
+    window.openAuthWindow = function(url) {
+      const target = url || document.getElementById('auth-url-display').dataset.fullUrl;
+      if (!target) return;
+      if (authWindow && !authWindow.closed) authWindow.focus();
+      else authWindow = window.open(target, '_blank', 'width=700,height=600');
+    };
+
+    window.cancelOAuth = function() {
+      clearInterval(authPollInterval);
+      if (authWindow) { authWindow.close(); authWindow = null; }
+      setState('disconnected');
+    };
+
+    function onAuthorized(data) {
+      populateConnectedUI({ username: data.username, connected_at: data.connected_at, token_hint: null });
+      setState('connected');
+      if (authWindow) { authWindow.close(); authWindow = null; }
+      showToast('Discogs account successfully linked.');
+    }
+
+    window.testConnection = async function() {
+      const btn = document.getElementById('test-btn');
+      btn.disabled = true;
+      btn.textContent = 'Testing…';
+      try {
+        const res = await fetch('/api/discogs/test');
+        const data = await res.json();
+        if (data.ok) {
+          showToast(`Connection OK — Pinged as ${data.username}.`);
+        } else {
+          showToast('Test failed. Please reconnect.', true);
+        }
+      } catch {
+        showToast('Could not reach backend server.', true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test Connection';
+      }
+    };
+
+    window.disconnect = async function() {
+      if (!confirm('Disconnect your Discogs account from this local environment?')) return;
+      await fetch('/api/discogs/account', { method: 'DELETE' });
+      setState('disconnected');
+      showToast('Account disconnected.');
+    };
+
+    function populateConnectedUI({ username, connected_at, token_hint }) {
+      document.getElementById('display-username').textContent = username || '—';
+      document.getElementById('display-url').textContent = username ? `discogs.com/user/${username}` : '—';
+      document.getElementById('display-token').textContent = token_hint || '••••••••••••••••';
+      document.getElementById('display-date').textContent = connected_at
+        ? new Date(connected_at * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '—';
+    }
+
+    function setState(s) { app.dataset.appState = s; }
+
+    function showToast(msg, error = false) {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      Object.assign(t.style, {
+        position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
+        background: error ? 'rgba(220, 38, 38, 0.9)' : 'rgba(255, 255, 255, 0.9)', 
+        color: error ? '#ffffff' : '#000000',
+        backdropFilter: 'blur(10px)',
+        padding: '12px 24px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+        letterSpacing: '0.05em', textTransform: 'uppercase', zIndex: 9999, opacity: 0,
+        transition: 'opacity 0.3s ease', whiteSpace: 'nowrap',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+        pointerEvents: 'none'
+      });
+      document.body.appendChild(t);
+      requestAnimationFrame(() => { t.style.opacity = 1; });
+      setTimeout(() => {
+        t.style.opacity = 0;
+        setTimeout(() => t.remove(), 300);
+      }, 3000);
+    }
+
+    // Init: Check existing connection on page load
+    (async function init() {
+      try {
+        const res = await fetch('/api/discogs/account');
+        const data = await res.json();
+        if (data.connected) {
+          populateConnectedUI(data);
+          setState('connected');
+        }
+      } catch (_) {
+        console.warn("Rolfsound backend unreachable for initial check.");
+      }
+    })();
+  </script>
+</body>
+</html>

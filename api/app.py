@@ -234,13 +234,15 @@ def create_app() -> FastAPI:
         # Remove barras sobrando (ex: "library/" vira "library")
         path = full_path.strip("/")
         
-        # Como o seu index.html atual é a página de Settings, 
-        # mapeamos tanto a raiz ("") quanto "settings" para ele.
-        if path == "" or path == "settings":
-            filename = "index.html"
+        # ─── MAPEAMENTO EXATO DE ROTAS ───
+        if path == "":
+            filename = "index.html"             # A sua futura home page 
+        elif path == "settings":
+            filename = "settings.html"          # O arquivo que renomeamos
+        elif path == "library":
+            filename = "vinyl-library.html"     # O nome real do seu arquivo 3D!
         else:
-            # Para "/library", busca "library.html". Para "/record", "record.html"
-            filename = f"{path}.html"
+            filename = f"{path}.html"           # Fallback para outras páginas (ex: /record)
 
         filepath = DASHBOARD_DIR / filename
         
