@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rolfsound — Next Gen Library</title>
+  
+  <link rel="stylesheet" href="/static/css/global.css">
+  
+  <script type="module" src="/static/js/RolfsoundIsland.js"></script>
+</head>
+<body>
+
+  <div id="cursor-dot"></div>
+  <rolfsound-island active-tab="library"></rolfsound-island>
+  <div class="bg-layer active" style="background-color: var(--black);"></div>
+
+  <section id="view-vinyl-library" class="view-layer active">
+    {% include 'views/vinyl-library.html' %}
+  </section>
+
+  <section id="view-settings" class="view-layer">
+    {% include 'views/settings.html' %}
+  </section>
+
+  <script type="module">
+    import Cursor from '/static/js/Cursor.js';
+    const meuCursor = new Cursor();
+
+    const island = document.querySelector('rolfsound-island');
+    const views = {
+        // A aba 'library' agora aponta corretamente para a section do vinyl-library
+        'library': document.getElementById('view-vinyl-library'),
+        'settings': document.getElementById('view-settings')
+    };
+
+    // Ajusta a aba inicial baseada na URL
+    const path = window.location.pathname.replace('/', '') || 'library';
+    if (views[path]) {
+        island.setAttribute('active-tab', path);
+        Object.values(views).forEach(v => v.classList.remove('active'));
+        views[path].classList.add('active');
+    }
+
+    // Transição suave quando clica na Ilha
+    island.addEventListener('rolfsound-navigate', (e) => {
+        const targetView = e.detail.view;
+        
+        Object.values(views).forEach(v => { if(v) v.classList.remove('active'); });
+        if(views[targetView]) views[targetView].classList.add('active');
+        
+        // Mantém a URL limpa (ex: /library)
+        const newUrl = targetView === 'library' ? '/library' : `/${targetView}`;
+        window.history.pushState({}, '', newUrl);
+    });
+  </script>
+</body>
+</html>

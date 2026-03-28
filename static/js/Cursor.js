@@ -1,11 +1,15 @@
-// /static/js/Cursor.js
+// static/js/Cursor.js
 
 export default class Cursor {
   constructor() {
     this.dot = document.getElementById('cursor-dot');
-    this.mouse = { x: 0, y: 0 }; // Posição real do mouse
-    this.pos = { x: 0, y: 0 };   // Posição da pílula (suavizada)
-    this.speed = 0.15;           // Velocidade da inércia
+    this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    
+    // ─── O SEGREDO DO FEELING PREMIUM: Múltiplas Velocidades ───
+    this.speedFree = 0.75;     // Livre: Muito rápido, responsivo, elimina o lag
+    this.speedMagnetic = 0.2;  // No botão: Inércia pesada para o efeito "chiclete"
+    
     this.isHovering = false;
     this.currentTarget = null;
     
@@ -37,7 +41,7 @@ export default class Cursor {
         const rect = target.getBoundingClientRect();
         const style = window.getComputedStyle(target);
 
-        // O container assume o tamanho do botão
+        // A pílula assume a exata forma geométrica do botão alvo
         this.dot.style.width = `${rect.width}px`;
         this.dot.style.height = `${rect.height}px`;
         this.dot.style.borderRadius = style.borderRadius;
@@ -47,42 +51,47 @@ export default class Cursor {
       this.currentTarget = null;
       this.dot.classList.remove('hovering');
 
-      // Volta a ser a bolinha normal
+      // Volta a ser a bolinha ágil
       this.dot.style.width = '5px';
       this.dot.style.height = '5px';
       this.dot.style.borderRadius = '50%';
       
-      // Reseta o deslocamento da bolinha interna
       this.dot.style.setProperty('--dx', '0px');
       this.dot.style.setProperty('--dy', '0px');
     }
   }
 
   render() {
-    let targetX, targetY;
+    let targetX, targetY, currentSpeed;
 
     if (this.isHovering && this.currentTarget) {
-      // 1. O container (pílula) foca no centro do botão
+      // 1. A PÍLULA foca no centro geométrico do botão
       const rect = this.currentTarget.getBoundingClientRect();
       targetX = rect.left + rect.width / 2;
       targetY = rect.top + rect.height / 2;
 
-      // 2. Calculamos a distância entre o centro e o mouse real
-      // Reduzimos o movimento em 40% (0.4) para a bolinha não sair da pílula
+      // 2. A BOLINHA INTERNA compensa a distância instantaneamente (sem lag)
+      // O fator 0.4 impede que a bolinha vaze para fora da pílula
       const dx = (this.mouse.x - targetX) * 0.4;
       const dy = (this.mouse.y - targetY) * 0.4;
 
       this.dot.style.setProperty('--dx', `${dx}px`);
       this.dot.style.setProperty('--dy', `${dy}px`);
+      
+      // Usa a velocidade pegajosa para a pílula balançar
+      currentSpeed = this.speedMagnetic;
     } else {
-      // Fora de botões, a pílula (que agora é a bolinha) segue o mouse
+      // Fora dos botões, o cursor segue o mouse diretamente
       targetX = this.mouse.x;
       targetY = this.mouse.y;
+      
+      // Usa a velocidade super rápida para evitar a sensação de travamento
+      currentSpeed = this.speedFree;
     }
 
-    // Inércia suave (Lerp)
-    this.pos.x += (targetX - this.pos.x) * this.speed;
-    this.pos.y += (targetY - this.pos.y) * this.speed;
+    // Aplica a matemática do Lerp dinâmico
+    this.pos.x += (targetX - this.pos.x) * currentSpeed;
+    this.pos.y += (targetY - this.pos.y) * currentSpeed;
 
     this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0)`;
     

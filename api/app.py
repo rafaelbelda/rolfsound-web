@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from utils import config as cfg
 from db import database
@@ -229,27 +230,25 @@ def create_app() -> FastAPI:
             )
         return _enrich_status(raw)
 
+    # ─── INICIALIZA O MOTOR JINJA2 ───
+    templates = Jinja2Templates(directory=str(DASHBOARD_DIR))
+
     @app.get("/{full_path:path}", response_class=HTMLResponse)
-    async def serve_dashboard(full_path: str):
-        # Remove barras sobrando (ex: "library/" vira "library")
+    async def serve_dashboard(request: Request, full_path: str): 
         path = full_path.strip("/")
         
-        # ─── MAPEAMENTO EXATO DE ROTAS ───
-        if path == "":
-            filename = "index.html"             # A sua futura home page 
-        elif path == "settings":
-            filename = "settings.html"          # O arquivo que renomeamos
-        elif path == "library":
-            filename = "vinyl-library.html"     # O nome real do seu arquivo 3D!
-        else:
-            filename = f"{path}.html"           # Fallback para outras páginas (ex: /record)
-
+        # ─── ROTEAMENTO DA SPA (APP SHELL) ───
+        # Se o usuário acessar a Home (""), a Library ou as Configurações, 
+        # nós sempre devolvemos a "Casca" (index.html).
+        if path in ["", "library", "vinyl-library", "settings"]:
+            return templates.TemplateResponse(request=request, name="index.html")
+        # ─── FALLBACK PARA OUTRAS PÁGINAS ───
+        filename = f"{path}.html"
         filepath = DASHBOARD_DIR / filename
         
         if filepath.exists():
             return HTMLResponse(content=filepath.read_text(encoding="utf-8"))
             
-        # Retorna 404 se o arquivo HTML não existir na pasta
         return HTMLResponse(content=f"<h1>404 - Página '{filename}' não encontrada</h1>", status_code=404)
 
-    return app
+    return app 
