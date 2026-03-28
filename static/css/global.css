@@ -131,11 +131,11 @@ html, body {
 }
 
 /* O Motor 3D fica fixo no fundo. Quando não estiver ativo, ele apenas afunda e borra, mas não some! */
-#view-library {
+#view-vinyl-library {
   z-index: 10;
   transform: scale(1); /* O 3D não lida bem com transform scale CSS, mudamos só o blur */
 }
-#view-library:not(.active) {
+#view-vinyl-library:not(.active) {
   opacity: 0.4; /* Fica escuro */
   filter: blur(15px); /* Borra como se uma lente perdesse o foco */
   pointer-events: none;

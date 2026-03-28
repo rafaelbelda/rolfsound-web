@@ -45,13 +45,25 @@
     // Transição suave quando clica na Ilha
     island.addEventListener('rolfsound-navigate', (e) => {
         const targetView = e.detail.view;
-        
+
         Object.values(views).forEach(v => { if(v) v.classList.remove('active'); });
         if(views[targetView]) views[targetView].classList.add('active');
-        
+
         // Mantém a URL limpa (ex: /library)
         const newUrl = targetView === 'library' ? '/library' : `/${targetView}`;
         window.history.pushState({}, '', newUrl);
+    });
+
+    function activateView(view) {
+        const target = views[view] || views['library'];
+        island.setAttribute('active-tab', view in views ? view : 'library');
+        Object.values(views).forEach(v => v.classList.remove('active'));
+        target.classList.add('active');
+    }
+
+    window.addEventListener('popstate', () => {
+        const view = window.location.pathname.replace('/', '') || 'library';
+        activateView(view);
     });
   </script>
 </body>

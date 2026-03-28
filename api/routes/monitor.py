@@ -80,23 +80,7 @@ async def set_auto_record(req: AutoRecordRequest):
 
 @router.post("/monitor/threshold")
 async def set_threshold(req: ThresholdRequest):
-    """
-    Forward threshold change to core.
-    Clamping is done by the core (RecorderService.set_threshold),
-    but we validate the range here too so bad requests never reach core.
-    """
-    # Fetch current bounds to validate
-    status = await core_client.get_status()
-    if status is None:
-        raise HTTPException(status_code=503, detail="Core unavailable")
-
-    recorder = status.get("recorder", {})
-    mn = recorder.get("min_threshold", 0.001)
-    mx = recorder.get("max_threshold", 0.1)
-
-    value = max(mn, min(mx, req.value))
-
-    result = await core_client._post("/recorder/threshold", {"value": value})
+    result = await core_client._post("/recorder/threshold", {"value": req.value})
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

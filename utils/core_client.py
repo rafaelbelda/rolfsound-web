@@ -132,8 +132,8 @@ async def seek(position: float)      -> dict | None: return await _post("/seek",
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
 
-async def queue_add(track_id, filepath, title="", thumbnail="", position=None) -> dict | None:
-    p = {"track_id": track_id, "filepath": filepath, "title": title, "thumbnail": thumbnail}
+async def queue_add(track_id, filepath, title="", thumbnail="", artist="", position=None) -> dict | None:
+    p = {"track_id": track_id, "filepath": filepath, "title": title, "thumbnail": thumbnail, "artist": artist}
     if position is not None:
         p["position"] = position
     return await _post("/queue/add", p)

@@ -61,13 +61,15 @@ class RolfsoundIsland extends HTMLElement {
         links.forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault(); // Bloqueia o recarregamento padrão (a tela branca)
-                
+
+                if (this.isLocked) return;
+
                 const tab = link.dataset.tab;
                 if (this.activeTab === tab) return; // Se já está na aba, ignora
-                
+
                 this.activeTab = tab;
                 this.updateActiveTab();
-                
+
                 // Grita para o index.html: "Troque a camada de visualização!"
                 this.dispatchEvent(new CustomEvent('rolfsound-navigate', {
                     bubbles: true,
@@ -335,7 +337,6 @@ class RolfsoundIsland extends HTMLElement {
                 </div>
                 
                 <div class="nav-section">
-                    <a href="#" class="nav-link hover-target ${this.activeTab === 'playing' ? 'active' : ''}" data-tab="playing">Now Playing</a>
                     <a href="#" class="nav-link hover-target ${this.activeTab === 'library' ? 'active' : ''}" data-tab="library">Library</a>
                     <a href="#" class="nav-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</a>
                 </div>

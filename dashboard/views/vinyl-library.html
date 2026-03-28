@@ -135,7 +135,7 @@
       const savedTime = localStorage.getItem(TIME_KEY);
       const agora = Date.now();
 
-      if (cache && savedTime && (agora - savedTime < TTL)) {
+      if (cache && savedTime && (agora - Number(savedTime) < TTL)) {
         return JSON.parse(cache);
       }
 
@@ -146,6 +146,7 @@
 
       const colecao = data.releases.map(item => ({
         titulo: item.title,
+        artista: item.artist,
         cover: item.cover,
         spine_color: item.spine_color || '#111111'
       }));
@@ -363,6 +364,7 @@
 
   // ─── 8. BACKGROUND WAKE (A Mágica Silenciosa via Ilha) ───
   let isWakingUp = false;
+  let lastCheckTime = 0;
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === 'visible' && !isWakingUp && !isSyncing) {
@@ -377,6 +379,10 @@
   });
 
   async function acordarESincronizar() {
+    if (isSyncing) return;
+    const now = Date.now();
+    if (now - lastCheckTime < 60000) return;
+    lastCheckTime = now;
     isWakingUp = true;
     try {
       const checkRes = await fetch('/api/discogs/check-updates');
@@ -419,6 +425,11 @@
     }
   }
 
-  // Primeira verificação leve
-  setTimeout(acordarESincronizar, 2000); 
+  // Primeira verificação leve (sem sync automático)
+  setTimeout(async () => {
+    const now = Date.now();
+    if (now - lastCheckTime < 60000) return;
+    lastCheckTime = now;
+    try { await fetch('/api/discogs/check-updates'); } catch (_) {}
+  }, 2000);
 </script>

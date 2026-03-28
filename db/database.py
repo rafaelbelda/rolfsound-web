@@ -136,8 +136,6 @@ def scan_and_reconcile(conn, music_dir):
     for f in music_path.iterdir():
         if f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
-        if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-            continue
         track_id = f.stem
         existing = conn.execute(
             "SELECT id FROM tracks WHERE id = ? OR file_path = ?", (track_id, str(f))
@@ -172,16 +170,6 @@ def search_tracks(conn, query, limit=50):
         LIMIT ?
     """, (pattern, pattern, limit)).fetchall()
     results = [dict(r) for r in rows]
-    if not results:
-        q_lower = query.lower()
-        all_rows = conn.execute(
-            "SELECT * FROM tracks ORDER BY streams DESC, date_added DESC"
-        ).fetchall()
-        results = [
-            dict(r) for r in all_rows
-            if q_lower in (r["title"] or "").lower()
-            or q_lower in (r["artist"] or "").lower()
-        ][:limit]
     return results
 
 

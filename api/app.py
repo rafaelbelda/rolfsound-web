@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,6 +29,8 @@ from api.routes import search, library, queue, playback, history, settings, down
 logger = logging.getLogger(__name__)
 
 DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard"
+
+_track_cache: dict = {"path": None, "data": None}
 
 
 @asynccontextmanager
@@ -142,22 +144,31 @@ def _enrich_status(raw: dict) -> dict:
     track_id  = os.path.basename(current_filepath) if current_filepath else ""
 
     if current_filepath:
-        try:
-            conn = database.get_connection()
+        if current_filepath == _track_cache["path"]:
+            cached = _track_cache["data"]
+            track_id  = cached["track_id"]  or track_id
+            title     = cached["title"]     or title
+            artist    = cached["artist"]    or ""
+            thumbnail = cached["thumbnail"] or ""
+        else:
             try:
-                row = conn.execute(
-                    "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
-                    (current_filepath,)
-                ).fetchone()
-                if row:
-                    track_id  = row["id"]        or track_id
-                    title     = row["title"]      or title
-                    artist    = row["artist"]     or ""
-                    thumbnail = row["thumbnail"]  or ""
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.debug(f"Status enrichment DB lookup failed: {e}")
+                conn = database.get_connection()
+                try:
+                    row = conn.execute(
+                        "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
+                        (current_filepath,)
+                    ).fetchone()
+                    if row:
+                        track_id  = row["id"]        or track_id
+                        title     = row["title"]      or title
+                        artist    = row["artist"]     or ""
+                        thumbnail = row["thumbnail"]  or ""
+                    _track_cache["path"] = current_filepath
+                    _track_cache["data"] = {"track_id": track_id, "title": title, "artist": artist, "thumbnail": thumbnail}
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.debug(f"Status enrichment DB lookup failed: {e}")
 
     np = pb.get("now_playing", {})
     if np:
@@ -232,6 +243,10 @@ def create_app() -> FastAPI:
 
     # ─── INICIALIZA O MOTOR JINJA2 ───
     templates = Jinja2Templates(directory=str(DASHBOARD_DIR))
+
+    @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+    async def api_not_found(rest: str):
+        raise HTTPException(status_code=404, detail=f"API endpoint '/api/{rest}' not found")
 
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_dashboard(request: Request, full_path: str): 

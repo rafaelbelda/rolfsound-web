@@ -19,6 +19,9 @@ export default class Cursor {
   init() {
     if (!this.dot) return;
 
+    // Prevent position jump when dot expands to button size on first hover frame
+    this.dot.style.transition = 'width 0.15s, height 0.15s, border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s ease, border 0.3s ease';
+
     window.addEventListener('mousemove', (e) => {
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;

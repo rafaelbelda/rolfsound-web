@@ -173,8 +173,16 @@
     setState('disconnected');
   };
 
-  function onAuthorized(data) {
-    populateConnectedUI({ username: data.username, connected_at: data.connected_at, token_hint: null });
+  async function onAuthorized(data) {
+    clearInterval(authPollInterval);
+    authPollInterval = null;
+    try {
+      const res = await fetch('/api/discogs/account');
+      const accountData = await res.json();
+      populateConnectedUI(accountData);
+    } catch (_) {
+      populateConnectedUI({ username: null, connected_at: null, token_hint: null });
+    }
     setState('connected');
     if (authWindow) { authWindow.close(); authWindow = null; }
     globalIsland.showNotification({ text: "Discogs Conectado", duration: 3000 });

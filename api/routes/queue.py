@@ -35,6 +35,7 @@ async def get_queue():
 @router.post("/queue/add")
 async def add_to_queue(req: AddRequest):
     # Resolve filepath and thumbnail from library if not provided
+    artist = ""
     if req.track_id and (not req.filepath or not req.thumbnail):
         from db import database
         conn = database.get_connection()
@@ -48,12 +49,13 @@ async def add_to_queue(req: AddRequest):
                 # Fix: forward thumbnail so queue renders album art
                 if not req.thumbnail:
                     req.thumbnail = track.get("thumbnail", "")
+                artist = track.get("artist", "")
         finally:
             conn.close()
 
     result = await core_client.queue_add(
         req.track_id, req.filepath, req.title,
-        thumbnail=req.thumbnail, position=req.position,
+        thumbnail=req.thumbnail, artist=artist, position=req.position,
     )
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")

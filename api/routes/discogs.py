@@ -9,6 +9,7 @@ import urllib.parse
 import uuid
 import httpx
 import os
+from pathlib import Path
 
 from db import database
 from utils import config as cfg
@@ -19,6 +20,12 @@ from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Shared HTTP client — reuses TCP connections across all Discogs API calls
+_http_client = httpx.AsyncClient(timeout=30)
+
+# Absolute path to covers directory, independent of CWD
+_COVERS_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "covers"
 
 # Memória temporária APENAS para o handshake inicial do OAuth
 _pending: dict[str, dict] = {}
@@ -156,25 +163,24 @@ async def sync_collection():
         total_pages = 1
 
         # 1. VARREDURA COMPLETA NO DISCOGS (Paginando para pegar a coleção inteira)
-        async with httpx.AsyncClient() as client:
-            while page <= total_pages:
-                resp = await client.get(
-                    f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
-                    headers={"Authorization": header, "User-Agent": _USER_AGENT},
-                    params={"page": page, "per_page": 100}, # Puxa de 100 em 100 para ser mais rápido
-                    timeout=30
-                )
+        while page <= total_pages:
+            resp = await _http_client.get(
+                f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
+                headers={"Authorization": header, "User-Agent": _USER_AGENT},
+                params={"page": page, "per_page": 100}, # Puxa de 100 em 100 para ser mais rápido
+                timeout=30
+            )
 
-                if resp.status_code != 200:
-                    return JSONResponse({"error": resp.text}, status_code=resp.status_code)
+            if resp.status_code != 200:
+                return JSONResponse({"error": resp.text}, status_code=resp.status_code)
 
-                data = resp.json()
-                total_pages = data.get("pagination", {}).get("pages", 1)
+            data = resp.json()
+            total_pages = data.get("pagination", {}).get("pages", 1)
 
-                for item in data.get("releases", []):
-                    remote_items[item["id"]] = item
-                
-                page += 1
+            for item in data.get("releases", []):
+                remote_items[item["id"]] = item
+
+            page += 1
 
         # 2. A MATEMÁTICA DOS CONJUNTOS (A Mágica da Conciliação)
         remote_ids = set(remote_items.keys())
@@ -189,9 +195,9 @@ async def sync_collection():
             database.delete_discogs_release(conn, rid)
             
             # Apaga a imagem física do cartão SD para liberar espaço!
-            file_path = os.path.join("static", "covers", f"{rid}.jpg")
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            file_path = _COVERS_DIR / f"{rid}.jpg"
+            if file_path.exists():
+                file_path.unlink()
 
         # 4. O MORDOMO (Baixando os discos novos)
         for rid in ids_to_add:
@@ -230,6 +236,10 @@ async def sync_collection():
 
 @router.post("/discogs/request-token")
 async def request_token(request: Request):
+    global _pending
+    now = time.time()
+    _pending = {k: v for k, v in _pending.items() if now - v["created_at"] < 600}
+
     ck, cs = _consumer()
     if not ck or not cs:
         return JSONResponse({"error": "Configurações de Consumer Key/Secret faltando."}, status_code=500)
@@ -237,18 +247,18 @@ async def request_token(request: Request):
     callback = str(request.base_url).rstrip("/") + "/api/discogs/callback"
     header = _oauth_header(ck, cs, callback=callback)
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(_REQUEST_TOKEN_URL, headers={"Authorization": header, "User-Agent": _USER_AGENT})
-        
+    resp = await _http_client.post(_REQUEST_TOKEN_URL, headers={"Authorization": header, "User-Agent": _USER_AGENT})
+
     if resp.status_code != 200:
         return JSONResponse({"error": resp.text}, status_code=resp.status_code)
 
     tokens = dict(urllib.parse.parse_qsl(resp.text))
     oauth_token = tokens.get("oauth_token", "")
-    
+
     _pending[oauth_token] = {
         "request_secret": tokens.get("oauth_token_secret", ""),
-        "status": "pending"
+        "status": "pending",
+        "created_at": now
     }
 
     return {
@@ -266,9 +276,8 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
     ck, cs = _consumer()
     header = _oauth_header(ck, cs, oauth_token, flow["request_secret"], oauth_verifier)
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(_ACCESS_TOKEN_URL, headers={"Authorization": header, "User-Agent": _USER_AGENT})
-    
+    resp = await _http_client.post(_ACCESS_TOKEN_URL, headers={"Authorization": header, "User-Agent": _USER_AGENT})
+
     if resp.status_code != 200:
         return HTMLResponse(f"<h2>Erro no Discogs: {resp.text}</h2>", status_code=500)
 
@@ -277,9 +286,8 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
     access_secret = ts["oauth_token_secret"]
 
     id_h = _oauth_header(ck, cs, access_token, access_secret)
-    async with httpx.AsyncClient() as client:
-        id_r = await client.get(_IDENTITY_URL, headers={"Authorization": id_h, "User-Agent": _USER_AGENT})
-        username = id_r.json().get("username")
+    id_r = await _http_client.get(_IDENTITY_URL, headers={"Authorization": id_h, "User-Agent": _USER_AGENT})
+    username = id_r.json().get("username")
 
     conn = database.get_connection()
     try:
@@ -289,7 +297,8 @@ async def oauth_callback(oauth_token: str, oauth_verifier: str):
         conn.close()
 
     flow["status"] = "authorized"
-    
+    _pending.pop(oauth_token, None)
+
     return HTMLResponse("""
         <html><body style="font-family:sans-serif; text-align:center; padding-top:50px;">
         <h2>Autorizado com sucesso!</h2>
@@ -319,9 +328,8 @@ async def test_connection():
     
     ck, cs = _consumer()
     h = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
-    async with httpx.AsyncClient() as client:
-        r = await client.get(_IDENTITY_URL, headers={"Authorization": h, "User-Agent": _USER_AGENT})
-        return {"ok": r.status_code == 200, "username": account["username"]}
+    r = await _http_client.get(_IDENTITY_URL, headers={"Authorization": h, "User-Agent": _USER_AGENT})
+    return {"ok": r.status_code == 200, "username": account["username"]}
 
 @router.get("/discogs/check-updates")
 async def check_updates():
@@ -339,21 +347,20 @@ async def check_updates():
         ck, cs = _consumer()
         header = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
         
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"https://api.discogs.com/users/{account['username']}/collection/folders/0",
-                headers={"Authorization": header, "User-Agent": _USER_AGENT},
-                timeout=10
-            )
-            
-            if resp.status_code == 200:
-                discogs_count = resp.json().get("count", 0)
-                diff = discogs_count - local_count
-                
-                # MÁGICA: Diferente de zero significa que a coleção mudou (pra mais ou pra menos)
-                if diff != 0:
-                    return {"has_updates": True, "diff": diff}
-                    
+        resp = await _http_client.get(
+            f"https://api.discogs.com/users/{account['username']}/collection/folders/0",
+            headers={"Authorization": header, "User-Agent": _USER_AGENT},
+            timeout=10
+        )
+
+        if resp.status_code == 200:
+            discogs_count = resp.json().get("count", 0)
+            diff = discogs_count - local_count
+
+            # MÁGICA: Diferente de zero significa que a coleção mudou (pra mais ou pra menos)
+            if diff != 0:
+                return {"has_updates": True, "diff": diff}
+
         return {"has_updates": False}
     except Exception as exc:
         logger.error("Erro no check-updates: %s", exc)
