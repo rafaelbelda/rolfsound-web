@@ -6,12 +6,12 @@ export default class Cursor {
     this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     this.pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     
-    // ─── O SEGREDO DO FEELING PREMIUM: Múltiplas Velocidades ───
-    this.speedFree = 0.75;     // Livre: Muito rápido, responsivo, elimina o lag
-    this.speedMagnetic = 0.2;  // No botão: Inércia pesada para o efeito "chiclete"
+    this.speedFree = 0.75;    
+    this.speedMagnetic = 0.2; 
     
     this.isHovering = false;
     this.currentTarget = null;
+    this.targetRect = null; // Guardamos a posição na memória!
     
     this.init();
   }
@@ -19,7 +19,6 @@ export default class Cursor {
   init() {
     if (!this.dot) return;
 
-    // Prevent position jump when dot expands to button size on first hover frame
     this.dot.style.transition = 'width 0.15s, height 0.15s, border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s ease, border 0.3s ease';
 
     window.addEventListener('mousemove', (e) => {
@@ -27,6 +26,13 @@ export default class Cursor {
       this.mouse.y = e.clientY;
       this.checkHoverState(e);
     });
+
+    // Se a página rolar, precisamos atualizar a caixa de colisão do botão
+    window.addEventListener('scroll', () => {
+      if (this.isHovering && this.currentTarget) {
+        this.targetRect = this.currentTarget.getBoundingClientRect();
+      }
+    }, { capture: true, passive: true });
 
     this.render();
   }
@@ -41,20 +47,20 @@ export default class Cursor {
         this.isHovering = true;
         this.dot.classList.add('hovering');
 
-        const rect = target.getBoundingClientRect();
+        // Calcula a posição do botão APENAS UMA VEZ ao entrar nele
+        this.targetRect = target.getBoundingClientRect();
         const style = window.getComputedStyle(target);
 
-        // A pílula assume a exata forma geométrica do botão alvo
-        this.dot.style.width = `${rect.width}px`;
-        this.dot.style.height = `${rect.height}px`;
+        this.dot.style.width = `${this.targetRect.width}px`;
+        this.dot.style.height = `${this.targetRect.height}px`;
         this.dot.style.borderRadius = style.borderRadius;
       }
     } else if (this.isHovering) {
       this.isHovering = false;
       this.currentTarget = null;
+      this.targetRect = null;
       this.dot.classList.remove('hovering');
 
-      // Volta a ser a bolinha ágil
       this.dot.style.width = '5px';
       this.dot.style.height = '5px';
       this.dot.style.borderRadius = '50%';
@@ -67,35 +73,28 @@ export default class Cursor {
   render() {
     let targetX, targetY, currentSpeed;
 
-    if (this.isHovering && this.currentTarget) {
-      // 1. A PÍLULA foca no centro geométrico do botão
-      const rect = this.currentTarget.getBoundingClientRect();
-      targetX = rect.left + rect.width / 2;
-      targetY = rect.top + rect.height / 2;
+    if (this.isHovering && this.targetRect) {
+      // Usa a memória cacheada em vez de forçar a GPU a calcular
+      targetX = this.targetRect.left + this.targetRect.width / 2;
+      targetY = this.targetRect.top + this.targetRect.height / 2;
 
-      // 2. A BOLINHA INTERNA compensa a distância instantaneamente (sem lag)
-      // O fator 0.4 impede que a bolinha vaze para fora da pílula
       const dx = (this.mouse.x - targetX) * 0.4;
       const dy = (this.mouse.y - targetY) * 0.4;
 
       this.dot.style.setProperty('--dx', `${dx}px`);
       this.dot.style.setProperty('--dy', `${dy}px`);
       
-      // Usa a velocidade pegajosa para a pílula balançar
       currentSpeed = this.speedMagnetic;
     } else {
-      // Fora dos botões, o cursor segue o mouse diretamente
       targetX = this.mouse.x;
       targetY = this.mouse.y;
-      
-      // Usa a velocidade super rápida para evitar a sensação de travamento
       currentSpeed = this.speedFree;
     }
 
-    // Aplica a matemática do Lerp dinâmico
     this.pos.x += (targetX - this.pos.x) * currentSpeed;
     this.pos.y += (targetY - this.pos.y) * currentSpeed;
 
+    // Usando translate3d força a renderização via Hardware (GPU)
     this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0)`;
     
     requestAnimationFrame(this.render.bind(this));

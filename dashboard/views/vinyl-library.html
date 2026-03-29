@@ -57,8 +57,6 @@
 <script type="module">
   import * as THREE from 'three';
   import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-  
-  // ─── NOTA: O Cursor.js foi removido daqui porque ele agora roda globalmente no index.html! ───
 
   // ─── 0. VARIÁVEIS GLOBAIS ───
   let totalDiscos = 0; 
@@ -66,6 +64,9 @@
   const espacamento = 6;
   let minhaColecaoGlobal = [];
   let isSyncing = false;
+
+  // Seleciona a camada da biblioteca para checar a visibilidade depois
+  const libraryLayer = document.getElementById('view-vinyl-library');
 
   // GRUPO DA ESTANTE
   const estanteGroup = new THREE.Group();
@@ -88,7 +89,7 @@
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
-  // ─── 2. ILUMINAÇÃO REVISADA E FUNDO INVISÍVEL ───
+  // ─── 2. ILUMINAÇÃO ───
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.05); 
   scene.add(ambientLight);
 
@@ -109,7 +110,6 @@
   softShadowSpot.penumbra = 1.0; 
   softShadowSpot.decay = 2.0; 
   softShadowSpot.distance = 150;
-  
   softShadowSpot.castShadow = true; 
   softShadowSpot.shadow.mapSize.width = 1024; 
   softShadowSpot.shadow.mapSize.height = 1024;
@@ -124,7 +124,7 @@
   wall.receiveShadow = true; 
   scene.add(wall);
 
-  // 3. FUNÇÃO DA API COM CACHE DE 24H
+  // 3. FUNÇÃO DA API
   async function buscarColecaoDiscogs() {
     const CACHE_KEY = 'rs_colecao_cache';
     const TIME_KEY = 'rs_colecao_timestamp';
@@ -231,7 +231,7 @@
     });
   });
 
-  // ─── 5. A MAGIA DA TENSÃO ELÁSTICA (Pull-to-Refresh e Inércia) ───
+  // ─── 5. TENSÃO ELÁSTICA (Pull-to-Refresh e Inércia) ───
   let isDragging = false;
   let prevX = 0;
   let targetX = 0; 
@@ -239,8 +239,10 @@
 
   const pullIndicator = document.getElementById('pull-indicator');
 
-  // Feedback tátil ao agarrar a prateleira
+  // PREVENÇÃO DE ARRASTO FANTASMA: Só escuta o clique se a biblioteca estiver na tela
   container.addEventListener('mousedown', (e) => { 
+    if (libraryLayer && !libraryLayer.classList.contains('active')) return;
+
     isDragging = true; 
     prevX = e.clientX; 
     const dot = document.getElementById('cursor-dot');
@@ -250,7 +252,6 @@
     }
   });
 
-  // Soltar a prateleira
   window.addEventListener('mouseup', () => { 
     if (!isDragging) return;
     isDragging = false; 
@@ -277,12 +278,17 @@
   });
 
   window.addEventListener('mousemove', (e) => {
+    // PREVENÇÃO: Cancela o arrasto se a tela foi trocada no meio da ação
+    if (libraryLayer && !libraryLayer.classList.contains('active')) {
+        isDragging = false;
+        return;
+    }
+
     if (isDragging && capasCarregadas === totalDiscos && !isSyncing) {
       const delta = e.clientX - prevX;
       prevX = e.clientX;
       
       let moveX = delta * 0.04; 
-      
       let proposedX = targetX + moveX; 
       const limite = (totalDiscos * espacamento) / 2;
 
@@ -307,9 +313,14 @@
     }
   });
 
-  // ─── 6. ANIMAÇÃO GERAL ───
+  // ─── 6. ANIMAÇÃO GERAL COM OCLUSÃO (RENDER FREEZE) ───
   const animate = () => {
     requestAnimationFrame(animate);
+    
+    // O SEGREDO DO DESEMPENHO: Se a biblioteca não estiver visível, não calcule e não renderize a GPU!
+    if (libraryLayer && !libraryLayer.classList.contains('active')) {
+        return; 
+    }
     
     if (capasCarregadas === totalDiscos && totalDiscos > 0) {
         estanteGroup.position.y = THREE.MathUtils.lerp(estanteGroup.position.y, -7.5, 0.05);
@@ -326,25 +337,20 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ─── 7. FUNÇÃO CENTRAL DE SYNC UNIFICADA (USANDO A ILHA) ───
+  // ─── 7. FUNÇÃO CENTRAL DE SYNC UNIFICADA ───
   const island = document.querySelector('rolfsound-island');
 
   async function dispararSync() {
     if (isSyncing) return;
     isSyncing = true;
     
-    island.showNotification({
-        text: "Prensando Novos Vinis...",
-        spinner: true,
-        duration: 0
-    });
+    island.showNotification({ text: "Prensando Novos Vinis...", spinner: true, duration: 0 });
     
     try {
       const res = await fetch('/api/discogs/sync', { method: 'POST' });
       if(res.ok) {
          localStorage.removeItem('rs_colecao_cache');
          localStorage.removeItem('rs_colecao_timestamp');
-         
          island.showNotification({ text: "Sincronização Concluída", duration: 2000 });
          setTimeout(() => { window.location.reload(); }, 2000); 
       } else {
@@ -358,11 +364,10 @@
     }
   }
 
-  // Escuta o evento da Ilha para botão ↻
   island.addEventListener('rolfsound-sync-start', () => dispararSync());
 
 
-  // ─── 8. BACKGROUND WAKE (A Mágica Silenciosa via Ilha) ───
+  // ─── 8. BACKGROUND WAKE ───
   let isWakingUp = false;
   let lastCheckTime = 0;
 
@@ -390,28 +395,15 @@
 
       if (checkData.has_updates) {
         isSyncing = true;
-        
-        let msgText = checkData.diff > 0 
-          ? `${checkData.diff} novo(s) disco(s) detectado(s). Prensando...` 
-          : `Reorganizando a prateleira...`;
-
-        island.showNotification({
-           text: msgText,
-           spinner: true,
-           duration: 0
-        });
+        let msgText = checkData.diff > 0 ? `${checkData.diff} novo(s) disco(s) detectado(s). Prensando...` : `Reorganizando a prateleira...`;
+        island.showNotification({ text: msgText, spinner: true, duration: 0 });
 
         const syncRes = await fetch('/api/discogs/sync', { method: 'POST' });
         
         if(syncRes.ok) {
           localStorage.removeItem('rs_colecao_cache');
           localStorage.removeItem('rs_colecao_timestamp');
-          
-          island.showNotification({
-             text: 'Coleção perfeitamente sincronizada!',
-             duration: 2000
-          });
-          
+          island.showNotification({ text: 'Coleção perfeitamente sincronizada!', duration: 2000 });
           setTimeout(() => { window.location.reload(); }, 2000);
         } else {
           island.hideNotification();
@@ -425,7 +417,6 @@
     }
   }
 
-  // Primeira verificação leve (sem sync automático)
   setTimeout(async () => {
     const now = Date.now();
     if (now - lastCheckTime < 60000) return;
