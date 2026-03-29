@@ -314,3 +314,66 @@ GET /api/monitor — do NOT poll this on a timer while the SSE stream is active.
 GET /monitor/samples (on core, port 8765) — the browser must NEVER call this
   directly. It is an internal endpoint consumed by rolfsound-web's accumulator.
   It is not protected by CORS and its response format may change without notice.
+
+
+================================================================================
+7. LIFECYCLE — ONLY STREAM WHEN THE MONITOR TAB IS VISIBLE
+================================================================================
+
+The SSE connection and the rAF loop must be tied to tab visibility. Leaving
+them running while the user is on Library or Settings wastes a persistent HTTP
+connection, keeps the server fan-out list populated, and runs a 60fps render
+loop against a canvas the user cannot see.
+
+Open the stream when the user navigates TO the monitor tab.
+Close it when the user navigates AWAY from it.
+
+    let source = null;
+    let rafId  = null;
+
+    function onMonitorTabEnter() {
+        // One-shot snapshot for initial threshold/bounds render
+        fetch('/api/monitor')
+            .then(r => r.json())
+            .then(data => renderInitialState(data));
+
+        // Open the SSE stream
+        source = new EventSource('/api/monitor/stream');
+        source.addEventListener('samples', onSamples);
+        source.onerror = () => { isReconnect = true; };
+        source.onopen  = () => { isReconnect = false; };
+
+        // Start the render loop
+        rafId = requestAnimationFrame(renderFrame);
+    }
+
+    function onMonitorTabLeave() {
+        if (source) {
+            source.close();
+            source = null;
+        }
+        if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+        ringBuffer = [];
+    }
+
+Wire these two functions to the navigation events that the SPA already emits
+(e.g. the 'rolfsound-navigate' CustomEvent from RolfsoundIsland). Call
+onMonitorTabEnter() when detail.view === 'monitor' and onMonitorTabLeave()
+on every other view, or symmetrically when the tab changes away from 'monitor'.
+
+Also close the stream on page hide so a background tab does not hold a
+connection open while the browser is minimised:
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && source) {
+            source.close();
+            source = null;
+        }
+        // Reopen when the user returns and the monitor tab is still active.
+        if (document.visibilityState === 'visible' && monitorTabIsActive) {
+            onMonitorTabEnter();
+        }
+    });
