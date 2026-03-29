@@ -23,6 +23,7 @@ from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
 from youtube.search import close_client as close_search_client
 from utils import core_client
+from utils.monitor_accumulator import get_accumulator
 
 from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs
 
@@ -65,9 +66,14 @@ async def lifespan(app: FastAPI):
     # This eliminates ~400-500ms TCP setup overhead on every API call.
     core_client.init_client()
 
+    # Start the monitor accumulator — polls core's /monitor/samples and fans
+    # out to connected SSE clients via /api/monitor/stream.
+    get_accumulator().start()
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────
+    get_accumulator().stop()
     poller.stop()
     manager.stop()
     await close_search_client()

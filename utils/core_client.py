@@ -117,6 +117,8 @@ async def _post(path: str, data: dict = None) -> dict | None:
 
 async def get_status() -> dict | None:    return await _get("/status")
 async def get_queue()  -> dict | None:    return await _get("/queue")
+async def get_monitor_samples(since: int = 0) -> dict | None:
+    return await _get("/monitor/samples", {"since": since})
 async def get_events(since: int = 0):     return await _get("/events", {"since": since})
 
 async def play(filepath=None, track_id=None) -> dict | None:

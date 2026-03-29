@@ -1,0 +1,316 @@
+MONITOR TAB — BACKEND CONTRACT FOR FRONTEND ENGINEERS
+======================================================
+This document is addressed to the engineer building the monitor tab in
+dashboard/index.html. It covers every backend endpoint you will touch,
+the exact data shapes, and a recommended rendering approach. You do not
+need to read any backend source code.
+
+
+================================================================================
+1. SSE ENDPOINT CONTRACT
+================================================================================
+
+URL:     GET /api/monitor/stream
+Method:  GET (EventSource, not fetch)
+
+The server sends a continuous stream of SSE events for as long as the
+connection is open. Two things come over the wire:
+
+  a) SSE events (named "samples")
+  b) SSE keepalive comments
+
+
+---- a) samples event ----------------------------------------------------------
+
+Every batch of new audio measurements is delivered as a named SSE event:
+
+    event: samples
+    data: {"samples":[...],"threshold":0.015,"recording":false}
+
+Fields in the data JSON:
+
+  samples    array   Each element is one audio measurement block:
+                       seq       int     Monotonically increasing counter.
+                                         Never resets while the server is up.
+                       rms       float   RMS amplitude, range [0.0, 1.0].
+                       peak      float   Peak amplitude, range [0.0, 1.0].
+                       ts        float   Unix timestamp (seconds, float) when
+                                         the block was captured on the device.
+  threshold  float   Current trigger threshold, range [0.0, 1.0].
+  recording  bool    True while a recording is in progress.
+
+The samples array may contain 1 or more entries per event — it batches
+everything that arrived since the last push (~every 20ms from core).
+
+
+---- Backfill event (first event on connect) -----------------------------------
+
+The very first event sent after connecting is a backfill. Its shape is
+identical to a normal samples event, but the samples array contains the
+last ~2 seconds of history. Use it to pre-populate your display buffer
+so the waveform does not start empty.
+
+There is no special flag or event name to distinguish backfill from normal
+events — just treat it the same way: append the samples to your local ring
+buffer. Because the backfill covers ~2 seconds of history, you will see
+the display filled immediately on connect.
+
+
+---- b) Keepalive comment ------------------------------------------------------
+
+If no new samples arrive within 5 seconds (e.g. core is offline or audio
+is silent), the server sends:
+
+    : keepalive
+
+This is a raw SSE comment. EventSource ignores it automatically — you do
+not need to handle it.
+
+
+---- Detecting a dropped connection -------------------------------------------
+
+EventSource reconnects automatically when the connection drops. On every
+reconnect the server sends a fresh backfill event (the last 2 seconds of
+history). Handle reconnects by resetting your local sample buffer to the
+backfill payload, not by appending to it, so stale data from before the
+disconnect is discarded:
+
+    source.addEventListener('samples', e => {
+        const payload = JSON.parse(e.data);
+        if (isReconnect) {
+            ringBuffer = payload.samples.slice();  // reset on reconnect
+            isReconnect = false;
+        } else {
+            ringBuffer.push(...payload.samples);
+            if (ringBuffer.length > BUFFER_MAX) {
+                ringBuffer.splice(0, ringBuffer.length - BUFFER_MAX);
+            }
+        }
+    });
+
+    source.onopen  = () => { isReconnect = false; };
+    source.onerror = () => { isReconnect = true;  };
+
+
+================================================================================
+2. FALLBACK ENDPOINT (snapshot)
+================================================================================
+
+URL:     GET /api/monitor
+Method:  GET
+
+Returns a single instantaneous snapshot of recorder state. Use it for:
+- The initial render before the SSE stream delivers its first event, so
+  you can display the threshold line and recording indicator immediately.
+- Non-streaming clients or environments where SSE is unavailable.
+
+Response shape:
+
+  {
+    "recording":            bool,
+    "auto_record_enabled":  bool,
+    "manual_record_active": bool,
+    "threshold":            float,
+    "rms_level":            float,
+    "trigger_progress":     float,   // 0.0–1.0, progress toward trigger
+    "silence_progress":     float,   // 0.0–1.0, progress toward stop
+    "min_threshold":        float,
+    "max_threshold":        float,
+    "encoder_step":         float,
+    "trigger_duration":     float,   // seconds
+    "stop_seconds":         int,     // seconds of silence before stop
+    "output_dir":           string,
+    "sample_rate":          int,
+    "block_size":           int,
+    "monitor_all_channels": bool,
+    "channel_index":        int
+  }
+
+DO NOT poll this endpoint on a timer while the SSE stream is active.
+Call it once on page load; from then on use the SSE stream for live data.
+
+
+================================================================================
+3. THRESHOLD ENDPOINT
+================================================================================
+
+URL:     POST /api/monitor/threshold
+Method:  POST
+Body:    { "value": float }
+Success: { "ok": true }
+Error:   HTTP 503 if core is unreachable.
+
+"value" must be in the range [min_threshold, max_threshold] from the
+/api/monitor snapshot. The server forwards it to core, which clamps it
+silently — so sending a slightly out-of-range value will not error, but
+the stored threshold may differ from what you sent.
+
+RATE LIMITING — IMPORTANT:
+The frontend must not call this endpoint on every drag event. Bind a
+commit timer (debounce) of at least 80ms. Fire only when the user stops
+dragging for 80ms, or on mouseup/pointerup:
+
+    let _commitTimer = null;
+
+    sliderEl.addEventListener('input', e => {
+        clearTimeout(_commitTimer);
+        _commitTimer = setTimeout(() => {
+            fetch('/api/monitor/threshold', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: parseFloat(e.target.value) })
+            });
+        }, 80);
+    });
+
+Firing on every drag event (mousemove) would send ~hundreds of requests
+per second and saturate the core's recorder service.
+
+
+================================================================================
+4. RECOMMENDED RENDERING APPROACH
+================================================================================
+
+---- Connecting to the SSE stream ---------------------------------------------
+
+    const BUFFER_MAX = 200;   // keep ~4s at 50 samples/s
+    let ringBuffer   = [];
+    let isReconnect  = false;
+
+    const source = new EventSource('/api/monitor/stream');
+
+    source.addEventListener('samples', e => {
+        const { samples, threshold, recording } = JSON.parse(e.data);
+
+        if (isReconnect) {
+            ringBuffer  = samples.slice();
+            isReconnect = false;
+        } else {
+            ringBuffer.push(...samples);
+            if (ringBuffer.length > BUFFER_MAX) {
+                ringBuffer.splice(0, ringBuffer.length - BUFFER_MAX);
+            }
+        }
+
+        // Update threshold line and recording indicator directly here
+        // (these change infrequently, so updating on every event is fine).
+        currentThreshold = threshold;
+        isRecording      = recording;
+    });
+
+    source.onopen  = () => { isReconnect = false; };
+    source.onerror = () => { isReconnect = true;  };
+
+To stop the stream (e.g. when navigating away from the monitor tab):
+
+    source.close();
+
+
+---- Local ring buffer ---------------------------------------------------------
+
+Maintain a fixed-length array of sample objects in JS:
+
+  ringBuffer: Array<{ seq, rms, peak, ts }>
+
+Suggested maxlen: 200 entries (~4 seconds at the default ~50 samples/s).
+Append new entries from each event, then trim from the front if over the
+limit (shown above). On backfill (first event / reconnect), reset the
+buffer to the backfill array directly rather than appending.
+
+
+---- Decoupling render from SSE arrival ----------------------------------------
+
+SSE events arrive at ~20–50ms intervals. The browser's native frame rate
+is ~16ms (60 fps). Drive your canvas/SVG render with requestAnimationFrame,
+which reads from ringBuffer at whatever rate the browser provides:
+
+    function renderFrame() {
+        drawWaveform(ringBuffer, currentThreshold, isRecording);
+        requestAnimationFrame(renderFrame);
+    }
+    requestAnimationFrame(renderFrame);
+
+Never call canvas draw operations inside the SSE event handler — just
+update the shared ringBuffer and let rAF read it on the next frame.
+
+
+---- Handling the backfill on first connect ------------------------------------
+
+The first SSE event contains ~2 seconds of history. Reset ringBuffer to
+that payload (do not append):
+
+    if (isFirstEvent) {
+        ringBuffer  = samples.slice();
+        isFirstEvent = false;
+    }
+
+This pre-populates the display immediately without a visible jump from
+empty-to-full. The backfill event shape is identical to a normal event.
+
+
+---- Displaying recording state and threshold ----------------------------------
+
+Every samples event carries:
+
+  recording  bool   True while a recording is in progress.
+                    Use to toggle a red recording indicator (LED/badge).
+
+  threshold  float  Current trigger threshold in the same scale as rms/peak.
+                    Draw it as a horizontal line on the waveform at this
+                    fractional height: y = (1 - threshold) * canvasHeight.
+
+These fields are the authoritative live values — do not use the snapshot
+endpoint to update them while the SSE stream is active.
+
+
+================================================================================
+5. TIMING AND LATENCY CHARACTERISTICS
+================================================================================
+
+Sample rate (from core):
+  Audio is processed at 48000 Hz in blocks of 1024 samples.
+  This produces ~46.9 measurement blocks per second from the audio hardware.
+
+SSE sample rate (what the browser receives):
+  rolfsound-web polls core every 20ms (configurable as "monitor_poll_ms" in
+  config.json). Each SSE event contains all samples captured since the last
+  poll. Expect ~1 sample per event on average; sometimes 0 (silence) or 2
+  (if poll interval and audio block boundary are slightly misaligned).
+  Effective delivery rate to the browser: ~50 events/second.
+
+End-to-end latency (audio capture → browser display):
+  Audio hardware → core worker:         ~21ms (one 1024-sample block at 48kHz)
+  Core ring buffer → web accumulator:   ~20ms (poll interval)
+  Web accumulator → browser via SSE:    ~1ms  (local network, no TCP overhead)
+  Total typical latency:                ~42ms
+
+The seq field:
+  seq is a monotonically increasing integer on core, incrementing by 1 for
+  every audio block captured. It never resets while core is running.
+
+  Use seq to detect gaps: if consecutive samples in your ringBuffer have
+  seq values that differ by more than 1, one or more blocks were dropped
+  (core was overloaded or the network hiccuped). You can visualise this as
+  a break in the waveform or a brief warning indicator. In practice, gaps
+  should be rare on a local network.
+
+  Example gap detection in the rAF loop:
+    for (let i = 1; i < ringBuffer.length; i++) {
+        if (ringBuffer[i].seq !== ringBuffer[i-1].seq + 1) {
+            // gap between index i-1 and i
+        }
+    }
+
+
+================================================================================
+6. WHAT NOT TO POLL
+================================================================================
+
+GET /api/monitor — do NOT poll this on a timer while the SSE stream is active.
+  It is a one-shot snapshot. Call it once on page load for initial render
+  (threshold line, bounds for the slider). From that point, the SSE stream
+  is your source of truth for rms, recording, and threshold.
+
+GET /monitor/samples (on core, port 8765) — the browser must NEVER call this
+  directly. It is an internal endpoint consumed by rolfsound-web's accumulator.
+  It is not protected by CORS and its response format may change without notice.
