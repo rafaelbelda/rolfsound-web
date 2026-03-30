@@ -1,44 +1,9 @@
 <style>
   /* ─── CSS ESPECÍFICO DO MOTOR 3D ─── */
-  #webgl-container { 
-    position: absolute; 
-    inset: 0; 
-    width: 100vw; 
-    height: 100vh; 
-    display: block; 
-    cursor: none;
-    z-index: 10; 
-  }
+  #webgl-container { position: absolute; inset: 0; width: 100vw; height: 100vh; display: block; cursor: none; z-index: 10; }
   #webgl-container:active { cursor: none; }
-  
-  #loading { 
-    position: absolute; 
-    top: 50%; left: 50%; 
-    transform: translate(-50%, -50%); 
-    letter-spacing: 2px; 
-    text-transform: uppercase; 
-    font-size: 11px; 
-    opacity: 0.6; 
-    z-index: 50;
-    pointer-events: none;
-    color: var(--white); 
-    transition: opacity 0.5s ease;
-  }
-
-  /* O Texto Fantasma da Tensão Elástica */
-  #pull-indicator {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.4);
-    z-index: 50; 
-    pointer-events: none;
-    opacity: 0;
-    transition: color 0.2s ease;
-  }
+  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 2px; text-transform: uppercase; font-size: 11px; opacity: 0.6; z-index: 50; pointer-events: none; color: var(--white); transition: opacity 0.5s ease; }
+  #pull-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 3px; text-transform: uppercase; font-size: 10px; color: rgba(255, 255, 255, 0.4); z-index: 50; pointer-events: none; opacity: 0; transition: color 0.2s ease; }
 </style>
 
 <div id="loading">Iniciando Motor 3D...</div>
@@ -58,21 +23,21 @@
   import * as THREE from 'three';
   import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-  // ─── 0. VARIÁVEIS GLOBAIS ───
+  // ─── 0. VARIÁVEIS GLOBAIS E ESTADO ───
+  const espacamento = 6;
+  const anguloLateral = Math.PI / 2;
+  
   let totalDiscos = 0; 
   let capasCarregadas = 0; 
-  const espacamento = 6;
   let minhaColecaoGlobal = [];
+  let discosMeshes = []; // Guarda os objetos 3D e seus dados
   let isSyncing = false;
 
-  // Seleciona a camada da biblioteca para checar a visibilidade depois
   const libraryLayer = document.getElementById('view-vinyl-library');
-
-  // GRUPO DA ESTANTE
   const estanteGroup = new THREE.Group();
   estanteGroup.position.y = -15; 
 
-  // 1. SETUP DA CENA
+  // ─── 1. SETUP DO THREE.JS ───
   const container = document.getElementById('webgl-container');
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
@@ -89,70 +54,63 @@
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
-  // ─── 2. ILUMINAÇÃO ───
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.05); 
-  scene.add(ambientLight);
-
+  // Iluminação
+  scene.add(new THREE.AmbientLight(0xffffff, 0.05)); 
+  
   const crossedLightL = new THREE.DirectionalLight(0xffffff, 1.2);
-  crossedLightL.position.set(-40, 10, 25); 
-  crossedLightL.castShadow = false; 
-  scene.add(crossedLightL);
-
+  crossedLightL.position.set(-40, 10, 25); scene.add(crossedLightL);
   const crossedLightR = new THREE.DirectionalLight(0xffffff, 1.2);
-  crossedLightR.position.set(40, 10, 25); 
-  crossedLightR.castShadow = false; 
-  scene.add(crossedLightR);
+  crossedLightR.position.set(40, 10, 25); scene.add(crossedLightR);
 
   const softShadowSpot = new THREE.SpotLight(0xffffff, 1800);
   softShadowSpot.position.set(0, 30, 40);
   softShadowSpot.target.position.set(0, -7.5, 0); 
-  softShadowSpot.angle = Math.PI / 8; 
-  softShadowSpot.penumbra = 1.0; 
-  softShadowSpot.decay = 2.0; 
-  softShadowSpot.distance = 150;
-  softShadowSpot.castShadow = true; 
-  softShadowSpot.shadow.mapSize.width = 1024; 
-  softShadowSpot.shadow.mapSize.height = 1024;
-  softShadowSpot.shadow.bias = -0.001; 
-  scene.add(softShadowSpot);
-  scene.add(softShadowSpot.target);
+  softShadowSpot.angle = Math.PI / 8; softShadowSpot.penumbra = 1.0; softShadowSpot.decay = 2.0; softShadowSpot.distance = 150;
+  softShadowSpot.castShadow = true; softShadowSpot.shadow.mapSize.width = 1024; softShadowSpot.shadow.mapSize.height = 1024;
+  scene.add(softShadowSpot); scene.add(softShadowSpot.target);
 
-  const wallGeo = new THREE.PlaneGeometry(1000, 200);
-  const wallMat = new THREE.ShadowMaterial({ opacity: 0.6 }); 
-  const wall = new THREE.Mesh(wallGeo, wallMat);
-  wall.position.z = -10; 
-  wall.receiveShadow = true; 
-  scene.add(wall);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(1000, 200), new THREE.ShadowMaterial({ opacity: 0.6 }));
+  wall.position.z = -10; wall.receiveShadow = true; scene.add(wall);
 
-  // 3. FUNÇÃO DA API
+  // ─── 2. UTILS DE DADOS (Cores e Ordenação) ───
+  // Função para converter Hex em Matiz (Hue) para o filtro Chromatics
+  function getHueFromHex(hex) {
+      if (!hex) return 0;
+      let r = parseInt(hex.substring(1,3), 16) / 255;
+      let g = parseInt(hex.substring(3,5), 16) / 255;
+      let b = parseInt(hex.substring(5,7), 16) / 255;
+      let max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h = 0;
+      if (max === min) h = 0;
+      else if (max === r) h = (g - b) / (max - min) + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / (max - min) + 2;
+      else if (max === b) h = (r - g) / (max - min) + 4;
+      return Math.round(h * 60);
+  }
+
   async function buscarColecaoDiscogs() {
-    const CACHE_KEY = 'rs_colecao_cache';
-    const TIME_KEY = 'rs_colecao_timestamp';
-    const TTL = 24 * 60 * 60 * 1000;
-
+    const CACHE_KEY = 'rs_colecao_cache', TIME_KEY = 'rs_colecao_timestamp';
     try {
-      const cache = localStorage.getItem(CACHE_KEY);
-      const savedTime = localStorage.getItem(TIME_KEY);
-      const agora = Date.now();
-
-      if (cache && savedTime && (agora - Number(savedTime) < TTL)) {
-        return JSON.parse(cache);
-      }
+      const cache = localStorage.getItem(CACHE_KEY), savedTime = localStorage.getItem(TIME_KEY);
+      if (cache && savedTime && (Date.now() - Number(savedTime) < 86400000)) return JSON.parse(cache);
 
       const response = await fetch('/api/discogs/collection'); 
       const data = await response.json();
-      
       if (!data.releases) return [];
 
-      const colecao = data.releases.map(item => ({
+      const colecao = data.releases.map((item, index) => ({
+        originalIndex: index, // Guarda a ordem padrão
         titulo: item.title,
         artista: item.artist,
         cover: item.cover,
-        spine_color: item.spine_color || '#111111'
+        spine_color: item.spine_color || '#111111',
+        hue: getHueFromHex(item.spine_color || '#111111'), // Pré-calcula a cor
+        ano: item.year || 0, // Precisa vir do backend!
+        adicionado: item.date_added || Date.now() // Precisa vir do backend!
       }));
 
       localStorage.setItem(CACHE_KEY, JSON.stringify(colecao));
-      localStorage.setItem(TIME_KEY, agora.toString());
+      localStorage.setItem(TIME_KEY, Date.now().toString());
       return colecao;
     } catch (e) {
       const fallback = localStorage.getItem(CACHE_KEY);
@@ -160,7 +118,55 @@
     }
   }
 
-  // 4. MONTAGEM DOS DISCOS
+  // ─── 3. MOTOR DE LAYOUT (Filtros) ───
+  // Esta função pega os discos atuais, reordena e atribui um "alvo" (Target X) para eles irem.
+  function aplicarFiltro(tipoFiltro) {
+      if (discosMeshes.length === 0) return;
+
+      let discosOrdenados = [...discosMeshes]; // Copia o array
+
+      switch(tipoFiltro) {
+          case 'all':
+              discosOrdenados.sort((a, b) => a.data.originalIndex - b.data.originalIndex);
+              break;
+          case 'new':
+              // Ordem reversa (mais recentes primeiro) baseada na data
+              discosOrdenados.sort((a, b) => new Date(b.data.adicionado) - new Date(a.data.adicionado));
+              break;
+          case 'era':
+              // Organiza do mais antigo para o mais novo
+              discosOrdenados.sort((a, b) => a.data.ano - b.data.ano);
+              break;
+          case 'palette':
+              // Organiza pelas cores do arco-íris
+              discosOrdenados.sort((a, b) => a.data.hue - b.data.hue);
+              break;
+          case 'frequent':
+              // TODO: Conectar com 'increment_streams' do backend. Por enquanto, randomiza para testar o efeito
+              discosOrdenados.sort(() => Math.random() - 0.5);
+              break;
+      }
+
+      // Aplica a nova posição alvo para cada disco
+      const totalLargura = (totalDiscos - 1) * espacamento;
+      
+      discosOrdenados.forEach((obj, index) => {
+          const posX = (index * espacamento) - (totalLargura / 2);
+          
+          // Em vez de teleportar, nós gravamos onde ele DEVE ir. O animate() cuida do resto!
+          obj.mesh.userData.targetX = posX;
+          obj.mesh.userData.targetRotY = posX <= 0 ? anguloLateral : -anguloLateral;
+      });
+  }
+
+  // Escuta o evento da Ilha Dinâmica
+  document.addEventListener('rolfsound-filter', (e) => {
+      const filtro = e.detail.filter;
+      aplicarFiltro(filtro);
+  });
+
+
+  // ─── 4. MONTAGEM INICIAL ───
   const loader = new GLTFLoader();
   const textureLoader = new THREE.TextureLoader();
 
@@ -170,13 +176,9 @@
 
     discoBase.traverse((child) => {
       if (child.isMesh) {
-        if (child.name === 'Capa' || child.name === 'Contracapa') {
-          child.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
-        } else if (child.name === 'Disco') {
-          child.material = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-        }
-        child.castShadow = true;
-        child.receiveShadow = true;
+        if (child.name === 'Capa' || child.name === 'Contracapa') child.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
+        else if (child.name === 'Disco') child.material = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+        child.castShadow = true; child.receiveShadow = true;
       }
     });
 
@@ -188,26 +190,28 @@
       return;
     }
 
-    const anguloLateral = Math.PI / 2;
+    const totalLargura = (totalDiscos - 1) * espacamento;
 
     minhaColecaoGlobal.forEach((album, index) => {
       const discoClone = discoBase.clone();
+      const posX = (index * espacamento) - (totalLargura / 2);
       
+      // Grava a memória do disco
+      discoClone.position.x = posX; 
+      discoClone.rotation.y = posX <= 0 ? anguloLateral : -anguloLateral;
+      discoClone.userData = { targetX: posX, targetRotY: discoClone.rotation.y };
+
       textureLoader.load(album.cover, (textura) => {
-        textura.colorSpace = THREE.SRGBColorSpace;
-        textura.flipY = true; 
+        textura.colorSpace = THREE.SRGBColorSpace; textura.flipY = true; 
         textura.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        textura.minFilter = THREE.LinearMipmapLinearFilter;
-        textura.magFilter = THREE.LinearFilter;
+        textura.minFilter = THREE.LinearMipmapLinearFilter; textura.magFilter = THREE.LinearFilter;
 
         discoClone.traverse((child) => {
           if (child.isMesh) {
             if (child.name === 'Capa' || child.name === 'Contracapa') {
-              child.material = child.material.clone();
-              child.material.map = textura;
+              child.material = child.material.clone(); child.material.map = textura;
             } else if (child.name === 'Disco') {
-              child.material = child.material.clone();
-              child.material.color = new THREE.Color(album.spine_color).lerp(new THREE.Color(0x000000), 0.15);
+              child.material = child.material.clone(); child.material.color = new THREE.Color(album.spine_color).lerp(new THREE.Color(0x000000), 0.15);
             }
             child.material.needsUpdate = true;
           }
@@ -215,116 +219,80 @@
 
         capasCarregadas++;
         document.getElementById('loading').innerText = `A montar prateleira: ${capasCarregadas} / ${totalDiscos}`;
-        
         if (capasCarregadas === totalDiscos) {
            document.getElementById('loading').style.opacity = '0';
            setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 500);
         }
       });
 
-      const totalLargura = (totalDiscos - 1) * espacamento;
-      const posX = (index * espacamento) - (totalLargura / 2);
-      discoClone.position.x = posX;
-      discoClone.rotation.y = posX <= 0 ? anguloLateral : -anguloLateral;
-
+      // Registra no sistema modular
+      discosMeshes.push({ mesh: discoClone, data: album });
       estanteGroup.add(discoClone);
     });
   });
 
-  // ─── 5. TENSÃO ELÁSTICA (Pull-to-Refresh e Inércia) ───
-  let isDragging = false;
-  let prevX = 0;
-  let targetX = 0; 
-  const MAX_OVERSHOOT = 18; 
+  // ─── 5. TENSÃO ELÁSTICA DA PRATELEIRA ───
+  let isDragging = false, prevX = 0, targetX = 0; 
+  const MAX_OVERSHOOT = 18, pullIndicator = document.getElementById('pull-indicator');
 
-  const pullIndicator = document.getElementById('pull-indicator');
-
-  // PREVENÇÃO DE ARRASTO FANTASMA: Só escuta o clique se a biblioteca estiver na tela
   container.addEventListener('mousedown', (e) => { 
     if (libraryLayer && !libraryLayer.classList.contains('active')) return;
-
-    isDragging = true; 
-    prevX = e.clientX; 
+    isDragging = true; prevX = e.clientX; 
     const dot = document.getElementById('cursor-dot');
-    if (dot) {
-      dot.style.width = '8px';
-      dot.style.height = '8px';
-    }
+    if (dot) { dot.style.width = '8px'; dot.style.height = '8px'; }
   });
 
   window.addEventListener('mouseup', () => { 
     if (!isDragging) return;
     isDragging = false; 
-    
     const dot = document.getElementById('cursor-dot');
-    if (dot) {
-      dot.style.width = '';
-      dot.style.height = '';
-    }
+    if (dot) { dot.style.width = ''; dot.style.height = ''; }
 
     const limite = (totalDiscos * espacamento) / 2;
-    
-    const puxaoDireita = targetX - limite;
-    const puxaoEsquerda = -limite - targetX;
+    const puxaoDireita = targetX - limite, puxaoEsquerda = -limite - targetX;
 
-    if ((puxaoDireita > MAX_OVERSHOOT || puxaoEsquerda > MAX_OVERSHOOT) && !isSyncing) {
-      dispararSync();
-    }
-
-    if (targetX > limite) targetX = limite;
-    else if (targetX < -limite) targetX = -limite;
+    if ((puxaoDireita > MAX_OVERSHOOT || puxaoEsquerda > MAX_OVERSHOOT) && !isSyncing) dispararSync();
+    if (targetX > limite) targetX = limite; else if (targetX < -limite) targetX = -limite;
     
     pullIndicator.style.opacity = '0';
   });
 
   window.addEventListener('mousemove', (e) => {
-    // PREVENÇÃO: Cancela o arrasto se a tela foi trocada no meio da ação
-    if (libraryLayer && !libraryLayer.classList.contains('active')) {
-        isDragging = false;
-        return;
-    }
+    if (libraryLayer && !libraryLayer.classList.contains('active')) { isDragging = false; return; }
 
     if (isDragging && capasCarregadas === totalDiscos && !isSyncing) {
-      const delta = e.clientX - prevX;
-      prevX = e.clientX;
-      
-      let moveX = delta * 0.04; 
-      let proposedX = targetX + moveX; 
+      const delta = e.clientX - prevX; prevX = e.clientX;
+      let moveX = delta * 0.04, proposedX = targetX + moveX; 
       const limite = (totalDiscos * espacamento) / 2;
 
       if (proposedX > limite || proposedX < -limite) {
         proposedX = targetX + (moveX * 0.25); 
-        
         const overshoot = Math.max(proposedX - limite, -limite - proposedX);
         pullIndicator.style.opacity = Math.min(overshoot / MAX_OVERSHOOT, 1).toString();
-        
-        if (overshoot > MAX_OVERSHOOT) {
-          pullIndicator.innerText = "Solte para atualizar!";
-          pullIndicator.style.color = "var(--white)";
-        } else {
-          pullIndicator.innerText = "Puxe para sincronizar...";
-          pullIndicator.style.color = "rgba(255, 255, 255, 0.4)";
-        }
-      } else {
-        pullIndicator.style.opacity = '0'; 
-      }
+        if (overshoot > MAX_OVERSHOOT) { pullIndicator.innerText = "Solte para atualizar!"; pullIndicator.style.color = "var(--white)"; } 
+        else { pullIndicator.innerText = "Puxe para sincronizar..."; pullIndicator.style.color = "rgba(255, 255, 255, 0.4)"; }
+      } else { pullIndicator.style.opacity = '0'; }
 
       targetX = proposedX; 
     }
   });
 
-  // ─── 6. ANIMAÇÃO GERAL COM OCLUSÃO (RENDER FREEZE) ───
+  // ─── 6. ANIMAÇÃO GERAL COM OCLUSÃO E LERP DE FILTROS ───
   const animate = () => {
     requestAnimationFrame(animate);
     
-    // O SEGREDO DO DESEMPENHO: Se a biblioteca não estiver visível, não calcule e não renderize a GPU!
-    if (libraryLayer && !libraryLayer.classList.contains('active')) {
-        return; 
-    }
+    if (libraryLayer && !libraryLayer.classList.contains('active')) return; 
     
     if (capasCarregadas === totalDiscos && totalDiscos > 0) {
+        // Desliza a estante inteira baseada no Scroll do usuário
         estanteGroup.position.y = THREE.MathUtils.lerp(estanteGroup.position.y, -7.5, 0.05);
         estanteGroup.position.x = THREE.MathUtils.lerp(estanteGroup.position.x, targetX, 0.06);
+
+        // O SEGREDO DOS FILTROS: Faz cada disco deslizar individualmente para a sua "cadeira" designada
+        discosMeshes.forEach(obj => {
+            obj.mesh.position.x = THREE.MathUtils.lerp(obj.mesh.position.x, obj.mesh.userData.targetX, 0.08);
+            obj.mesh.rotation.y = THREE.MathUtils.lerp(obj.mesh.rotation.y, obj.mesh.userData.targetRotY, 0.08);
+        });
     }
 
     renderer.render(scene, camera);
@@ -332,95 +300,53 @@
   animate();
 
   window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ─── 7. FUNÇÃO CENTRAL DE SYNC UNIFICADA ───
+  // ─── 7. FUNÇÕES DE SYNC E BACKGROUND WAKE (Inalteradas) ───
   const island = document.querySelector('rolfsound-island');
 
   async function dispararSync() {
     if (isSyncing) return;
     isSyncing = true;
-    
     island.showNotification({ text: "Prensando Novos Vinis...", spinner: true, duration: 0 });
-    
     try {
       const res = await fetch('/api/discogs/sync', { method: 'POST' });
       if(res.ok) {
-         localStorage.removeItem('rs_colecao_cache');
-         localStorage.removeItem('rs_colecao_timestamp');
+         localStorage.removeItem('rs_colecao_cache'); localStorage.removeItem('rs_colecao_timestamp');
          island.showNotification({ text: "Sincronização Concluída", duration: 2000 });
          setTimeout(() => { window.location.reload(); }, 2000); 
-      } else {
-         island.showNotification({ text: "Falha na Sincronização", duration: 3000 });
-         isSyncing = false;
-      }
-    } catch (e) {
-      console.error(e);
-      island.showNotification({ text: "Erro de Servidor", duration: 3000 });
-      isSyncing = false;
-    }
+      } else { island.showNotification({ text: "Falha na Sincronização", duration: 3000 }); isSyncing = false; }
+    } catch (e) { island.showNotification({ text: "Erro de Servidor", duration: 3000 }); isSyncing = false; }
   }
 
-  island.addEventListener('rolfsound-sync-start', () => dispararSync());
+  document.addEventListener('rolfsound-sync-start', () => dispararSync());
 
-
-  // ─── 8. BACKGROUND WAKE ───
-  let isWakingUp = false;
-  let lastCheckTime = 0;
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'visible' && !isWakingUp && !isSyncing) {
-      acordarESincronizar();
-    }
-  });
-
-  window.addEventListener("online", () => {
-    if (!isWakingUp && !isSyncing) {
-      acordarESincronizar();
-    }
-  });
+  let isWakingUp = false, lastCheckTime = 0;
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === 'visible' && !isWakingUp && !isSyncing) acordarESincronizar(); });
+  window.addEventListener("online", () => { if (!isWakingUp && !isSyncing) acordarESincronizar(); });
 
   async function acordarESincronizar() {
     if (isSyncing) return;
-    const now = Date.now();
-    if (now - lastCheckTime < 60000) return;
-    lastCheckTime = now;
-    isWakingUp = true;
+    const now = Date.now(); if (now - lastCheckTime < 60000) return;
+    lastCheckTime = now; isWakingUp = true;
     try {
-      const checkRes = await fetch('/api/discogs/check-updates');
-      const checkData = await checkRes.json();
-
+      const checkRes = await fetch('/api/discogs/check-updates'); const checkData = await checkRes.json();
       if (checkData.has_updates) {
         isSyncing = true;
-        let msgText = checkData.diff > 0 ? `${checkData.diff} novo(s) disco(s) detectado(s). Prensando...` : `Reorganizando a prateleira...`;
+        let msgText = checkData.diff > 0 ? `${checkData.diff} novo(s) detectado(s). Prensando...` : `Reorganizando...`;
         island.showNotification({ text: msgText, spinner: true, duration: 0 });
-
         const syncRes = await fetch('/api/discogs/sync', { method: 'POST' });
-        
         if(syncRes.ok) {
-          localStorage.removeItem('rs_colecao_cache');
-          localStorage.removeItem('rs_colecao_timestamp');
-          island.showNotification({ text: 'Coleção perfeitamente sincronizada!', duration: 2000 });
-          setTimeout(() => { window.location.reload(); }, 2000);
-        } else {
-          island.hideNotification();
-          isSyncing = false;
-        }
+          localStorage.removeItem('rs_colecao_cache'); localStorage.removeItem('rs_colecao_timestamp');
+          island.showNotification({ text: 'Perfeitamente sincronizada!', duration: 2000 }); setTimeout(() => { window.location.reload(); }, 2000);
+        } else { island.hideNotification(); isSyncing = false; }
       }
-    } catch (e) {
-      console.warn("Erro no Background Wake:", e);
-    } finally {
-      isWakingUp = false;
-    }
+    } catch (e) {} finally { isWakingUp = false; }
   }
 
   setTimeout(async () => {
-    const now = Date.now();
-    if (now - lastCheckTime < 60000) return;
-    lastCheckTime = now;
+    const now = Date.now(); if (now - lastCheckTime < 60000) return; lastCheckTime = now;
     try { await fetch('/api/discogs/check-updates'); } catch (_) {}
   }, 2000);
 </script>

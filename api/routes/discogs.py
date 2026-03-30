@@ -134,7 +134,9 @@ async def get_collection():
                 "title": r["title"],
                 "artist": r["artist"],
                 "cover": r["local_cover_url"], # Caminho local: /static/covers/...
-                "spine_color": r["spine_color"] # Cor HEX já calculada!
+                "spine_color": r["spine_color"], # Cor HEX já calculada!
+                "year": r.get("year", 0), 
+                "date_added": r.get("date_added", "")
             })
             
         return {"releases": colecao_formatada}
@@ -146,8 +148,6 @@ async def get_collection():
 async def sync_collection():
     """
     Sincronização de Estado Profunda (State Reconciliation).
-    Lê todas as páginas do Discogs, compara com o SQLite, 
-    adiciona os novos (baixando as capas) e destrói os vendidos (limpando o SD).
     """
     conn = database.get_connection()
     try:
@@ -162,12 +162,12 @@ async def sync_collection():
         page = 1
         total_pages = 1
 
-        # 1. VARREDURA COMPLETA NO DISCOGS (Paginando para pegar a coleção inteira)
+        # 1. VARREDURA COMPLETA NO DISCOGS
         while page <= total_pages:
             resp = await _http_client.get(
                 f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
                 headers={"Authorization": header, "User-Agent": _USER_AGENT},
-                params={"page": page, "per_page": 100}, # Puxa de 100 em 100 para ser mais rápido
+                params={"page": page, "per_page": 100}, 
                 timeout=30
             )
 
@@ -182,19 +182,16 @@ async def sync_collection():
 
             page += 1
 
-        # 2. A MATEMÁTICA DOS CONJUNTOS (A Mágica da Conciliação)
+        # 2. A MATEMÁTICA DOS CONJUNTOS
         remote_ids = set(remote_items.keys())
         local_ids = database.get_all_discogs_ids(conn)
 
-        ids_to_add = remote_ids - local_ids       # O que tem na nuvem, mas não tem aqui.
-        ids_to_remove = local_ids - remote_ids    # O que tem aqui, mas sumiu da nuvem.
+        ids_to_add = remote_ids - local_ids       
+        ids_to_remove = local_ids - remote_ids    
 
         # 3. O CAMINHÃO DE LIXO (Removendo os discos vendidos)
         for rid in ids_to_remove:
-            # Apaga do Banco de Dados
             database.delete_discogs_release(conn, rid)
-            
-            # Apaga a imagem física do cartão SD para liberar espaço!
             file_path = _COVERS_DIR / f"{rid}.jpg"
             if file_path.exists():
                 file_path.unlink()
@@ -206,6 +203,10 @@ async def sync_collection():
             title = bi.get("title", "Unknown Title")
             artist = " / ".join([a.get("name", "").rstrip(" 0123456789").strip("() ") for a in bi.get("artists", [])])
             cover_url = bi.get("cover_image", "")
+            
+            # Extraindo dados para os Filtros
+            year = bi.get("year", 0)
+            date_added = item.get("date_added", "")
 
             if cover_url:
                 processed = await process_release_cover(str(rid), cover_url, {"User-Agent": _USER_AGENT})
@@ -215,7 +216,7 @@ async def sync_collection():
                 local_url = ""
                 spine_color = "#111111"
 
-            database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, int(time.time()))
+            database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, year, date_added)
         
         conn.commit()
         return {
@@ -357,7 +358,6 @@ async def check_updates():
             discogs_count = resp.json().get("count", 0)
             diff = discogs_count - local_count
 
-            # MÁGICA: Diferente de zero significa que a coleção mudou (pra mais ou pra menos)
             if diff != 0:
                 return {"has_updates": True, "diff": diff}
 

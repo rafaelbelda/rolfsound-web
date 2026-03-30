@@ -11,7 +11,7 @@ export default class Cursor {
     
     this.isHovering = false;
     this.currentTarget = null;
-    this.targetRect = null; // Guardamos a posição na memória!
+    this.targetRect = null; 
     
     this.init();
   }
@@ -27,7 +27,6 @@ export default class Cursor {
       this.checkHoverState(e);
     });
 
-    // Se a página rolar, precisamos atualizar a caixa de colisão do botão
     window.addEventListener('scroll', () => {
       if (this.isHovering && this.currentTarget) {
         this.targetRect = this.currentTarget.getBoundingClientRect();
@@ -47,7 +46,7 @@ export default class Cursor {
         this.isHovering = true;
         this.dot.classList.add('hovering');
 
-        // Calcula a posição do botão APENAS UMA VEZ ao entrar nele
+        // Calcula tamanho APENAS UMA VEZ (pois o botão não cresce/encolhe)
         this.targetRect = target.getBoundingClientRect();
         const style = window.getComputedStyle(target);
 
@@ -73,8 +72,11 @@ export default class Cursor {
   render() {
     let targetX, targetY, currentSpeed;
 
-    if (this.isHovering && this.targetRect) {
-      // Usa a memória cacheada em vez de forçar a GPU a calcular
+    if (this.isHovering && this.currentTarget) {
+      // ─── A CORREÇÃO ESTÁ AQUI ───
+      // Atualiza a posição em TEMPO REAL para acompanhar animações CSS (como a gaveta descendo)
+      this.targetRect = this.currentTarget.getBoundingClientRect();
+
       targetX = this.targetRect.left + this.targetRect.width / 2;
       targetY = this.targetRect.top + this.targetRect.height / 2;
 

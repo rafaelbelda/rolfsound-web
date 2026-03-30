@@ -77,21 +77,17 @@ def _create_tables(conn):
             connected_at  INTEGER
         );
         
-        -- NOVA TABELA: O CACHE 3D INSTANTÂNEO DA COLEÇÃO
+        -- O CACHE 3D INSTANTÂNEO DA COLEÇÃO
         CREATE TABLE IF NOT EXISTS discogs_collection (
             release_id      INTEGER PRIMARY KEY,
             title           TEXT,
             artist          TEXT,
             local_cover_url TEXT,
             spine_color     TEXT,
-            date_added      INTEGER
+            year            INTEGER,
+            date_added      TEXT
         );
     """)
-    try:
-        conn.execute("ALTER TABLE tracks ADD COLUMN published_date INTEGER")
-        logger.info("Migrated tracks table: added published_date column")
-    except sqlite3.OperationalError:
-        pass
 
 
 def get_track(conn, track_id):
@@ -183,11 +179,6 @@ def list_tracks(conn):
 
 
 def delete_track(conn, track_id):
-    """
-    Remove a track from the library and purge its download record.
-    Without purging downloads, enqueue() finds status='complete' and
-    refuses to re-download after deletion.
-    """
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
 
@@ -265,47 +256,30 @@ def delete_discogs_account(conn) -> None:
 # ── Discogs Collection ─────────────────────────────
 
 def upsert_discogs_release(conn, release_id: int, title: str, artist: str, 
-                           local_cover_url: str, spine_color: str, date_added: int) -> None:
-    """
-    Insere ou atualiza um disco na coleção local. 
-    Usado pelo nosso 'mordomo' após baixar a imagem e calcular a cor.
-    """
+                           local_cover_url: str, spine_color: str, year: int, date_added: str) -> None:
     conn.execute("""
         INSERT OR REPLACE INTO discogs_collection 
-        (release_id, title, artist, local_cover_url, spine_color, date_added)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (release_id, title, artist, local_cover_url, spine_color, date_added))
+        (release_id, title, artist, local_cover_url, spine_color, year, date_added)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (release_id, title, artist, local_cover_url, spine_color, year, date_added))
 
 
 def get_discogs_collection(conn) -> list[dict]:
-    """
-    Retorna a coleção inteira para a interface 3D.
-    Como os dados já estão mastigados (cor em HEX e imagem local), a UI carrega instantaneamente.
-    """
     rows = conn.execute("""
         SELECT * FROM discogs_collection 
         ORDER BY date_added DESC
     """).fetchall()
     return [dict(r) for r in rows]
 
+
 def get_all_discogs_ids(conn) -> set:
-    """
-    Retorna um 'Set' matemático com todos os IDs locais.
-    Isso permite comparações ultra-rápidas no Python (O(1)).
-    """
     rows = conn.execute("SELECT release_id FROM discogs_collection").fetchall()
     return {r["release_id"] for r in rows}
 
 
 def delete_discogs_release(conn, release_id: int) -> None:
-    """
-    Remove o disco da prateleira digital do Rolfsound.
-    """
     conn.execute("DELETE FROM discogs_collection WHERE release_id = ?", (release_id,))
 
 
 def clear_discogs_collection(conn) -> None:
-    """
-    Útil caso o usuário queira forçar uma sincronização do zero.
-    """
     conn.execute("DELETE FROM discogs_collection")
