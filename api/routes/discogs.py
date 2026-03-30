@@ -9,6 +9,7 @@ import urllib.parse
 import uuid
 import httpx
 import os
+import asyncio
 from pathlib import Path
 
 from db import database
@@ -196,7 +197,7 @@ async def sync_collection():
             if file_path.exists():
                 file_path.unlink()
 
-        # 4. O MORDOMO (Baixando os discos novos)
+        # 4. O MORDOMO (Baixando os discos novos e buscando o ano original)
         for rid in ids_to_add:
             item = remote_items[rid]
             bi = item.get("basic_information", {})
@@ -204,8 +205,27 @@ async def sync_collection():
             artist = " / ".join([a.get("name", "").rstrip(" 0123456789").strip("() ") for a in bi.get("artists", [])])
             cover_url = bi.get("cover_image", "")
             
-            # Extraindo dados para os Filtros
-            year = bi.get("year", 0)
+            # Pegamos o ano da prensagem e o ID master
+            pressing_year = bi.get("year", 0)
+            master_id = bi.get("master_id", 0)
+            original_year = pressing_year
+            
+            # Se tiver um master, fazemos a viagem no tempo para buscar a data de nascimento real
+            if master_id != 0:
+                try:
+                    master_resp = await _http_client.get(
+                        f"https://api.discogs.com/masters/{master_id}",
+                        headers={"Authorization": header, "User-Agent": _USER_AGENT},
+                        timeout=10
+                    )
+                    if master_resp.status_code == 200:
+                        original_year = master_resp.json().get("year", pressing_year)
+                    
+                    # Freio de segurança: Evita banimento da API do Discogs (Limite de 60/min)
+                    await asyncio.sleep(1.1) 
+                except Exception as e:
+                    logger.warning(f"Falha ao buscar o ano original do master {master_id}: {e}")
+
             date_added = item.get("date_added", "")
 
             if cover_url:
@@ -216,7 +236,7 @@ async def sync_collection():
                 local_url = ""
                 spine_color = "#111111"
 
-            database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, year, date_added)
+            database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, original_year, date_added)
         
         conn.commit()
         return {
