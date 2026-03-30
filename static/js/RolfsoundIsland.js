@@ -30,20 +30,7 @@ class RolfsoundIsland extends HTMLElement {
     // ─── LÓGICA DE COMPORTAMENTO E SPA ROUTING ───
 
     addEventListeners() {
-        const syncBtn = this.shadowRoot.getElementById('btn-sync');
-        if (syncBtn) {
-            syncBtn.addEventListener('click', () => {
-                if(confirm("Iniciar prensagem de novos discos?")) {
-                    this.showNotification({
-                        text: "Prensando Novos Vinis...",
-                        spinner: true,
-                        duration: 0 
-                    });
-                    
-                    this.dispatchEvent(new CustomEvent('rolfsound-sync-start', { bubbles: true, composed: true }));
-                }
-            });
-        }
+        // (O botão de sync foi removido daqui)
 
         const links = this.shadowRoot.querySelectorAll('.nav-link');
         links.forEach(link => {
@@ -55,7 +42,7 @@ class RolfsoundIsland extends HTMLElement {
                 if (this.activeTab === tab) return; 
 
                 this.setAttribute('active-tab', tab);
-
+                
                 this.dispatchEvent(new CustomEvent('rolfsound-navigate', {
                     bubbles: true, composed: true, detail: { view: tab }
                 }));
@@ -103,7 +90,7 @@ class RolfsoundIsland extends HTMLElement {
 
         navContent.classList.add('hidden');
         filtersDrawer.classList.add('hidden');
-        externalIndicator.classList.add('hidden'); // Esconde o texto "Filters" quando notificar
+        externalIndicator.classList.add('hidden'); 
         
         allViews.forEach(v => {
             if (v.id !== viewId) v.classList.remove('visible');
@@ -188,6 +175,23 @@ class RolfsoundIsland extends HTMLElement {
         this.morph({
             width: targetWidth, height: 44, viewId: 'view-notification', islandClass: 'notifying', duration: duration
         });
+    }
+
+    updateNotificationText(text) {
+        const notifText = this.shadowRoot.getElementById('notif-text');
+        if (!notifText || notifText.textContent === text) return; // Ignora se o texto for igual
+        
+        // Atualiza o texto
+        notifText.textContent = text;
+        
+        // Recalcula a largura dinamicamente como se fosse elástico
+        const notifContent = this.shadowRoot.getElementById('view-notification');
+        const container = this.shadowRoot.getElementById('bar-container');
+        
+        let targetWidth = notifContent.scrollWidth + 60; 
+        if (targetWidth < 220) targetWidth = 220; 
+        
+        container.style.setProperty('--island-width', `${targetWidth}px`);
     }
 
     // ─── RENDERIZAÇÃO E STYLES ───
@@ -275,13 +279,12 @@ class RolfsoundIsland extends HTMLElement {
                 font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: var(--gray); text-transform: uppercase;
             }
 
-            /* ─── A GAVETA DE FILTROS REFINADA PARA 5 BOTÕES ─── */
             #filters-drawer {
                 position: absolute; bottom: 18px; 
                 display: flex; gap: 6px; justify-content: center; align-items: center;
                 opacity: 0; pointer-events: none; transform: translateY(10px);
                 transition: all 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
-                width: 100%; /* Garante que os botões tenham espaço */
+                width: 100%; 
             }
             #filters-drawer.hidden { display: none; }
 
@@ -293,12 +296,12 @@ class RolfsoundIsland extends HTMLElement {
                 background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
                 color: var(--gray); border-radius: 12px; padding: 6px 10px;
                 font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-                transition: all 0.2s ease; white-space: nowrap; /* Impede o texto de quebrar linha */
+                transition: all 0.2s ease; white-space: nowrap; 
             }
             .filter-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--white); }
             .filter-btn.active { background: var(--white); color: var(--black); border-color: var(--white); }
 
-            /* ─── NOTIFICAÇÕES E NAVEGAÇÃO ─── */
+            /* ─── NOTIFICAÇÕES ─── */
             .island-view {
                 display: none; position: absolute; inset: 0; align-items: center; justify-content: center; gap: 12px;
                 opacity: 0; transform: scale(0.9); transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
@@ -309,15 +312,28 @@ class RolfsoundIsland extends HTMLElement {
             .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.05); border-top-color: var(--white); border-radius: 50%; animation: spin 0.8s linear infinite; }
             @keyframes spin { to { transform: rotate(360deg); } }
 
+            /* ─── NAVEGAÇÃO SUPERIOR ─── */
             .logo-section { display: flex; align-items: center; gap: 8px; margin-left: 8px; position: relative; z-index: 1200; }
             .logo-led { width: 4px; height: 4px; background: rgba(255,255,255,0.2); border-radius: 50%; }
             .logo-name { font-weight: 700; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--white); }
-            .nav-section { display: flex; gap: 2px; position: relative; z-index: 1200; }
+            
+            /* O Segredo do Centro Absoluto */
+            .nav-section { 
+                display: flex; gap: 2px; position: absolute; left: 50%; transform: translateX(-50%); z-index: 1200; 
+            }
+            
             .nav-link { color: var(--gray); text-decoration: none; font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; padding: 6px 14px; border-radius: 16px; transition: all 0.2s ease; background: transparent; border: 1px solid transparent; position: relative; z-index: 1200; }
             .nav-link:hover, .nav-link.active { color: var(--white); }
             .nav-link.active { font-weight: 600; background: rgba(255, 255, 255, 0.05); }
-            #btn-sync { background: none; border: 1px solid transparent; color: var(--gray); font-size: 11px; padding: 4px 8px; margin-right: 5px; border-radius: 16px; transition: all 0.2s ease; position: relative; z-index: 1200; }
-            #btn-sync:hover { color: var(--white); }
+            
+            /* O Novo Ícone Minimalista (Engrenagem) */
+            .icon-link {
+                display: flex; align-items: center; justify-content: center; padding: 6px; margin-right: 4px;
+            }
+            .icon-link svg { transition: transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1); }
+            .icon-link:hover svg, .icon-link.active svg {
+                transform: rotate(90deg); /* Faz a engrenagem girar suavemente */
+            }
         </style>
 
         <div id="hover-zone">
@@ -327,11 +343,17 @@ class RolfsoundIsland extends HTMLElement {
                         <div class="logo-led"></div>
                         <span class="logo-name">Rolfsound</span>
                     </div>
+                    
                     <div class="nav-section">
                         <a href="#" class="nav-link hover-target ${this.activeTab === 'library' ? 'active' : ''}" data-tab="library">Library</a>
-                        <a href="#" class="nav-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</a>
                     </div>
-                    <button id="btn-sync" class="hover-target" title="Sincronizar Coleção">↻</button>
+                    
+                    <a href="#" class="nav-link icon-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </a>
                 </div>
 
                 <div id="filters-drawer">

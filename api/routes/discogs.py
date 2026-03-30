@@ -1,6 +1,6 @@
 # api/routes/discogs.py
 """
-Discogs OAuth 1.0a flow - Arquitetura de Banco de Dados com Sync Local.
+Discogs OAuth 1.0a flow - Sincronização Assíncrona com Data Original (Master).
 """
 
 import logging
@@ -15,7 +15,7 @@ from pathlib import Path
 from db import database
 from utils import config as cfg
 from utils.image_processor import process_release_cover
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -37,6 +37,14 @@ _ACCESS_TOKEN_URL  = "https://api.discogs.com/oauth/access_token"
 _IDENTITY_URL      = "https://api.discogs.com/oauth/identity"
 _USER_AGENT        = "Rolfsound/1.0"
 
+
+# ─── O QUADRO DE AVISOS GLOBAL (Tracking do Progresso) ───
+_sync_state = {
+    "is_syncing": False,
+    "progress": 0,
+    "total": 0,
+    "message": ""
+}
 
 # ── OAuth 1.0a Helpers ────────────────────────────────────────────────────────
 
@@ -63,7 +71,6 @@ def _oauth_header(
     if callback:
         params["oauth_callback"] = callback
 
-    # Assinatura PLAINTEXT para Discogs
     params["oauth_signature"] = (
         f"{urllib.parse.quote(consumer_secret, safe='')}"
         f"&{urllib.parse.quote(token_secret, safe='')}"
@@ -134,8 +141,8 @@ async def get_collection():
             colecao_formatada.append({
                 "title": r["title"],
                 "artist": r["artist"],
-                "cover": r["local_cover_url"], # Caminho local: /static/covers/...
-                "spine_color": r["spine_color"], # Cor HEX já calculada!
+                "cover": r["local_cover_url"], 
+                "spine_color": r["spine_color"], 
                 "year": r.get("year", 0), 
                 "date_added": r.get("date_added", "")
             })
@@ -145,35 +152,33 @@ async def get_collection():
         conn.close()
 
 
-@router.post("/discogs/sync")
-async def sync_collection():
-    """
-    Sincronização de Estado Profunda (State Reconciliation).
-    """
+# ── O OPERÁRIO INVISÍVEL (O Trabalho Pesado que roda no Fundo) ──────────────
+
+async def _run_sync_task(username: str, access_token: str, access_secret: str):
+    global _sync_state
+    
     conn = database.get_connection()
     try:
-        account = database.get_discogs_account(conn)
-        if not account:
-            return JSONResponse({"error": "not_connected"}, status_code=400)
-
         ck, cs = _consumer()
-        header = _oauth_header(ck, cs, account["access_token"], account["access_secret"])
+        header = _oauth_header(ck, cs, access_token, access_secret)
 
         remote_items = {}
         page = 1
         total_pages = 1
 
+        _sync_state["message"] = "Lendo a biblioteca remota..."
+
         # 1. VARREDURA COMPLETA NO DISCOGS
         while page <= total_pages:
             resp = await _http_client.get(
-                f"https://api.discogs.com/users/{account['username']}/collection/folders/0/releases",
+                f"https://api.discogs.com/users/{username}/collection/folders/0/releases",
                 headers={"Authorization": header, "User-Agent": _USER_AGENT},
                 params={"page": page, "per_page": 100}, 
                 timeout=30
             )
 
             if resp.status_code != 200:
-                return JSONResponse({"error": resp.text}, status_code=resp.status_code)
+                raise Exception(f"Discogs API error: {resp.status_code}")
 
             data = resp.json()
             total_pages = data.get("pagination", {}).get("pages", 1)
@@ -190,27 +195,32 @@ async def sync_collection():
         ids_to_add = remote_ids - local_ids       
         ids_to_remove = local_ids - remote_ids    
 
-        # 3. O CAMINHÃO DE LIXO (Removendo os discos vendidos)
+        # 3. O CAMINHÃO DE LIXO
+        _sync_state["message"] = "Limpando discos vendidos..."
         for rid in ids_to_remove:
             database.delete_discogs_release(conn, rid)
             file_path = _COVERS_DIR / f"{rid}.jpg"
             if file_path.exists():
                 file_path.unlink()
 
-        # 4. O MORDOMO (Baixando os discos novos e buscando o ano original)
+        # 4. O MORDOMO (Baixando discos e buscando o ano original)
+        _sync_state["total"] = len(ids_to_add)
+        _sync_state["progress"] = 0
+
         for rid in ids_to_add:
+            _sync_state["message"] = f"Prensando vinil {_sync_state['progress'] + 1} de {_sync_state['total']}..."
+            
             item = remote_items[rid]
             bi = item.get("basic_information", {})
             title = bi.get("title", "Unknown Title")
             artist = " / ".join([a.get("name", "").rstrip(" 0123456789").strip("() ") for a in bi.get("artists", [])])
             cover_url = bi.get("cover_image", "")
             
-            # Pegamos o ano da prensagem e o ID master
+            # A lógica do Mestre Purista
             pressing_year = bi.get("year", 0)
             master_id = bi.get("master_id", 0)
             original_year = pressing_year
             
-            # Se tiver um master, fazemos a viagem no tempo para buscar a data de nascimento real
             if master_id != 0:
                 try:
                     master_resp = await _http_client.get(
@@ -221,7 +231,6 @@ async def sync_collection():
                     if master_resp.status_code == 200:
                         original_year = master_resp.json().get("year", pressing_year)
                     
-                    # Freio de segurança: Evita banimento da API do Discogs (Limite de 60/min)
                     await asyncio.sleep(1.1) 
                 except Exception as e:
                     logger.warning(f"Falha ao buscar o ano original do master {master_id}: {e}")
@@ -237,20 +246,53 @@ async def sync_collection():
                 spine_color = "#111111"
 
             database.upsert_discogs_release(conn, rid, title, artist, local_url, spine_color, original_year, date_added)
+            _sync_state["progress"] += 1
         
         conn.commit()
-        return {
-            "ok": True, 
-            "message": "Sincronização perfeita.",
-            "added": len(ids_to_add),
-            "removed": len(ids_to_remove)
-        }
+        _sync_state["message"] = "Concluído!"
         
     except Exception as exc:
-        logger.error("Erro no sync: %s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=502)
+        logger.error("Erro fatal no sync background: %s", exc)
+        _sync_state["message"] = "Erro na sincronização."
     finally:
         conn.close()
+        await asyncio.sleep(2) 
+        _sync_state["is_syncing"] = False
+
+
+# ── ROTAS DE CONTROLE DA SINCRONIZAÇÃO ──────────────────────────────────────
+
+@router.post("/discogs/sync")
+async def start_sync(background_tasks: BackgroundTasks):
+    """Avisa o operário para começar e já devolve resposta."""
+    global _sync_state
+    
+    if _sync_state["is_syncing"]:
+        return JSONResponse({"message": "Sincronização já está em andamento."}, status_code=202)
+
+    conn = database.get_connection()
+    try:
+        account = database.get_discogs_account(conn)
+        if not account:
+            return JSONResponse({"error": "not_connected"}, status_code=400)
+    finally:
+        conn.close()
+
+    _sync_state["is_syncing"] = True
+    _sync_state["progress"] = 0
+    _sync_state["total"] = 0
+    _sync_state["message"] = "Iniciando motores..."
+
+    # Inicia no fundo
+    background_tasks.add_task(_run_sync_task, account["username"], account["access_token"], account["access_secret"])
+    
+    return {"ok": True, "message": "Sync started in background."}
+
+
+@router.get("/discogs/sync-status")
+async def get_sync_status():
+    """A rota que a Ilha Dinâmica vai ficar perguntando a cada X segundos."""
+    return _sync_state
 
 
 # ── OAuth Handshake (Fluxo de Conexão) ──────────────────────────────────────
