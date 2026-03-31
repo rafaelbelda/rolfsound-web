@@ -394,6 +394,7 @@ async def test_connection():
     r = await _http_client.get(_IDENTITY_URL, headers={"Authorization": h, "User-Agent": _USER_AGENT})
     return {"ok": r.status_code == 200, "username": account["username"]}
 
+
 @router.get("/discogs/check-updates")
 async def check_updates():
     """

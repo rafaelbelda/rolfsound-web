@@ -4,13 +4,46 @@
   #webgl-container:active { cursor: none; }
   #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 2px; text-transform: uppercase; font-size: 11px; opacity: 0.6; z-index: 50; pointer-events: none; color: var(--white); transition: opacity 0.5s ease; }
   #pull-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 3px; text-transform: uppercase; font-size: 10px; color: rgba(255, 255, 255, 0.4); z-index: 50; pointer-events: none; opacity: 0; transition: color 0.2s ease; }
+
+  /* ─── HUD DE TIPOGRAFIA (ETIQUETAS) ─── */
+  #labels-container {
+      position: absolute; inset: 0;
+      pointer-events: none; /* Deixa o clique passar para o 3D */
+      z-index: 20; overflow: hidden;
+  }
+  .record-label {
+      position: absolute; top: 0; left: 0;
+      /* Alinha o texto à esquerda e empurra para cima do disco */
+      transform: translate(0%, -100%); 
+      display: flex; flex-direction: column; align-items: flex-start;
+      opacity: 0; /* Começa invisível */
+      transition: opacity 0.3s ease;
+      will-change: transform, opacity; /* Otimização de GPU */
+
+      padding-left: 2px;
+
+      max-width: 200px;
+  }
+  .record-label .album {
+      color: #ffffff;
+      font-size: 10px; font-weight: 600; letter-spacing: 1px;
+      text-transform: uppercase; margin-bottom: 2px;
+      white-space: normal;
+      line-height: 1.2;
+  }
+  .record-label .artist {
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 9px; letter-spacing: 1.5px;
+      text-transform: uppercase;
+      white-space: normal;
+      line-height: 1.2;
+  }
 </style>
 
 <div id="loading">Iniciando Motor 3D...</div>
 <div id="pull-indicator">Puxe para sincronizar</div>
 <div id="webgl-container"></div>
-
-<script type="importmap">
+<div id="labels-container"></div> <script type="importmap">
   {
     "imports": {
       "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -116,9 +149,14 @@
 
   // ─── 3. A ESTEIRA INFINITA (Gerenciamento de Memória) ───
   function aplicarCapa(mesh, album) {
+      // Aplica as cores na lombada e no miolo escuro do papelão
       mesh.traverse(child => {
-          if (child.name === 'Disco') {
-              child.material.color = new THREE.Color(album.spine_color).lerp(new THREE.Color(0x000000), 0.15);
+          if (child.name === 'Spine') {
+              child.material.color = new THREE.Color(album.spine_color);
+              child.material.needsUpdate = true;
+          } else if (child.name.startsWith('Cubo_')) {
+              // Mistura a cor do disco com preto para fazer o miolo de papelão
+              child.material.color = new THREE.Color(album.spine_color).lerp(new THREE.Color(0x000000), 0.85);
               child.material.needsUpdate = true;
           }
       });
@@ -128,7 +166,8 @@
       } else {
           setTextura(mesh, null); // Loading cinza
           textureLoader.load(album.cover, (textura) => {
-              textura.colorSpace = THREE.SRGBColorSpace; textura.flipY = true; 
+              textura.colorSpace = THREE.SRGBColorSpace; 
+              textura.flipY = true; // Ajuste para UV de modelos exportados de Spline/Blender
               textura.anisotropy = renderer.capabilities.getMaxAnisotropy();
               textureCache.set(album.cover, textura);
               
@@ -143,10 +182,10 @@
           if (child.name === 'Capa' || child.name === 'Contracapa') {
               if (textura) {
                   child.material.map = textura;
-                  child.material.color.setHex(0xffffff);
+                  child.material.color.setHex(0xffffff); // Restaura o branco para não tingir a foto
               } else {
                   child.material.map = null;
-                  child.material.color.setHex(0x1a1a1a);
+                  child.material.color.setHex(0x1a1a1a); // Cor de Loading
               }
               child.material.needsUpdate = true;
           }
@@ -184,7 +223,7 @@
                   
                   const album = currentCollection[i];
                   const posX = (i * espacamento) - (totalLargura / 2);
-                  const rotY = posX <= 0 ? anguloLateral : -anguloLateral;
+                  const rotY = anguloLateral;
 
                   freeSlot.recordInstance.data = album;
                   freeSlot.recordInstance.targetX = posX;
@@ -192,6 +231,10 @@
                   freeSlot.recordInstance.mesh.position.x = posX;
                   freeSlot.recordInstance.mesh.rotation.y = rotY;
                   
+                  // ─── ATUALIZA O TEXTO DA ETIQUETA HTML ───
+                  freeSlot.label.querySelector('.album').innerText = album.titulo;
+                  freeSlot.label.querySelector('.artist').innerText = album.artista;
+
                   // Reseta o estado físico para evitar bugs ao reciclar
                   freeSlot.recordInstance.state = 'IDLE';
                   freeSlot.recordInstance.mesh.position.y = freeSlot.recordInstance.baseY;
@@ -223,7 +266,19 @@
       setTimeout(() => {
           // Organiza os dados nos bastidores
           switch(tipoFiltro) {
-              case 'all': currentCollection.sort((a, b) => a.originalIndex - b.originalIndex); break;
+              case 'all': 
+                  currentCollection.sort((a, b) => {
+                      // 1. Primeiro organizamos por Artista (Ordem Alfabética A-Z)
+                      const artistaA = a.artista.toLowerCase();
+                      const artistaB = b.artista.toLowerCase();
+                      
+                      if (artistaA < artistaB) return -1;
+                      if (artistaA > artistaB) return 1;
+                      
+                      // 2. Se o artista for o mesmo, desempatamos pelo Ano (Mais antigo para o mais novo)
+                      return a.ano - b.ano;
+                  }); 
+                  break;
               case 'new': currentCollection.sort((a, b) => new Date(b.adicionado) - new Date(a.adicionado)); break;
               case 'era': currentCollection.sort((a, b) => a.ano - b.ano); break;
               case 'palette': currentCollection.sort((a, b) => a.hue - b.hue); break;
@@ -251,46 +306,112 @@
 
   document.addEventListener('rolfsound-filter', (e) => { aplicarFiltro(e.detail.filter); });
 
-
-  // ─── 5. MONTAGEM INICIAL ───
+  // ─── 5. MONTAGEM INICIAL (CORRIGIDA PARA NÃO TER CLIPPING) ───
   const loader = new GLTFLoader();
 
   loader.load('/static/models/disco.gltf', async (gltf) => {
     const discoBase = gltf.scene;
+    // Escala para o modelo do Spline. Ajuste se ficar muito grande/pequeno.
     discoBase.scale.set(5, 5, 5); 
+    
+    const elementsToRemove = [];
+    discoBase.traverse((child) => {
+        if (child.isLight || child.isCamera) elementsToRemove.push(child);
+    });
+    elementsToRemove.forEach(el => el.removeFromParent());
 
     discoBase.traverse((child) => {
       if (child.isMesh) {
-        if (child.name === 'Capa' || child.name === 'Contracapa') child.material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
-        else if (child.name === 'Disco') child.material = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-        child.castShadow = true; child.receiveShadow = true;
+        // 1. Criamos um material base de luxo (com verniz/clearcoat)
+        const materialPadrao = new THREE.MeshPhysicalMaterial({ 
+            color: 0xffffff, 
+            roughness: 0.25, 
+            metalness: 0.1,  
+            clearcoat: 0.3,  
+            clearcoatRoughness: 0.2
+        });
+        
+        // 2. O PULODE GATO CONTRA O CLIPPING (Z-FIGHTING)
+        // Se for a face impressa, mandamos ela "pular" virtualmente para frente da câmera.
+        if (child.name === 'Capa' || child.name === 'Contracapa') {
+            materialPadrao.polygonOffset = true;
+            materialPadrao.polygonOffsetFactor = -1; // <--- PUXA PARA FRENTE
+            materialPadrao.polygonOffsetUnits = -1;
+        }
+        // Se for o miolo de suporte (papelão), removemos o brilho para imitar papelão opaco.
+        else if (child.name.startsWith('Cubo_')) {
+            materialPadrao.roughness = 0.8;
+            materialPadrao.clearcoat = 0;
+        }
+
+        child.material = materialPadrao;
+        child.castShadow = true; 
+        child.receiveShadow = true;
       }
     });
 
+    // ─── DOBRADIÇA (GATEFOLD) ───
+
+    const pastaRaiz = discoBase.children[0];
+
+    const hinge = new THREE.Group();
+    hinge.name = 'GatefoldHinge';
+    
+    // O modelo tem 300 unidades de largura. A ponta esquerda (lombada) fica no X = -150.
+    hinge.position.set(-150, 0, 0); 
+    discoBase.add(hinge);
+
+    pastaRaiz.add(hinge);
+
+    discoBase.updateMatrixWorld(true);
+
+    const capa = discoBase.getObjectByName('Capa');
+    const cuboCapa = discoBase.getObjectByName('Cubo_Capa');
+
+    if (capa) hinge.attach(capa);
+    if (cuboCapa) hinge.attach(cuboCapa);
+
     minhaColecaoGlobal = await buscarColecaoDiscogs();
     currentCollection = [...minhaColecaoGlobal];
+    
+    currentCollection.sort((a, b) => {
+        const artistaA = a.artista.toLowerCase();
+        const artistaB = b.artista.toLowerCase();
+        if (artistaA < artistaB) return -1;
+        if (artistaA > artistaB) return 1;
+        return a.ano - b.ano;
+    });
+
     totalDiscos = currentCollection.length; 
 
     if (totalDiscos === 0) { document.getElementById('loading').innerText = 'Coleção vazia. Vá em Settings.'; return; }
 
     const numMeshesCriar = Math.min(totalDiscos, MAX_MESHES);
+    const labelsContainer = document.getElementById('labels-container'); // Container das etiquetas HTML
     
     for (let i = 0; i < numMeshesCriar; i++) {
         const discoClone = discoBase.clone();
         
+        // Clona os materiais para que as modificações de textura/cor não afetem os outros
         discoClone.traverse((child) => {
             if (child.isMesh) child.material = child.material.clone();
         });
 
         discoClone.visible = false;
+        // Importante: No seu VinylRecord.js, garanta que a profundidade (Z) da Inspeção seja `baseZ` para manter o tamanho.
         const discoInteligente = new VinylRecord(discoClone, null, i);
         discoClone.userData.instance = discoInteligente;
+
+        // ─── CRIA A ETIQUETA HTML PARA ESSE DISCO ───
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'record-label';
+        labelDiv.innerHTML = `<span class="album"></span><span class="artist"></span>`;
+        labelsContainer.appendChild(labelDiv);
         
-        meshPool.push({ activeIndex: null, mesh: discoClone, recordInstance: discoInteligente });
+        meshPool.push({ activeIndex: null, mesh: discoClone, recordInstance: discoInteligente, label: labelDiv });
         estanteGroup.add(discoClone);
     }
 
-    // CENTRALIZA A CÂMERA AO CARREGAR A PÁGINA
     targetX = 0;
     atualizarJanelaVirtual();
 
@@ -298,38 +419,44 @@
     setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 500);
   });
 
-  // ─── 6. INTERAÇÕES DE MOUSE ───
-  let isDragging = false, prevX = 0, targetX = 0; 
+  // ─── 6. INTERAÇÕES DE MOUSE E CLIQUES INTELIGENTES ───
+  let isPointerDown = false; // Mouse apertado
+  let isDragging = false;    // Se arrastou de verdade
+  let startX = 0;            // Posição inicial do clique
+  let prevX = 0, targetX = 0; 
   const MAX_OVERSHOOT = 10, pullIndicator = document.getElementById('pull-indicator');
+  
+  // VARIÁVEIS GLOBAIS PARA O MODO INSPEÇÃO
+  let inspectedRecord = null; 
+  let isWaitingToInspect = false;
 
   container.addEventListener('mousedown', (e) => { 
     if (libraryLayer && !libraryLayer.classList.contains('active')) return;
-    isDragging = true; prevX = e.clientX; 
+    if (inspectedRecord) return; // Trava o arrasto se estiver inspecionando
+
+    isPointerDown = true; 
+    isDragging = false; // Começamos presumindo que é um clique, não um arrasto!
+    startX = e.clientX;
+    prevX = e.clientX; 
+    
     const dot = document.getElementById('cursor-dot');
     if (dot) { dot.style.width = '8px'; dot.style.height = '8px'; }
   });
 
-  window.addEventListener('mouseup', () => { 
-    if (!isDragging) return;
-    isDragging = false; 
-    const dot = document.getElementById('cursor-dot');
-    if (dot) { dot.style.width = ''; dot.style.height = ''; }
-
-    const limite = (totalDiscos * espacamento) / 2;
-    const puxaoDireita = targetX - limite, puxaoEsquerda = -limite - targetX;
-
-    if ((puxaoDireita > MAX_OVERSHOOT || puxaoEsquerda > MAX_OVERSHOOT) && !isSyncing) dispararSync();
-    if (targetX > limite) targetX = limite; else if (targetX < -limite) targetX = -limite;
-    pullIndicator.style.opacity = '0';
-  });
-
   window.addEventListener('mousemove', (e) => {
-    if (libraryLayer && !libraryLayer.classList.contains('active')) { isDragging = false; return; }
+    if (libraryLayer && !libraryLayer.classList.contains('active')) { 
+        isPointerDown = false; isDragging = false; return; 
+    }
 
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
-    if (isDragging && !isSyncing && !isFiltering) {
+    // Se o mouse está apertado e moveu mais de 5 pixels, aí sim ativamos o "Arrasto"
+    if (isPointerDown && Math.abs(e.clientX - startX) > 5) {
+        isDragging = true;
+    }
+
+    if (isDragging && !isSyncing && !isFiltering && !inspectedRecord) {
       const delta = e.clientX - prevX; prevX = e.clientX;
       let moveX = delta * 0.04, proposedX = targetX + moveX; 
       const limite = (totalDiscos * espacamento) / 2;
@@ -345,7 +472,59 @@
     }
   });
 
+  window.addEventListener('mouseup', (e) => { 
+    if (!isPointerDown) return;
+    isPointerDown = false;
+    
+    const dot = document.getElementById('cursor-dot');
+    if (dot) { dot.style.width = ''; dot.style.height = ''; }
+
+    if (isDragging) {
+        // O usuário ARRASTOU a estante (Física de Snap e Sync)
+        isDragging = false; 
+        const limite = (totalDiscos * espacamento) / 2;
+        const puxaoDireita = targetX - limite, puxaoEsquerda = -limite - targetX;
+
+        if ((puxaoDireita > MAX_OVERSHOOT || puxaoEsquerda > MAX_OVERSHOOT) && !isSyncing) dispararSync();
+        if (targetX > limite) targetX = limite; else if (targetX < -limite) targetX = -limite;
+        pullIndicator.style.opacity = '0';
+    } else {
+        // O usuário apenas CLICOU sem mover (Dispara a Inspeção!)
+        handleRecordClick(e);
+    }
+  });
+
+  // ─── O CLIQUE CINEMATOGRÁFICO SEQUENCIADO ───
+  function handleRecordClick(e) {
+      if (isFiltering) return;
+      
+      const path = e.composedPath && e.composedPath();
+      if (path && path.some(el => el.tagName === 'ROLFSOUND-ISLAND')) return;
+
+      // Se clicar enquanto estiver inspecionando ou aguardando, cancela e devolve pra prateleira
+      if (inspectedRecord) {
+          if (!isWaitingToInspect) {
+              inspectedRecord.state = 'RETURNING'; 
+          }
+          inspectedRecord = null;
+          isWaitingToInspect = false;
+          return;
+      }
+
+      if (hoveredRecord) {
+          inspectedRecord = hoveredRecord;
+          
+          // 1. Força a estante a centralizar perfeitamente o disco clicado
+          targetX = -inspectedRecord.targetX;
+
+          // 2. Em vez de mandar subir, colocamos ele na "fila de espera"
+          isWaitingToInspect = true; 
+      }
+  }
+
   // ─── 7. ANIMAÇÃO GERAL E RAYCASTER ───
+  const tempV = new THREE.Vector3(); // Vetor usado para projetar o 3D no 2D (textos)
+
   const animate = () => {
     requestAnimationFrame(animate);
     
@@ -355,28 +534,92 @@
         estanteGroup.position.y = THREE.MathUtils.lerp(estanteGroup.position.y, -7.5, 0.05);
         estanteGroup.position.x = THREE.MathUtils.lerp(estanteGroup.position.x, targetX, 0.06);
 
-        atualizarJanelaVirtual();
-
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(estanteGroup.children, true);
-        
-        let currentHover = null;
-        if (intersects.length > 0 && !isDragging && !isFiltering) {
-            let object = intersects[0].object;
-            while(object.parent && !object.userData.instance) { object = object.parent; }
-            if (object.userData.instance && object.visible) {
-                currentHover = object.userData.instance;
+        // ─── A MÁGICA DO SEQUENCIAMENTO ───
+        // Se estamos aguardando a estante centralizar o disco...
+        if (isWaitingToInspect && inspectedRecord) {
+            // Mede a distância: se a estante chegou a menos de 0.5 unidades do alvo, dispara a decolagem!
+            if (Math.abs(estanteGroup.position.x - targetX) < 0.5) {
+                isWaitingToInspect = false;
+                inspectedRecord.state = 'INSPECTING'; 
             }
         }
 
-        if (hoveredRecord !== currentHover) {
-            if (hoveredRecord) hoveredRecord.setHover(false);
-            if (currentHover) currentHover.setHover(true);
-            hoveredRecord = currentHover;
+        // A CÂMERA SEGUE O DISCO (Mas só começa a subir depois que a estante parou)
+        if (inspectedRecord && !isWaitingToInspect) {
+            camera.position.y = THREE.MathUtils.lerp(camera.position.y, 18, 0.04);
+        } else {
+            camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0, 0.05);
+        }
+
+        atualizarJanelaVirtual();
+
+        // ─── O NOVO CÉREBRO DO RAYCASTER E HOVER ───
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(estanteGroup.children, true);
+        
+        if (!inspectedRecord) {
+            // 1. MODO NORMAL (Prateleira Livre)
+            // Procura quem está sob o mouse e aplica o hover normalmente
+            let currentHover = null;
+            if (!isDragging && !isFiltering && intersects.length > 0) {
+                let object = intersects[0].object;
+                while(object.parent && !object.userData.instance) { object = object.parent; }
+                if (object.userData.instance && object.visible) {
+                    currentHover = object.userData.instance;
+                }
+            }
+
+            if (hoveredRecord !== currentHover) {
+                if (hoveredRecord) hoveredRecord.setHover(false);
+                if (currentHover) currentHover.setHover(true);
+                hoveredRecord = currentHover;
+            }
+        } else {
+            // 2. MODO DE INSPEÇÃO (Foco total no disco)
+            if (isWaitingToInspect) {
+                // A estante está movendo. Forçamos o disco a continuar flutuando ("surfando") até o centro!
+                inspectedRecord.setHover(true); 
+            } else {
+                // A estante parou e a animação de subir (INSPECTING) começou.
+                // Matamos o hover para que o pulinho não brigue com o voo da câmera.
+                if (hoveredRecord) {
+                    hoveredRecord.setHover(false);
+                    hoveredRecord = null;
+                }
+            }
         }
 
         meshPool.forEach(slot => {
-            if (slot.mesh.visible) slot.recordInstance.update();
+            if (slot.mesh.visible) {
+                slot.recordInstance.update();
+
+                // ─── RASTREAMENTO DA ETIQUETA (3D para 2D) ───
+                // Pegamos a posição X do disco (lombada) e subimos o Y em 10 unidades
+                tempV.set(slot.mesh.position.x, slot.mesh.position.y + 10, slot.mesh.position.z);
+                
+                // Converte a posição local da estante para a posição global da cena
+                estanteGroup.localToWorld(tempV);
+                // Projeta na câmera para achar o equivalente em 2D
+                tempV.project(camera);
+
+                // Traduz a matemática (-1 a +1) para a resolução do seu monitor
+                const screenX = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+                const screenY = (tempV.y * -0.5 + 0.5) * window.innerHeight;
+
+                // Move a div instantaneamente pelo transform
+                slot.label.style.transform = `translate(0%, -100%) translate(${screenX}px, ${screenY}px)`;
+
+                // ─── LÓGICA DE VISIBILIDADE ───
+                // Some com a tipografia se a estante estiver arrastando, ou se tiver algum disco em Inspeção
+                if (isDragging || isWaitingToInspect || inspectedRecord || slot.recordInstance.state !== 'IDLE') {
+                    slot.label.style.opacity = '0';
+                } else {
+                    slot.label.style.opacity = '1'; 
+                }
+            } else {
+                // Se a esteira desativar o disco invisível, desativa o texto dele também
+                slot.label.style.opacity = '0';
+            }
         });
     }
 
