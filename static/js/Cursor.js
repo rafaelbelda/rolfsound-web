@@ -28,12 +28,27 @@ export default class Cursor {
     });
 
     window.addEventListener('scroll', () => {
-      if (this.isHovering && this.currentTarget) {
+      if (this.isHovering && this.currentTarget && this.currentTarget.isConnected) {
         this.targetRect = this.currentTarget.getBoundingClientRect();
       }
     }, { capture: true, passive: true });
 
     this.render();
+  }
+
+  // ─── FUNÇÃO NOVA: Limpa o estado do cursor com segurança ───
+  resetHover() {
+    this.isHovering = false;
+    this.currentTarget = null;
+    this.targetRect = null;
+    this.dot.classList.remove('hovering');
+
+    this.dot.style.width = '5px';
+    this.dot.style.height = '5px';
+    this.dot.style.borderRadius = '50%';
+    
+    this.dot.style.setProperty('--dx', '0px');
+    this.dot.style.setProperty('--dy', '0px');
   }
 
   checkHoverState(e) {
@@ -55,17 +70,7 @@ export default class Cursor {
         this.dot.style.borderRadius = style.borderRadius;
       }
     } else if (this.isHovering) {
-      this.isHovering = false;
-      this.currentTarget = null;
-      this.targetRect = null;
-      this.dot.classList.remove('hovering');
-
-      this.dot.style.width = '5px';
-      this.dot.style.height = '5px';
-      this.dot.style.borderRadius = '50%';
-      
-      this.dot.style.setProperty('--dx', '0px');
-      this.dot.style.setProperty('--dy', '0px');
+      this.resetHover();
     }
   }
 
@@ -73,20 +78,30 @@ export default class Cursor {
     let targetX, targetY, currentSpeed;
 
     if (this.isHovering && this.currentTarget) {
-      // ─── A CORREÇÃO ESTÁ AQUI ───
-      // Atualiza a posição em TEMPO REAL para acompanhar animações CSS (como a gaveta descendo)
-      this.targetRect = this.currentTarget.getBoundingClientRect();
+      // ─── A CORREÇÃO DO BUG DA MITOSE ESTÁ AQUI ───
+      // Se o botão for deletado do DOM OU perder a classe hover-target, solta o cursor imediatamente!
+      if (!this.currentTarget.isConnected || !this.currentTarget.classList.contains('hover-target')) {
+        this.resetHover();
+        
+        // Redireciona o alvo imediatamente para o mouse livre para não engasgar
+        targetX = this.mouse.x;
+        targetY = this.mouse.y;
+        currentSpeed = this.speedFree;
+      } else {
+        // Atualiza a posição em TEMPO REAL para acompanhar animações CSS
+        this.targetRect = this.currentTarget.getBoundingClientRect();
 
-      targetX = this.targetRect.left + this.targetRect.width / 2;
-      targetY = this.targetRect.top + this.targetRect.height / 2;
+        targetX = this.targetRect.left + this.targetRect.width / 2;
+        targetY = this.targetRect.top + this.targetRect.height / 2;
 
-      const dx = (this.mouse.x - targetX) * 0.4;
-      const dy = (this.mouse.y - targetY) * 0.4;
+        const dx = (this.mouse.x - targetX) * 0.4;
+        const dy = (this.mouse.y - targetY) * 0.4;
 
-      this.dot.style.setProperty('--dx', `${dx}px`);
-      this.dot.style.setProperty('--dy', `${dy}px`);
-      
-      currentSpeed = this.speedMagnetic;
+        this.dot.style.setProperty('--dx', `${dx}px`);
+        this.dot.style.setProperty('--dy', `${dy}px`);
+        
+        currentSpeed = this.speedMagnetic;
+      }
     } else {
       targetX = this.mouse.x;
       targetY = this.mouse.y;

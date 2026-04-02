@@ -71,9 +71,63 @@
   // ─── O MOTOR VIRTUAL (Object Pool) ───
   const MAX_MESHES = 45; // Teto máximo de RAM (impede travamentos)
   let meshPool = [];     // Guarda os clones 3D para reciclagem
-  const textureCache = new Map(); // Cache de texturas para não baixar duas vezes
+
+// Máximo de texturas vivas na VRAM ao mesmo tempo.
+// 80 cobre ~2× o MAX_MESHES (45) com folga para navegação rápida.
+// Cada textura de capa em 500×500px ocupa ~1 MB de VRAM → 80 ≈ 80 MB.
+// Ajuste para baixo (ex: 50) se estiver em hardware com pouca VRAM.
+const TEXTURE_LRU_LIMIT = 80;
+
+const textureLRU = {
+    _cache: new Map(), // url → THREE.Texture
+
+    has(url) {
+        return this._cache.has(url);
+    },
+
+    get(url) {
+        if (!this._cache.has(url)) return undefined;
+
+        // ─── LRU touch: remove e reinseere no final para marcar como "recente" ───
+        // O Map do JS preserva ordem de inserção, então o primeiro elemento
+        // é sempre o "mais antigo" (candidato a eviction).
+        const tex = this._cache.get(url);
+        this._cache.delete(url);
+        this._cache.set(url, tex);
+        return tex;
+    },
+
+    set(url, texture) {
+        // Se já existe, toca (move para o final) e não conta como novo
+        if (this._cache.has(url)) {
+            this._cache.delete(url);
+            this._cache.set(url, texture);
+            return;
+        }
+
+        // Eviction: se chegou no limite, descarta a textura mais antiga
+        if (this._cache.size >= TEXTURE_LRU_LIMIT) {
+            const oldestUrl = this._cache.keys().next().value;
+            const oldestTex = this._cache.get(oldestUrl);
+
+            // Three.js libera a VRAM ao chamar dispose()
+            if (oldestTex && typeof oldestTex.dispose === 'function') {
+                oldestTex.dispose();
+            }
+
+            this._cache.delete(oldestUrl);
+        }
+
+        this._cache.set(url, texture);
+    },
+
+    get size() {
+        return this._cache.size;
+    }
+};
 
   const libraryLayer = document.getElementById('view-vinyl-library');
+  const island = document.querySelector('rolfsound-island'); // MOVIDO PARA CIMA PARA ACESSO GLOBAL
   const estanteGroup = new THREE.Group();
   estanteGroup.position.y = -15; 
 
@@ -161,15 +215,15 @@
           }
       });
 
-      if (textureCache.has(album.cover)) {
-          setTextura(mesh, textureCache.get(album.cover));
+      if (textureLRU.has(album.cover)) {
+          setTextura(mesh, textureLRU.get(album.cover));
       } else {
           setTextura(mesh, null); // Loading cinza
           textureLoader.load(album.cover, (textura) => {
               textura.colorSpace = THREE.SRGBColorSpace; 
               textura.flipY = true; // Ajuste para UV de modelos exportados de Spline/Blender
               textura.anisotropy = renderer.capabilities.getMaxAnisotropy();
-              textureCache.set(album.cover, textura);
+              textureLRU.set(album.cover, textura);
               
               if (mesh.userData.currentCover === album.cover) setTextura(mesh, textura);
           });
@@ -505,6 +559,7 @@
       if (inspectedRecord) {
           if (!isWaitingToInspect) {
               inspectedRecord.state = 'RETURNING'; 
+              island.undoMitosis(); // Desfaz a mitose e destrava a ilha se clicar fora
           }
           inspectedRecord = null;
           isWaitingToInspect = false;
@@ -521,6 +576,17 @@
           isWaitingToInspect = true; 
       }
   }
+
+  // Escuta o evento de fechar criado dinamicamente pela Mitose
+  document.addEventListener('rolfsound-close-inspect', () => {
+      if (inspectedRecord) {
+          inspectedRecord.state = 'RETURNING'; 
+          inspectedRecord = null;
+          isWaitingToInspect = false;
+          
+          island.undoMitosis('btn-fechar'); // Destrói o botão de mitose específico
+      }
+  });
 
   // ─── 7. ANIMAÇÃO GERAL E RAYCASTER ───
   const tempV = new THREE.Vector3(); // Vetor usado para projetar o 3D no 2D (textos)
@@ -541,6 +607,17 @@
             if (Math.abs(estanteGroup.position.x - targetX) < 0.5) {
                 isWaitingToInspect = false;
                 inspectedRecord.state = 'INSPECTING'; 
+                
+                // Dispara a Mitose Modular com a Ilha
+                if (island) {
+                    island.mitosis({
+                        id: 'btn-fechar',
+                        icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+                        eventName: 'rolfsound-close-inspect', 
+                        direction: 'right', 
+                        distance: 245 // Distância para acomodar bem o botão fora da ilha principal
+                    });
+                }
             }
         }
 
@@ -632,7 +709,7 @@
   });
 
   // ─── 8. MOTOR DE SYNC (Background Polling) ───
-  const island = document.querySelector('rolfsound-island');
+  // const island = ... (Foi movido para as variáveis globais lá em cima!)
 
   function monitorarProgressoSync() {
       const pollInterval = setInterval(async () => {
@@ -640,16 +717,16 @@
               const res = await fetch('/api/discogs/sync-status');
               const status = await res.json();
               
-              if (island.updateNotificationText) island.updateNotificationText(status.message);
+              if (island && island.updateNotificationText) island.updateNotificationText(status.message);
 
               if (!status.is_syncing && status.message !== "Iniciando motores...") {
                   clearInterval(pollInterval); 
                   if (status.message === "Concluído!") {
                       localStorage.removeItem('rs_colecao_cache'); localStorage.removeItem('rs_colecao_timestamp');
-                      island.showNotification({ text: "Sincronização Perfeita!", duration: 2500 });
+                      if(island) island.showNotification({ text: "Sincronização Perfeita!", duration: 2500 });
                       setTimeout(() => { window.location.reload(); }, 2500);
                   } else {
-                      island.showNotification({ text: status.message, duration: 4000 });
+                      if(island) island.showNotification({ text: status.message, duration: 4000 });
                       isSyncing = false;
                   }
               }
@@ -660,12 +737,12 @@
   async function dispararSync() {
     if (isSyncing) return;
     isSyncing = true;
-    island.showNotification({ text: "Conectando ao Discogs...", spinner: true, duration: 0 });
+    if(island) island.showNotification({ text: "Conectando ao Discogs...", spinner: true, duration: 0 });
     try {
       const res = await fetch('/api/discogs/sync', { method: 'POST' });
       if(res.ok) { monitorarProgressoSync(); } 
-      else { island.showNotification({ text: "Falha de Conexão", duration: 3000 }); isSyncing = false; }
-    } catch (e) { island.showNotification({ text: "Erro de Servidor", duration: 3000 }); isSyncing = false; }
+      else { if(island) island.showNotification({ text: "Falha de Conexão", duration: 3000 }); isSyncing = false; }
+    } catch (e) { if(island) island.showNotification({ text: "Erro de Servidor", duration: 3000 }); isSyncing = false; }
   }
 
   document.addEventListener('rolfsound-sync-start', () => dispararSync());
@@ -683,9 +760,9 @@
       if (checkData.has_updates) {
         isSyncing = true;
         let msgText = checkData.diff > 0 ? `${checkData.diff} novo(s) detectado(s).` : `Diferença detectada.`;
-        island.showNotification({ text: msgText, spinner: true, duration: 0 });
+        if(island) island.showNotification({ text: msgText, spinner: true, duration: 0 });
         const syncRes = await fetch('/api/discogs/sync', { method: 'POST' });
-        if(syncRes.ok) { monitorarProgressoSync(); } else { island.hideNotification(); isSyncing = false; }
+        if(syncRes.ok) { monitorarProgressoSync(); } else { if(island) island.hideNotification(); isSyncing = false; }
       }
     } catch (e) {} finally { isWakingUp = false; }
   }
