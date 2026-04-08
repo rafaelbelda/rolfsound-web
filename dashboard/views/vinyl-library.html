@@ -56,6 +56,7 @@
   import * as THREE from 'three';
   import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
   import VinylRecord from '/static/js/VinylRecord.js';
+  import AnimationEngine from '/static/js/AnimationEngine.js';
 
   // ─── 0. VARIÁVEIS GLOBAIS E ESTADO ───
   const espacamento = 6;
@@ -559,7 +560,7 @@ const textureLRU = {
       if (inspectedRecord) {
           if (!isWaitingToInspect) {
               inspectedRecord.state = 'RETURNING'; 
-              island.undoMitosis(); // Desfaz a mitose e destrava a ilha se clicar fora
+              AnimationEngine.undoMitosis(island); // Desfaz a mitose e destrava a ilha se clicar fora
           }
           inspectedRecord = null;
           isWaitingToInspect = false;
@@ -584,7 +585,7 @@ const textureLRU = {
           inspectedRecord = null;
           isWaitingToInspect = false;
           
-          island.undoMitosis('btn-fechar'); // Destrói o botão de mitose específico
+          AnimationEngine.undoMitosis(island, 'btn-fechar'); // Destrói o botão de mitose específico
       }
   });
 
@@ -608,9 +609,9 @@ const textureLRU = {
                 isWaitingToInspect = false;
                 inspectedRecord.state = 'INSPECTING'; 
                 
-                // Dispara a Mitose Modular com a Ilha
+                // Dispara a Mitose Modular com a Ilha via AnimationEngine
                 if (island) {
-                    island.mitosis({
+                    AnimationEngine.mitosis(island, {
                         id: 'btn-fechar',
                         icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
                         eventName: 'rolfsound-close-inspect', 
@@ -717,16 +718,16 @@ const textureLRU = {
               const res = await fetch('/api/discogs/sync-status');
               const status = await res.json();
               
-              if (island && island.updateNotificationText) island.updateNotificationText(status.message);
+              if (island && island.updateNotificationText) AnimationEngine.updateNotificationText(island, status.message);
 
               if (!status.is_syncing && status.message !== "Iniciando motores...") {
                   clearInterval(pollInterval); 
                   if (status.message === "Concluído!") {
                       localStorage.removeItem('rs_colecao_cache'); localStorage.removeItem('rs_colecao_timestamp');
-                      if(island) island.showNotification({ text: "Sincronização Perfeita!", duration: 2500 });
+                      if(island) AnimationEngine.showNotification(island, { text: "Sincronização Perfeita!", duration: 2500 });
                       setTimeout(() => { window.location.reload(); }, 2500);
                   } else {
-                      if(island) island.showNotification({ text: status.message, duration: 4000 });
+                      if(island) AnimationEngine.showNotification(island, { text: status.message, duration: 4000 });
                       isSyncing = false;
                   }
               }
@@ -737,12 +738,12 @@ const textureLRU = {
   async function dispararSync() {
     if (isSyncing) return;
     isSyncing = true;
-    if(island) island.showNotification({ text: "Conectando ao Discogs...", spinner: true, duration: 0 });
+    if(island) AnimationEngine.showNotification(island, { text: "Conectando ao Discogs...", spinner: true, duration: 0 });
     try {
       const res = await fetch('/api/discogs/sync', { method: 'POST' });
       if(res.ok) { monitorarProgressoSync(); } 
-      else { if(island) island.showNotification({ text: "Falha de Conexão", duration: 3000 }); isSyncing = false; }
-    } catch (e) { if(island) island.showNotification({ text: "Erro de Servidor", duration: 3000 }); isSyncing = false; }
+      else { if(island) AnimationEngine.showNotification(island, { text: "Falha de Conexão", duration: 3000 }); isSyncing = false; }
+    } catch (e) { if(island) AnimationEngine.showNotification(island, { text: "Erro de Servidor", duration: 3000 }); isSyncing = false; }
   }
 
   document.addEventListener('rolfsound-sync-start', () => dispararSync());
@@ -760,9 +761,9 @@ const textureLRU = {
       if (checkData.has_updates) {
         isSyncing = true;
         let msgText = checkData.diff > 0 ? `${checkData.diff} novo(s) detectado(s).` : `Diferença detectada.`;
-        if(island) island.showNotification({ text: msgText, spinner: true, duration: 0 });
+        if(island) AnimationEngine.showNotification(island, { text: msgText, spinner: true, duration: 0 });
         const syncRes = await fetch('/api/discogs/sync', { method: 'POST' });
-        if(syncRes.ok) { monitorarProgressoSync(); } else { if(island) island.hideNotification(); isSyncing = false; }
+        if(syncRes.ok) { monitorarProgressoSync(); } else { if(island) AnimationEngine.hideNotification(island); isSyncing = false; }
       }
     } catch (e) {} finally { isWakingUp = false; }
   }

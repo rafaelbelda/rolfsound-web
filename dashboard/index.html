@@ -7,7 +7,12 @@
   
   <link rel="stylesheet" href="/static/css/global.css">
   
+  <script type="module">
+    import AnimationEngine from '/static/js/AnimationEngine.js';
+    window.AnimationEngine = AnimationEngine;
+  </script>
   <script type="module" src="/static/js/RolfsoundIsland.js"></script>
+  <script type="module" src="/static/js/playback-mitosis.js"></script>
 </head>
 <body>
 
@@ -29,7 +34,6 @@
 
     const island = document.querySelector('rolfsound-island');
     const views = {
-        // A aba 'library' agora aponta corretamente para a section do vinyl-library
         'library': document.getElementById('view-vinyl-library'),
         'settings': document.getElementById('view-settings')
     };
@@ -40,16 +44,22 @@
         island.setAttribute('active-tab', path);
         Object.values(views).forEach(v => v.classList.remove('active'));
         views[path].classList.add('active');
+    } else if (path === 'playback') {
+        // Playback é renderizado via Mitosis, não tem view dedicada
+        island.setAttribute('active-tab', path);
     }
 
     // Transição suave quando clica na Ilha
     island.addEventListener('rolfsound-navigate', (e) => {
         const targetView = e.detail.view;
 
+        // Remove todas as views ativas
         Object.values(views).forEach(v => { if(v) v.classList.remove('active'); });
+        
+        // Ativa a view se existir (library, settings) - playback é via Mitosis
         if(views[targetView]) views[targetView].classList.add('active');
 
-        // Mantém a URL limpa (ex: /library)
+        // Mantém a URL atualizada
         const newUrl = targetView === 'library' ? '/library' : `/${targetView}`;
         window.history.pushState({}, '', newUrl);
     });
@@ -58,12 +68,18 @@
         const target = views[view] || views['library'];
         island.setAttribute('active-tab', view in views ? view : 'library');
         Object.values(views).forEach(v => v.classList.remove('active'));
-        target.classList.add('active');
+        if (target) target.classList.add('active');
     }
 
     window.addEventListener('popstate', () => {
         const view = window.location.pathname.replace('/', '') || 'library';
-        activateView(view);
+        if (view === 'playback') {
+            // Playback triggered via popstate
+            island.setAttribute('active-tab', 'playback');
+            Object.values(views).forEach(v => v.classList.remove('active'));
+        } else {
+            activateView(view);
+        }
     });
   </script>
 </body>

@@ -52,6 +52,11 @@ export default class Cursor {
   }
 
   checkHoverState(e) {
+    // Valida se o elemento ainda existe e tem a classe
+    if (this.currentTarget && (!this.currentTarget.isConnected || !this.currentTarget.classList.contains('hover-target'))) {
+      this.resetHover();
+    }
+
     const path = e.composedPath();
     const target = path.find(el => el.classList && el.classList.contains('hover-target'));
 

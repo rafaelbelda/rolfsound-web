@@ -448,6 +448,7 @@ class RolfsoundIsland extends HTMLElement {
 
                     <div class="nav-section">
                         <a href="#" class="nav-link hover-target ${this.activeTab === 'library'  ? 'active' : ''}" data-tab="library">Library</a>
+                        <a href="#" class="nav-link hover-target ${this.activeTab === 'playback' ? 'active' : ''}" data-tab="playback">Now Playing</a>
                     </div>
 
                     <a href="#" class="nav-link icon-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">

@@ -82,6 +82,8 @@
 </div>
 
 <script type="module">
+  import AnimationEngine from '/static/js/AnimationEngine.js';
+
   const app = document.getElementById('settings-app');
   const globalIsland = document.querySelector('rolfsound-island');
   let authWindow = null;
@@ -113,7 +115,7 @@
 
     } catch (err) {
       setState('disconnected');
-      globalIsland.showNotification({ text: "Erro ao iniciar OAuth", duration: 4000 });
+      AnimationEngine.showNotification(globalIsland, { text: "Erro ao iniciar OAuth", duration: 4000 });
     }
   };
 
@@ -142,7 +144,7 @@
     }
     setState('connected');
     if (authWindow) { authWindow.close(); authWindow = null; }
-    globalIsland.showNotification({ text: "Discogs Conectado", duration: 3000 });
+    AnimationEngine.showNotification(globalIsland, { text: "Discogs Conectado", duration: 3000 });
   }
 
   window.testConnection = async function() {
@@ -153,12 +155,12 @@
       const res = await fetch('/api/discogs/test');
       const data = await res.json();
       if (data.ok) {
-        globalIsland.showNotification({ text: `Conexão OK: ${data.username}`, duration: 3000 });
+        AnimationEngine.showNotification(globalIsland, { text: `Conexão OK: ${data.username}`, duration: 3000 });
       } else {
-        globalIsland.showNotification({ text: "Teste falhou", duration: 3000 });
+        AnimationEngine.showNotification(globalIsland, { text: "Teste falhou", duration: 3000 });
       }
     } catch {
-      globalIsland.showNotification({ text: "Servidor offline", duration: 3000 });
+      AnimationEngine.showNotification(globalIsland, { text: "Servidor offline", duration: 3000 });
     } finally {
       btn.disabled = false;
       btn.textContent = 'Test Connection';
@@ -169,7 +171,7 @@
     if (!confirm('Disconnect your Discogs account from this local environment?')) return;
     await fetch('/api/discogs/account', { method: 'DELETE' });
     setState('disconnected');
-    globalIsland.showNotification({ text: "Conta Desconectada", duration: 3000 });
+    AnimationEngine.showNotification(globalIsland, { text: "Conta Desconectada", duration: 3000 });
   };
 
   function populateConnectedUI({ username, connected_at, token_hint }) {
