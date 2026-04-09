@@ -19,13 +19,14 @@ export default class Cursor {
   init() {
     if (!this.dot) return;
 
-    this.dot.style.transition = 'width 0.15s, height 0.15s, border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s ease, border 0.3s ease';
-
     window.addEventListener('mousemove', (e) => {
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;
       this.checkHoverState(e);
     });
+
+    // Cursor sai da janela do browser → força reset para não ficar travado
+    document.addEventListener('mouseleave', () => this.resetHover());
 
     window.addEventListener('scroll', () => {
       if (this.isHovering && this.currentTarget && this.currentTarget.isConnected) {

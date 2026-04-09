@@ -33,24 +33,32 @@ export class AnimationEngine {
       startAnimation = 'cellularExpansion',
       onComplete = null,
       duration = 850,
-      containerId = 'mitosis-container'
+      containerId = 'mitosis-container',
+      initialStyle = null
     } = options;
 
     const container = document.createElement('div');
     container.id = containerId;
     container.innerHTML = containerHTML;
-    container.style.cssText = `
-      position: fixed;
-      top: 15px;
-      left: 50%;
-      transform: translateX(-50%) scale(0.08);
-      width: 38px;
-      height: 38px;
-      z-index: 996;
-      border-radius: 16px;
-      animation: ${startAnimation} ${duration}ms cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
-      pointer-events: auto;
-    `;
+
+    const animDecl = `animation: ${startAnimation} ${duration}ms linear both;`;
+
+    if (initialStyle) {
+      container.style.cssText = `${initialStyle}; ${animDecl}`;
+    } else {
+      container.style.cssText = `
+        position: fixed;
+        top: 15px;
+        left: 50%;
+        transform: translateX(-50%) scale(0.08);
+        width: 38px;
+        height: 38px;
+        z-index: 996;
+        border-radius: 16px;
+        pointer-events: auto;
+        ${animDecl}
+      `;
+    }
 
     document.body.appendChild(container);
 
@@ -78,7 +86,7 @@ export class AnimationEngine {
       duration = 850
     } = options;
 
-    container.style.animation = `${endAnimation} ${duration}ms cubic-bezier(0.34, 1.2, 0.64, 1) forwards`;
+    container.style.animation = `${endAnimation} ${duration}ms linear both`;
 
     setTimeout(() => {
       if (container.parentNode) {

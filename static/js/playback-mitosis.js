@@ -71,38 +71,73 @@ class PlaybackMitosisManager {
   registerAnimations() {
     // Registra as keyframes de mitose no AnimationEngine
     AnimationEngine.registerKeyframes('cellular', `
+      /* ─── EXPANSÃO: pílula nasce abaixo da ilha e viaja ao centro ─── */
       @keyframes cellularExpansion {
         0% {
-          top: 15px;
+          /* Pílula aparece colapsada logo abaixo da ilha */
+          animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+          top: 60px;
           left: 50%;
-          transform: translateX(-50%) scale(0.08);
-          width: 38px;
+          transform: translate(-50%, 0) scaleY(0);
+          width: 450px;
           height: 38px;
-          opacity: 0.3;
+          border-radius: 19px;
+          opacity: 0;
+        }
+        22% {
+          /* Célula-filha totalmente formada — momento da divisão celular */
+          animation-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+          top: 60px;
+          left: 50%;
+          transform: translate(-50%, 0) scaleY(1);
+          width: 450px;
+          height: 38px;
+          border-radius: 19px;
+          opacity: 1;
         }
         100% {
+          /* Player no centro da tela */
           top: 50%;
           left: 50%;
-          transform: translate(-50%, -50%) scale(1);
+          transform: translate(-50%, -50%) scaleY(1);
           width: 380px;
-          height: auto;
+          height: 520px;
+          border-radius: 20px;
           opacity: 1;
         }
       }
 
+      /* ─── CONTRAÇÃO: player retorna à pílula e desaparece ─── */
       @keyframes cellularContraction {
         0% {
+          /* Player parte do centro — height vem do inline style capturado */
+          animation-timing-function: cubic-bezier(0.55, 0, 0.1, 1);
           top: 50%;
           left: 50%;
-          transform: translate(-50%, -50%) scale(1);
+          transform: translate(-50%, -50%) scaleY(1);
           width: 380px;
+          border-radius: 20px;
+          opacity: 1;
+        }
+        82% {
+          /* Pílula de volta abaixo da ilha */
+          animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+          top: 60px;
+          left: 50%;
+          transform: translate(-50%, 0) scaleY(1);
+          width: 450px;
+          height: 38px;
+          border-radius: 19px;
           opacity: 1;
         }
         100% {
-          top: 15px;
+          /* Célula colapsa de volta para a ilha */
+          top: 60px;
           left: 50%;
-          transform: translateX(-50%) scale(0.08);
-          width: 38px;
+          transform: translate(-50%, 0) scaleY(0);
+          width: 450px;
+          height: 38px;
+          border-radius: 19px;
           opacity: 0;
         }
       }
@@ -110,8 +145,8 @@ class PlaybackMitosisManager {
       #playback-player-container {
         position: fixed !important;
         z-index: 996;
-        pointer-events: auto;
-        border-radius: 16px;
+        transform-origin: top center;
+        will-change: transform, opacity;
       }
     `);
   }
@@ -150,7 +185,30 @@ class PlaybackMitosisManager {
       startAnimation: 'cellularExpansion',
       containerId: 'playback-player-container',
       duration: 850,
-      onComplete: () => this.cacheDomElements()
+      // Estado inicial = pílula colapsada logo abaixo da ilha
+      initialStyle: `
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translate(-50%, 0) scaleY(0);
+        transform-origin: top center;
+        width: 450px;
+        height: 38px;
+        border-radius: 19px;
+        opacity: 0;
+        z-index: 996;
+        pointer-events: none;
+        overflow: hidden;
+      `,
+      onComplete: () => {
+        // Libera a altura fixa e permite interação após animação completa
+        if (this.playerContainer) {
+          this.playerContainer.style.height = 'auto';
+          this.playerContainer.style.overflow = 'visible';
+          this.playerContainer.style.pointerEvents = 'auto';
+        }
+        this.cacheDomElements();
+      }
     });
 
     // Reset cursor quando abre a mitose
@@ -163,9 +221,17 @@ class PlaybackMitosisManager {
     if (!this.isMorphed) return;
     this.isMorphed = false;
 
+    // ── Fixa a altura em px antes de contrair (height: auto não é animável) ──
+    if (this.playerContainer) {
+      const h = this.playerContainer.getBoundingClientRect().height;
+      this.playerContainer.style.height = h + 'px';
+      this.playerContainer.style.overflow = 'hidden';
+      this.playerContainer.style.pointerEvents = 'none';
+    }
+
     AnimationEngine.destroyMitosis(this.playerContainer, {
       endAnimation: 'cellularContraction',
-      duration: 850,
+      duration: 750,
       onComplete: () => {
         this.playerContainer = null;
         this.clearDomReferences();
@@ -209,13 +275,13 @@ class PlaybackMitosisManager {
 
         <!-- Controls -->
         <div style="display: flex; align-items: center; justify-content: center; gap: 16px;">
-          <button id="btn-skip-back" style="display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; color: white; cursor: pointer; transition: all 0.25s ease; padding: 0; font-size: 0;">
+          <button id="btn-skip-back" class="hover-target" style="display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; color: white; transition: all 0.25s ease; padding: 0; font-size: 0;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 16px; height: 16px; stroke-width: 1.8;">
               <polygon points="19,20 9,12 19,4" />
               <line x1="5" y1="19" x2="5" y2="5" />
             </svg>
           </button>
-          <button id="btn-play-pause" style="display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; background: rgba(255,255,255,0.95); border: none; border-radius: 10px; color: black; cursor: pointer; transition: all 0.25s ease; padding: 0;">
+          <button id="btn-play-pause" class="hover-target" style="display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; background: rgba(255,255,255,0.95); border: none; border-radius: 10px; color: black; transition: all 0.25s ease; padding: 0;">
             <svg id="icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 22px; height: 22px; stroke-width: 1.8;">
               <polygon points="5,3 19,12 5,21" />
             </svg>
@@ -224,7 +290,7 @@ class PlaybackMitosisManager {
               <rect x="14" y="4" width="4" height="16" />
             </svg>
           </button>
-          <button id="btn-skip-fwd" style="display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; color: white; cursor: pointer; transition: all 0.25s ease; padding: 0; font-size: 0;">
+          <button id="btn-skip-fwd" class="hover-target" style="display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; color: white; transition: all 0.25s ease; padding: 0; font-size: 0;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 16px; height: 16px; stroke-width: 1.8;">
               <polygon points="5,4 15,12 5,20" />
               <line x1="19" y1="5" x2="19" y2="19" />
@@ -495,7 +561,7 @@ class PlaybackMitosisManager {
       : '<span>♪</span>';
 
     return `
-      <div class="queue-item ${isActive}" data-idx="${idx}" style="padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; display: flex; gap: 10px; cursor: pointer; transition: all 0.2s ease; text-align: left;">
+      <div class="queue-item hover-target ${isActive}" data-idx="${idx}" style="padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; display: flex; gap: 10px; transition: all 0.2s ease; text-align: left;">
         <div style="width: 36px; height: 36px; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 9px; color: rgba(255,255,255,0.3);">
           ${thumb}
         </div>

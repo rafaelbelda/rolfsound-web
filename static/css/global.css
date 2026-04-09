@@ -51,9 +51,9 @@ html, body {
   background-color: var(--white);
   border-radius: 50%;
   
-  /* MORPH */
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), 
-              height 0.3s cubic-bezier(0.16, 1, 0.3, 1), 
+  /* MORPH — width/height mais rápido (0.15s) para resposta imediata ao hover */
+  transition: width 0.15s cubic-bezier(0.16, 1, 0.3, 1), 
+              height 0.15s cubic-bezier(0.16, 1, 0.3, 1), 
               border-radius 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               background-color 0.3s ease,
               border 0.3s ease;
