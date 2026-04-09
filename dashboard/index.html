@@ -24,19 +24,35 @@
     {% include 'views/vinyl-library.html' %}
   </section>
 
+  <section id="view-digital-library" class="view-layer" style="background: var(--black);">
+    {% include 'views/digital-library.html' %}
+  </section>
+
   <section id="view-settings" class="view-layer">
     {% include 'views/settings.html' %}
   </section>
 
   <script type="module">
     import Cursor from '/static/js/Cursor.js';
+    import SearchController from '/static/js/SearchController.js';
+    import ContextMenuController from '/static/js/ContextMenuController.js';
+
     const meuCursor = new Cursor();
+    window.meuCursor = meuCursor;
 
     const island = document.querySelector('rolfsound-island');
     const views = {
         'library': document.getElementById('view-vinyl-library'),
+        'digital': document.getElementById('view-digital-library'),
         'settings': document.getElementById('view-settings')
     };
+
+    let libraryMode = 'vinyl'; // 'vinyl' | 'digital'
+
+    // Inicia o SearchController apenas quando o custom element estiver registrado
+    customElements.whenDefined('rolfsound-island').then(() => {
+        window.searchController = new SearchController(island);
+    });
 
     // Ajusta a aba inicial baseada na URL
     const path = window.location.pathname.replace('/', '') || 'library';
@@ -51,25 +67,51 @@
 
     // Transição suave quando clica na Ilha
     island.addEventListener('rolfsound-navigate', (e) => {
-        const targetView = e.detail.view;
+      navigateTo(e.detail.view);
+    });
 
-        // Remove todas as views ativas
+    // Troca entre Vinyl e Digital library
+    island.addEventListener('rolfsound-library-mode-change', (e) => {
+        libraryMode = e.detail.mode;
+
+        // Move as duas views de library para overlay correto
         Object.values(views).forEach(v => { if(v) v.classList.remove('active'); });
-        
-        // Ativa a view se existir (library, settings) - playback é via Mitosis
-        if(views[targetView]) views[targetView].classList.add('active');
 
-        // Mantém a URL atualizada
-        const newUrl = targetView === 'library' ? '/library' : `/${targetView}`;
-        window.history.pushState({}, '', newUrl);
+        if (libraryMode === 'vinyl') {
+            views['library'].classList.add('active');
+        } else if (libraryMode === 'digital') {
+            views['digital'].classList.add('active');
+        }
+
+        // Dispara um evento que a digital-library.html pode escutar
+        window.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
+            detail: { mode: libraryMode }
+        }));
     });
 
     function activateView(view) {
-        const target = views[view] || views['library'];
-        island.setAttribute('active-tab', view in views ? view : 'library');
+      if (view === 'playback') {
+        island.setAttribute('active-tab', 'playback');
+        Object.values(views).forEach(v => v.classList.remove('active'));
+        return;
+      }
+
+      const target = views[view] || views['library'];
+      island.setAttribute('active-tab', view in views ? view : 'library');
         Object.values(views).forEach(v => v.classList.remove('active'));
         if (target) target.classList.add('active');
     }
+
+    function navigateTo(view) {
+      activateView(view);
+      const newUrl = view === 'library' ? '/library' : `/${view}`;
+      window.history.pushState({}, '', newUrl);
+    }
+
+    window.contextMenuController = new ContextMenuController({
+      island,
+      onNavigate: navigateTo
+    });
 
     window.addEventListener('popstate', () => {
         const view = window.location.pathname.replace('/', '') || 'library';

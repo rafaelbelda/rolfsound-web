@@ -7,6 +7,15 @@
   --gray: rgba(255, 255, 255, 0.4);
   /* A ÚNICA definição de fonte do si stema todo */
   --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* Escala tipográfica padrão (UI compacta) */
+  --fs-2xs: 8px;
+  --fs-xs: 9px;
+  --fs-sm: 10px;
+  --fs-md: 11px;
+  --fs-lg: 12px;
+  --fs-xl: 13px;
+  --fs-2xl: 14px;
 }
 
 /* ─── 2. RESET MODULAR & ENFORCEMENT ─── */
@@ -44,7 +53,7 @@ html, body {
   top: 0;
   left: 0;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 12000;
   
   width: 5px;
   height: 5px;
@@ -219,3 +228,108 @@ html, body {
 /* ── Notice Box ── */
 .notice { margin-top: 16px; padding: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.06); border-left: 3px solid rgba(255, 255, 255, 0.2); border-radius: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.5); line-height: 1.6; }
 .notice a { color: var(--white); text-underline-offset: 3px; }
+
+/* ── Custom Context Menu ── */
+.rs-context-menu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0;
+  transform: scale(0.96);
+  transform-origin: var(--rs-origin-x, 16px) var(--rs-origin-y, 16px);
+  pointer-events: none;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 10, 10, 0.92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  transition: opacity 0.14s ease,
+              transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 10001;
+}
+
+.rs-context-menu.opening {
+  opacity: 1;
+  transform: scale(var(--rs-start-sx, 0.03), var(--rs-start-sy, 0.03));
+  border-radius: var(--rs-start-radius, 999px);
+}
+
+.rs-context-menu.active {
+  opacity: 1;
+  transform: scale(1);
+  border-radius: 14px;
+  pointer-events: auto;
+}
+
+.rs-context-menu.opening .rs-context-item,
+.rs-context-menu.opening .rs-context-separator {
+  opacity: 0;
+}
+
+.rs-context-item,
+.rs-context-separator {
+  transition: opacity 0.12s ease;
+}
+
+.rs-context-menu.active .rs-context-item,
+.rs-context-menu.active .rs-context-separator {
+  opacity: 1;
+}
+
+.rs-context-item {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.86);
+  background: transparent;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.rs-context-item:hover,
+.rs-context-item:focus-visible {
+  outline: none;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.rs-context-item:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.rs-context-separator {
+  height: 1px;
+  margin: 2px 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Cursor em modo de contexto: anel vazio no centro */
+#cursor-dot.context-ring {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(255, 255, 255, 0.85) !important;
+  background-color: transparent !important;
+}
+
+/* Cursor em morph para o menu de contexto */
+#cursor-dot.context-morphing {
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  opacity: 0;
+}

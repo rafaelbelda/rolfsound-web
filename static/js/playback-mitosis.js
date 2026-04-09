@@ -259,7 +259,7 @@ class PlaybackMitosisManager {
         <!-- Info -->
         <div style="display: flex; flex-direction: column; gap: 6px; text-align: center; width: 100%;">
           <div id="playback-title" style="font-size: 18px; font-weight: 700; color: white; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">Nothing playing</div>
-          <div id="playback-artist" style="font-size: 12px; color: rgba(255,255,255,0.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">—</div>
+          <div id="playback-artist" style="font-size: var(--fs-lg, 12px); color: rgba(255,255,255,0.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">—</div>
         </div>
 
         <!-- Progress -->
@@ -267,7 +267,7 @@ class PlaybackMitosisManager {
           <div id="progress-bar" style="height: 3px; background: rgba(255,255,255,0.15); border-radius: 2px; cursor: pointer; position: relative; overflow: hidden; transition: height 0.2s ease;">
             <div id="progress-fill" style="height: 100%; background: white; border-radius: 2px; width: 0%; transition: width 0.08s linear;"></div>
           </div>
-          <div style="display: flex; justify-content: space-between; font-size: 10px; color: rgba(255,255,255,0.5); font-family: 'Courier New', monospace;">
+          <div style="display: flex; justify-content: space-between; font-size: var(--fs-sm, 10px); color: rgba(255,255,255,0.5); font-family: 'Courier New', monospace;">
             <span id="current-time">0:00</span>
             <span id="total-time">0:00</span>
           </div>
@@ -300,9 +300,9 @@ class PlaybackMitosisManager {
 
         <!-- Queue -->
         <div style="display: flex; flex-direction: column; gap: 8px; width: 100%; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
-          <div style="font-size: 9px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(255,255,255,0.4);">QUEUE</div>
+          <div style="font-size: var(--fs-xs, 9px); font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(255,255,255,0.4);">QUEUE</div>
           <div id="queue-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto;">
-            <div style="padding: 16px; text-align: center; color: rgba(255,255,255,0.3); font-size: 11px;">Queue is empty</div>
+            <div style="padding: 16px; text-align: center; color: rgba(255,255,255,0.3); font-size: var(--fs-md, 11px);">Queue is empty</div>
           </div>
         </div>
 
@@ -542,7 +542,7 @@ class PlaybackMitosisManager {
     if (!this.dom.queueList) return;
 
     if (!this.state.queue || this.state.queue.length === 0) {
-      this.dom.queueList.innerHTML = '<div style="padding: 16px; text-align: center; color: rgba(255,255,255,0.3); font-size: 11px;">Queue is empty</div>';
+      this.dom.queueList.innerHTML = '<div style="padding: 16px; text-align: center; color: rgba(255,255,255,0.3); font-size: var(--fs-md, 11px);">Queue is empty</div>';
       return;
     }
 
@@ -562,12 +562,12 @@ class PlaybackMitosisManager {
 
     return `
       <div class="queue-item hover-target ${isActive}" data-idx="${idx}" style="padding: 10px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; display: flex; gap: 10px; transition: all 0.2s ease; text-align: left;">
-        <div style="width: 36px; height: 36px; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 9px; color: rgba(255,255,255,0.3);">
+        <div style="width: 36px; height: 36px; flex-shrink: 0; background: rgba(255,255,255,0.06); border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: var(--fs-xs, 9px); color: rgba(255,255,255,0.3);">
           ${thumb}
         </div>
         <div style="flex: 1; min-width: 0;">
-          <div style="font-size: 11px; color: white; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${this.escapeHtml(track.title || track.track_id)}</div>
-          <div style="font-size: 9px; color: rgba(255,255,255,0.4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(track.artist || '')}</div>
+          <div style="font-size: var(--fs-md, 11px); color: white; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">${this.escapeHtml(track.title || track.track_id)}</div>
+          <div style="font-size: var(--fs-xs, 9px); color: rgba(255,255,255,0.4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(track.artist || '')}</div>
         </div>
       </div>
     `;

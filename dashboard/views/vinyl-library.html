@@ -2,8 +2,8 @@
   /* ─── CSS ESPECÍFICO DO MOTOR 3D ─── */
   #webgl-container { position: absolute; inset: 0; width: 100vw; height: 100vh; display: block; cursor: none; z-index: 10; }
   #webgl-container:active { cursor: none; }
-  #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 2px; text-transform: uppercase; font-size: 11px; opacity: 0.6; z-index: 50; pointer-events: none; color: var(--white); transition: opacity 0.5s ease; }
-  #pull-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 3px; text-transform: uppercase; font-size: 10px; color: rgba(255, 255, 255, 0.4); z-index: 50; pointer-events: none; opacity: 0; transition: color 0.2s ease; }
+    #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 2px; text-transform: uppercase; font-size: var(--fs-md, 11px); opacity: 0.6; z-index: 50; pointer-events: none; color: var(--white); transition: opacity 0.5s ease; }
+    #pull-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 3px; text-transform: uppercase; font-size: var(--fs-sm, 10px); color: rgba(255, 255, 255, 0.4); z-index: 50; pointer-events: none; opacity: 0; transition: color 0.2s ease; }
 
   /* ─── HUD DE TIPOGRAFIA (ETIQUETAS) ─── */
   #labels-container {
@@ -26,14 +26,14 @@
   }
   .record-label .album {
       color: #ffffff;
-      font-size: 10px; font-weight: 600; letter-spacing: 1px;
+      font-size: var(--fs-sm, 10px); font-weight: 600; letter-spacing: 1px;
       text-transform: uppercase; margin-bottom: 2px;
       white-space: normal;
       line-height: 1.2;
   }
   .record-label .artist {
       color: rgba(255, 255, 255, 0.4);
-      font-size: 9px; letter-spacing: 1.5px;
+      font-size: var(--fs-xs, 9px); letter-spacing: 1.5px;
       text-transform: uppercase;
       white-space: normal;
       line-height: 1.2;

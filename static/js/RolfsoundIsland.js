@@ -35,11 +35,21 @@ class RolfsoundIsland extends HTMLElement {
 
     _attachDelegatedListeners() {
         this.shadowRoot.addEventListener('click', (e) => {
+            // ── Botão de busca ──
+            const searchBtn = e.target.closest('#btn-search');
+            if (searchBtn) {
+                e.preventDefault();
+                this.openSearch();
+                return;
+            }
+
             // ── Nav links ──
             const navLink = e.target.closest('.nav-link');
             if (navLink) {
                 e.preventDefault();
                 if (this.isLocked) return;
+
+                this.closeSearch();
 
                 const tab = navLink.dataset.tab;
                 if (!tab || this.activeTab === tab) return;
@@ -60,6 +70,7 @@ class RolfsoundIsland extends HTMLElement {
                 this.dispatchEvent(new CustomEvent('rolfsound-filter', {
                     bubbles: true, composed: true, detail: { filter: filterBtn.dataset.filter }
                 }));
+                return;
             }
         });
     }
@@ -71,20 +82,26 @@ class RolfsoundIsland extends HTMLElement {
         links.forEach(link => {
             link.classList.toggle('active', link.dataset.tab === this.activeTab);
         });
+
+        if (this.activeTab === 'library') {
+            this.deployLibraryModeToggle();
+        } else {
+            this.recolheLibraryModeToggle();
+        }
     }
 
     // ─── Motor de Mitose Modular (DOM Injection) ─────────────────────────────
 
     mitosis(options) {
         // Trava a ilha principal (esconde o "Filters" e impede o hover de expandir)
-        this.setAttribute('inspecting', 'true'); 
+        this.setAttribute('inspecting', 'true');
 
-        const { 
-            id = 'default', 
-            icon = '', 
-            eventName = 'rolfsound-mitosis-click', 
-            direction = 'right', 
-            distance = 237 
+        const {
+            id = 'default',
+            icon = '',
+            eventName = 'rolfsound-mitosis-click',
+            direction = 'right',
+            distance = 237
         } = options;
 
         const hoverZone = this.shadowRoot.getElementById('hover-zone');
@@ -146,6 +163,171 @@ class RolfsoundIsland extends HTMLElement {
 
         // Destrava a ilha principal para ela voltar ao comportamento normal
         this.removeAttribute('inspecting'); 
+    }
+
+    // ─── Motor de Search (split-down) ────────────────────────────────────────
+
+    openSearch() {
+        if (this.isLocked) return;
+        const hoverZone = this.shadowRoot.getElementById('hover-zone');
+        if (this.shadowRoot.getElementById('mitosis-search')) return;
+
+        this.setAttribute('inspecting', 'true');
+
+        const pill = document.createElement('div');
+        pill.id = 'mitosis-search';
+        pill.className = 'mitosis-pill';
+        pill.style.setProperty('--mitosis-distance', '55px');
+
+        pill.innerHTML = `
+            <div class="search-bar">
+                <div class="search-icon-static">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none">
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="m21 21-4.35-4.35"/>
+                    </svg>
+                </div>
+                <input id="search-input" class="search-input" type="text" placeholder="Search..." autocomplete="off" spellcheck="false" />
+                <button class="search-close hover-target" aria-label="Fechar busca">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="pointer-events:none">
+                        <path d="M18 6 6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+
+        pill.querySelector('.search-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closeSearch();
+        });
+
+        pill.querySelector('#search-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this.closeSearch();
+        });
+
+        pill.querySelector('#search-input').addEventListener('input', (e) => {
+            this.dispatchEvent(new CustomEvent('rolfsound-search', {
+                bubbles: true, composed: true, detail: { query: e.target.value }
+            }));
+        });
+
+        hoverZone.insertBefore(pill, hoverZone.firstChild);
+
+        // Calcula o offset do botão em relação ao centro da hover-zone
+        const btnRect  = this.shadowRoot.getElementById('btn-search').getBoundingClientRect();
+        const zoneRect = hoverZone.getBoundingClientRect();
+        const offset   = (btnRect.left + btnRect.width / 2) - (zoneRect.left + zoneRect.width / 2);
+        pill.style.setProperty('--search-x-offset', `${offset}px`);
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                // Etapa 1: lupa desce a partir da posição real do botão
+                pill.classList.add('split-down');
+                setTimeout(() => {
+                    // Etapa 2: expande horizontalmente e centraliza
+                    pill.classList.add('search-expanded');
+                    setTimeout(() => {
+                        const input = pill.querySelector('#search-input');
+                        if (input) input.focus();
+                    }, 350);
+                }, 520);
+            });
+        });
+    }
+
+    closeSearch() {
+        const pill = this.shadowRoot.getElementById('mitosis-search');
+        if (!pill) return;
+
+        // Desarma o cursor do botão fechar antes de animar
+        const closeBtn = pill.querySelector('.hover-target');
+        if (closeBtn) closeBtn.classList.remove('hover-target');
+
+        this.removeAttribute('inspecting');
+
+        // Etapa 1: encolhe horizontalmente
+        pill.classList.remove('search-expanded');
+        setTimeout(() => {
+            // Etapa 2: sobe de volta para a ilha
+            pill.className = 'mitosis-pill';
+            pill.addEventListener('transitionend', () => {
+                if (pill.parentNode) pill.remove();
+            }, { once: true });
+            setTimeout(() => { if (pill.parentNode) pill.remove(); }, 600);
+        }, 520);
+    }
+
+    // ─── Motor de Library Mode Toggle (Mitose para direita) ──────────────────────────────
+
+    deployLibraryModeToggle() {
+        if (this.shadowRoot.getElementById('library-toggle-mitosis')) return;
+
+        const hoverZone = this.shadowRoot.getElementById('hover-zone');
+        if (!hoverZone) return;
+
+        const pill = document.createElement('div');
+        pill.id = 'library-toggle-mitosis';
+        pill.className = 'mitosis-pill';
+        pill.style.setProperty('--pill-w', '176px');
+        pill.style.setProperty('--pill-h', '38px');
+
+        pill.innerHTML = `
+            <div class="pill-content">
+                <button class="pill-btn active hover-target" data-mode="vinyl">Vinyl</button>
+                <button class="pill-btn hover-target" data-mode="digital">Digital</button>
+            </div>
+        `;
+
+        pill.querySelectorAll('.pill-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pill.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.closeSearch();
+                this.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
+                    bubbles: true, composed: true, detail: { mode: btn.dataset.mode }
+                }));
+            });
+        });
+
+        hoverZone.insertBefore(pill, hoverZone.firstChild);
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const hostRect = this.getBoundingClientRect();
+                const pillRect = pill.getBoundingClientRect();
+
+                // Posição desejada na viewport (quadrante superior direito)
+                const targetRight = 80;
+
+                // Como :host usa transform, fixed fica relativo ao host transformado.
+                // Compensa isso convertendo viewport -> coordenadas locais do host.
+                const localLeft = (window.innerWidth - targetRight - pillRect.width) - hostRect.left;
+                // Topo exatamente alinhado com a ilha dinâmica.
+                const localTop = 0;
+
+                pill.style.setProperty('--pill-left', `${Math.round(localLeft)}px`);
+                pill.style.setProperty('--pill-top', `${Math.round(localTop)}px`);
+                pill.classList.add('positioned');
+            });
+        });
+    }
+
+    recolheLibraryModeToggle() {
+        const pill = this.shadowRoot.getElementById('library-toggle-mitosis');
+        if (!pill) return;
+
+        pill.querySelectorAll('.hover-target').forEach(btn => btn.classList.remove('hover-target'));
+
+        // Anima a saída mantendo position: fixed (evita pulo visual)
+        pill.style.opacity = '0';
+        pill.style.transform = 'scale(0.6)';
+        pill.style.pointerEvents = 'none';
+
+        pill.addEventListener('transitionend', () => {
+            if (pill.parentNode) pill.remove();
+        }, { once: true });
+        setTimeout(() => { if (pill.parentNode) pill.remove(); }, 600);
     }
 
     // ─── Motor de Morph ──────────────────────────────────────────────────────
@@ -293,12 +475,19 @@ class RolfsoundIsland extends HTMLElement {
                 --default-r: 24px;
             }
 
-            /* ─── CLASSES DINÂMICAS DO MOTOR DE MITOSE ─── */
+            /* ─── MOTOR DE MITOSE (Custom Properties) ───
+                --pill-w: largura (default 38px)
+                --pill-h: altura  (default 38px)
+                --pill-r: radius  (default metade da altura)
+                --pill-top/--pill-left: posição fixa (modo positioned)
+            */
             .mitosis-pill {
                 position: absolute;
                 top: 10px; 
                 left: 50%;
-                width: 38px; height: 38px; border-radius: 19px;
+                width: var(--pill-w, 38px);
+                height: var(--pill-h, 38px);
+                border-radius: var(--pill-r, calc(var(--pill-h, 38px) / 2));
                 background: var(--black-studio);
                 backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
                 border: 1px solid var(--border-metal);
@@ -309,6 +498,7 @@ class RolfsoundIsland extends HTMLElement {
                 transition: all 0.5s cubic-bezier(0.34, 1.2, 0.64, 1);
                 z-index: 900; 
                 box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+                overflow: hidden;
             }
             .mitosis-pill.split-right {
                 transform: translateX(calc(-50% + var(--mitosis-distance, 237px))) scale(1);
@@ -318,12 +508,41 @@ class RolfsoundIsland extends HTMLElement {
                 transform: translateX(calc(-50% - var(--mitosis-distance, 237px))) scale(1);
                 opacity: 1; pointer-events: auto;
             }
+            /* Modo posicionado: a pill vai para uma posição fixa na viewport */
+            .mitosis-pill.positioned {
+                position: fixed;
+                left: var(--pill-left, 0px);
+                top: var(--pill-top, 15px);
+                transform: scale(1);
+                opacity: 1; pointer-events: auto;
+            }
             .mitosis-btn { 
                 color: var(--gray); transition: color 0.2s ease, background 0.2s ease; 
                 width: 100%; height: 100%; border-radius: 50%;
                 display: flex; align-items: center; justify-content: center; 
             }
             .mitosis-btn:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+
+            /* ─ Pill content utils ─ */
+            .pill-content {
+                display: flex; align-items: center; gap: 6px;
+                padding: 0 8px; width: 100%; height: 100%; justify-content: center;
+                opacity: 0; transition: opacity 0.25s ease 0.3s;
+            }
+            .mitosis-pill.positioned .pill-content,
+            .mitosis-pill.split-right .pill-content,
+            .mitosis-pill.split-left .pill-content { opacity: 1; }
+
+            .pill-btn {
+                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+                color: var(--gray); border-radius: 12px; padding: 6px 14px;
+                font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+                line-height: 1;
+                display: inline-flex; align-items: center; justify-content: center;
+                transition: all 0.2s ease; white-space: nowrap;
+            }
+            .pill-btn:hover  { background: rgba(255,255,255,0.1); color: var(--white); }
+            .pill-btn.active { background: var(--white); color: #000; border-color: var(--white); }
 
 
             /* ─── ILHA PRINCIPAL ─── */
@@ -377,7 +596,7 @@ class RolfsoundIsland extends HTMLElement {
             :host([active-tab="library"]) #external-indicator { display: flex; }
 
             .indicator-line  { width: 24px; height: 2px; background: rgba(255,255,255,0.3); border-radius: 2px; }
-            .indicator-text  { font-size: 8px; font-weight: 700; letter-spacing: 0.15em; color: var(--gray); text-transform: uppercase; }
+            .indicator-text  { font-size: var(--fs-2xs, 8px); font-weight: 700; letter-spacing: 0.15em; color: var(--gray); text-transform: uppercase; }
 
             #filters-drawer {
                 position: absolute; bottom: 18px;
@@ -395,7 +614,7 @@ class RolfsoundIsland extends HTMLElement {
             .filter-btn {
                 background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
                 color: var(--gray); border-radius: 12px; padding: 6px 10px;
-                font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+                font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                 transition: all 0.2s ease; white-space: nowrap;
             }
             .filter-btn:hover  { background: rgba(255,255,255,0.1); color: var(--white); }
@@ -410,13 +629,13 @@ class RolfsoundIsland extends HTMLElement {
             }
             .island-view.visible { opacity: 1; transform: scale(1); }
 
-            #notif-text { font-size: 11px; font-weight: 600; color: var(--white); letter-spacing: 0.05em; white-space: nowrap; }
+            #notif-text { font-size: var(--fs-md, 11px); font-weight: 600; color: var(--white); letter-spacing: 0.05em; white-space: nowrap; }
             .spinner    { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.05); border-top-color: var(--white); border-radius: 50%; animation: spin 0.8s linear infinite; }
             @keyframes spin { to { transform: rotate(360deg); } }
 
             .logo-section { display: flex; align-items: center; gap: 8px; margin-left: 8px; position: relative; z-index: 1200; }
             .logo-led     { width: 4px; height: 4px; background: rgba(255,255,255,0.2); border-radius: 50%; }
-            .logo-name    { font-weight: 700; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--white); }
+            .logo-name    { font-weight: 700; font-size: var(--fs-sm, 10px); letter-spacing: 1.5px; text-transform: uppercase; color: var(--white); }
 
             .nav-section {
                 display: flex; gap: 2px;
@@ -425,17 +644,86 @@ class RolfsoundIsland extends HTMLElement {
             }
 
             .nav-link {
-                color: var(--gray); text-decoration: none; font-size: 9px; text-transform: uppercase;
-                letter-spacing: 0.1em; padding: 6px 14px; border-radius: 16px;
+                color: var(--gray); text-decoration: none; font-size: var(--fs-xs, 9px); text-transform: uppercase;
+                letter-spacing: 0.1em; padding: 6px 12px; border-radius: 16px;
                 transition: all 0.2s ease; background: transparent; border: 1px solid transparent;
                 position: relative; z-index: 1200;
+                display: flex; align-items: center;
             }
             .nav-link:hover, .nav-link.active { color: var(--white); }
             .nav-link.active { font-weight: 600; background: rgba(255,255,255,0.05); }
 
+            .nav-icon { flex-shrink: 0; color: inherit; transition: opacity 0.25s ease; }
+            .nav-link:hover .nav-icon  { opacity: 0.55; }
+            .nav-link.active .nav-icon { opacity: 0.8; }
+
+            .nav-label {
+                max-width: 0; overflow: hidden; opacity: 0; white-space: nowrap; margin-left: 0;
+                transition: max-width 0.4s cubic-bezier(0.34, 1.2, 0.64, 1),
+                            opacity 0.3s ease,
+                            margin-left 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
+            }
+            .nav-link:hover .nav-label,
+            .nav-link.active  .nav-label { max-width: 90px; opacity: 1; margin-left: 7px; }
+
+            /* ─── EQ Bars animados (Now Playing ativo) ─── */
+            .eq-bar { transform-box: fill-box; transform-origin: bottom center; }
+            .nav-link[data-tab="playback"].active .eq-bar-1 { animation: eq 0.80s ease-in-out infinite; }
+            .nav-link[data-tab="playback"].active .eq-bar-2 { animation: eq 0.55s ease-in-out infinite 0.12s; }
+            .nav-link[data-tab="playback"].active .eq-bar-3 { animation: eq 0.95s ease-in-out infinite 0.07s; }
+            @keyframes eq { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+
             .icon-link { display: flex; align-items: center; justify-content: center; padding: 6px; margin-right: 4px; }
             .icon-link svg { transition: transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1); }
             .icon-link:hover svg, .icon-link.active svg { transform: rotate(90deg); }
+
+            /* ─── Lado direito da barra ─── */
+            .right-section { display: flex; align-items: center; }
+
+            /* ─── Motor de Search (split-down) ─── */
+            .mitosis-pill.split-down {
+                transform: translateX(calc(-50% + var(--search-x-offset, 0px))) translateY(var(--mitosis-distance, 55px)) scale(1);
+                opacity: 1; pointer-events: auto;
+            }
+            .mitosis-pill.search-expanded {
+                width: 560px;
+                border-radius: 22px;
+                transform: translateX(-50%) translateY(var(--mitosis-distance, 55px)) scale(1);
+            }
+            :host([inspecting]) #btn-search { opacity: 0; pointer-events: none; transform: scale(0.7); transition: opacity 0.2s ease, transform 0.2s ease; }
+            #btn-search { transition: opacity 0.2s ease, transform 0.2s ease; }
+            .search-bar {
+                display: flex; align-items: center;
+                padding: 0 10px 0 14px;
+                width: 100%; height: 100%;
+                gap: 8px; overflow: hidden;
+            }
+            .search-icon-static {
+                flex-shrink: 0; color: var(--gray);
+                display: flex; align-items: center; justify-content: center;
+            }
+            .search-input {
+                flex: 1; min-width: 0;
+                background: transparent; border: none; outline: none;
+                color: var(--white); font-size: var(--fs-md, 11px); font-family: var(--font, sans-serif);
+                letter-spacing: 0.04em;
+                opacity: 0; transform: translateX(-8px); pointer-events: none;
+                transition: opacity 0.25s ease 0.3s, transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1) 0.3s;
+            }
+            .search-input::placeholder { color: var(--gray); }
+            .mitosis-pill.search-expanded .search-input { opacity: 1; transform: translateX(0); pointer-events: auto; }
+            .search-close {
+                flex-shrink: 0; background: none; border: none;
+                color: var(--gray); border-radius: 50%;
+                width: 24px; height: 24px;
+                display: flex; align-items: center; justify-content: center;
+                padding: 0;
+                opacity: 0; transform: scale(0.5); pointer-events: none;
+                transition: opacity 0.2s ease 0.35s, transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1) 0.35s,
+                            color 0.15s ease, background 0.15s ease;
+            }
+            .search-close:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+            .mitosis-pill.search-expanded .search-close { opacity: 1; transform: scale(1); pointer-events: auto; }
         </style>
 
         <div id="hover-zone">
@@ -447,16 +735,38 @@ class RolfsoundIsland extends HTMLElement {
                     </div>
 
                     <div class="nav-section">
-                        <a href="#" class="nav-link hover-target ${this.activeTab === 'library'  ? 'active' : ''}" data-tab="library">Library</a>
-                        <a href="#" class="nav-link hover-target ${this.activeTab === 'playback' ? 'active' : ''}" data-tab="playback">Now Playing</a>
+                        <a href="#" class="nav-link hover-target ${this.activeTab === 'library'  ? 'active' : ''}" data-tab="library">
+                            <svg class="nav-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="pointer-events:none">
+                                <circle cx="12" cy="12" r="10"/>
+                                <circle cx="12" cy="12" r="4"/>
+                                <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                            </svg>
+                            <span class="nav-label">Library</span>
+                        </a>
+                        <a href="#" class="nav-link hover-target ${this.activeTab === 'playback' ? 'active' : ''}" data-tab="playback">
+                            <svg class="nav-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="pointer-events:none">
+                                <rect class="eq-bar eq-bar-1" x="2"  y="9"  width="4" height="12" rx="1.5"/>
+                                <rect class="eq-bar eq-bar-2" x="10" y="4"  width="4" height="17" rx="1.5"/>
+                                <rect class="eq-bar eq-bar-3" x="18" y="12" width="4" height="9"  rx="1.5"/>
+                            </svg>
+                            <span class="nav-label">Now Playing</span>
+                        </a>
                     </div>
 
-                    <a href="#" class="nav-link icon-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
-                            <circle cx="12" cy="12" r="3"></circle>
-                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                        </svg>
-                    </a>
+                    <div class="right-section">
+                        <a href="#" id="btn-search" class="nav-link icon-link hover-target" aria-label="Abrir pesquisa">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none">
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="m21 21-4.35-4.35"/>
+                            </svg>
+                        </a>
+                        <a href="#" class="nav-link icon-link hover-target ${this.activeTab === 'settings' ? 'active' : ''}" data-tab="settings">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                            </svg>
+                        </a>
+                    </div>
                 </div>
 
                 <div id="filters-drawer">
