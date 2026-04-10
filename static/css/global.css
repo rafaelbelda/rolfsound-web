@@ -8,6 +8,10 @@
   /* A ÚNICA definição de fonte do si stema todo */
   --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
 
+  /* Raios globais da Dynamic Island */
+  --radius-dynamic-island: 16px;
+  --radius-dynamic-island-expanded: 24px;
+
   /* Escala tipográfica padrão (UI compacta) */
   --fs-2xs: 8px;
   --fs-xs: 9px;
@@ -170,7 +174,7 @@ html, body {
   backdrop-filter: blur(20px); 
   -webkit-backdrop-filter: blur(20px); 
   border: 1px solid rgba(255, 255, 255, 0.06); 
-  border-radius: 16px; 
+  border-radius: var(--radius-dynamic-island); 
   overflow: hidden; 
   box-shadow: 0 8px 30px rgba(0,0,0,0.4); 
   will-change: transform; 

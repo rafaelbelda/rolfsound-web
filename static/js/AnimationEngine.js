@@ -54,7 +54,7 @@ export class AnimationEngine {
         width: 38px;
         height: 38px;
         z-index: 996;
-        border-radius: 16px;
+        border-radius: var(--radius-dynamic-island);
         pointer-events: auto;
         ${animDecl}
       `;

@@ -333,7 +333,7 @@ class RolfsoundIsland extends HTMLElement {
     // ─── Motor de Morph ──────────────────────────────────────────────────────
 
     morph(options) {
-        const { width, height = 44, radius = height / 2, viewId, islandClass = '', duration = 0 } = options;
+        const { width, height = 44, radius = 'var(--radius-dynamic-island)', viewId, islandClass = '', duration = 0 } = options;
 
         const container          = this.shadowRoot.getElementById('bar-container');
         const navContent         = this.shadowRoot.getElementById('bar-content');
@@ -458,7 +458,7 @@ class RolfsoundIsland extends HTMLElement {
 
                 --default-w: 450px;
                 --default-h: 38px;
-                --default-r: 16px;
+                --default-r: var(--radius-dynamic-island);
             }
 
             #hover-zone {
@@ -472,13 +472,13 @@ class RolfsoundIsland extends HTMLElement {
             /* Desativa o Hover de abrir o Menu de Filtros se estiver Inspecionando um disco */
             :host([active-tab="library"]:not([inspecting])) #hover-zone:hover #bar-container:not(.notifying) {
                 --default-h: 90px;
-                --default-r: 24px;
+                --default-r: var(--radius-dynamic-island-expanded);
             }
 
             /* ─── MOTOR DE MITOSE (Custom Properties) ───
                 --pill-w: largura (default 38px)
                 --pill-h: altura  (default 38px)
-                --pill-r: radius  (default metade da altura)
+                --pill-r: radius  (default = mesmo raio da ilha dinâmica)
                 --pill-top/--pill-left: posição fixa (modo positioned)
             */
             .mitosis-pill {
@@ -487,7 +487,7 @@ class RolfsoundIsland extends HTMLElement {
                 left: 50%;
                 width: var(--pill-w, 38px);
                 height: var(--pill-h, 38px);
-                border-radius: var(--pill-r, calc(var(--pill-h, 38px) / 2));
+                border-radius: var(--pill-r, var(--default-r));
                 background: var(--black-studio);
                 backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
                 border: 1px solid var(--border-metal);
@@ -687,7 +687,7 @@ class RolfsoundIsland extends HTMLElement {
             }
             .mitosis-pill.search-expanded {
                 width: 560px;
-                border-radius: 22px;
+                border-radius: var(--pill-r, var(--default-r));
                 transform: translateX(-50%) translateY(var(--mitosis-distance, 55px)) scale(1);
             }
             :host([inspecting]) #btn-search { opacity: 0; pointer-events: none; transform: scale(0.7); transition: opacity 0.2s ease, transform 0.2s ease; }
