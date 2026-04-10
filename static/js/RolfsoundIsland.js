@@ -1,18 +1,25 @@
 // static/js/RolfsoundIsland.js
 
+import AnimationEngine from '/static/js/AnimationEngine.js';
+import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
+import { playElasticImpact } from '/static/js/IslandImpactEngine.js';
+
 class RolfsoundIsland extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: 'open' });
 
         this.activeTab   = this.getAttribute('active-tab') || 'library';
+        this.libraryMode = this.getAttribute('library-mode') === 'digital' ? 'digital' : 'vinyl';
         this.morphTimeout = null;
         this.isLocked    = false;
         this._listenersAttached = false;
+        this._animationTimers = new Set();
+        this._impactAnimations = new Set();
     }
 
     static get observedAttributes() {
-        return ['active-tab'];
+        return ['active-tab', 'library-mode'];
     }
 
     connectedCallback() {
@@ -24,12 +31,29 @@ class RolfsoundIsland extends HTMLElement {
         }
 
         this.reset();
+        this.updateActiveTab();
+    }
+
+    disconnectedCallback() {
+        if (this.morphTimeout) {
+            clearTimeout(this.morphTimeout);
+            this.morphTimeout = null;
+        }
+
+        AnimationEngine.clearScheduled(this, '_animationTimers');
+        this.cancelImpactResponse();
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
         if (name === 'active-tab' && oldValue !== newValue) {
             this.activeTab = newValue;
             this.updateActiveTab();
+            return;
+        }
+
+        if (name === 'library-mode' && oldValue !== newValue) {
+            this.libraryMode = newValue === 'digital' ? 'digital' : 'vinyl';
+            this.syncLibraryModeToggle();
         }
     }
 
@@ -90,79 +114,95 @@ class RolfsoundIsland extends HTMLElement {
         }
     }
 
-    // ─── Motor de Mitose Modular (DOM Injection) ─────────────────────────────
+    syncLibraryModeToggle() {
+        const pill = this.shadowRoot.getElementById('library-toggle-mitosis');
+        if (!pill) return;
 
-    mitosis(options) {
-        // Trava a ilha principal (esconde o "Filters" e impede o hover de expandir)
-        this.setAttribute('inspecting', 'true');
-
-        const {
-            id = 'default',
-            icon = '',
-            eventName = 'rolfsound-mitosis-click',
-            direction = 'right',
-            distance = 237
-        } = options;
-
-        const hoverZone = this.shadowRoot.getElementById('hover-zone');
-        
-        // Evita criar duplicatas se a função for chamada acidentalmente duas vezes
-        if (this.shadowRoot.getElementById(`mitosis-${id}`)) return;
-
-        // Constrói o botão do zero na memória
-        const pill = document.createElement('div');
-        pill.id = `mitosis-${id}`;
-        pill.className = `mitosis-pill`;
-        pill.style.setProperty('--mitosis-distance', `${distance}px`);
-        
-        pill.innerHTML = `
-            <div class="mitosis-btn hover-target">
-                ${icon}
-            </div>
-        `;
-
-        // Atrela o evento dinâmico diretamente ao botão gerado
-        pill.addEventListener('click', (e) => {
-            e.stopPropagation(); // Impede que o clique vaze para outros elementos
-            this.dispatchEvent(new CustomEvent(eventName, { bubbles: true, composed: true }));
-        });
-
-        // Insere fisicamente no início do hover-zone (para ficar atrás da Ilha Principal)
-        hoverZone.insertBefore(pill, hoverZone.firstChild);
-
-        // Força a renderização do navegador e dispara a animação CSS deslizando para o lado
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                pill.classList.add(`split-${direction}`);
-            });
+        pill.querySelectorAll('.pill-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === this.libraryMode);
         });
     }
 
-    undoMitosis(id = null) {
-        // Se passar um ID, recolhe aquele. Se não, recolhe todos os botões de mitose abertos na tela.
-        const selector = id ? `#mitosis-${id}` : '.mitosis-pill';
-        const pills = this.shadowRoot.querySelectorAll(selector);
-
-        pills.forEach(pill => {
-            // ─── O DESARME DO CURSOR ───
-            // Arranca a classe magnética do botão interno para o cursor soltar na mesma hora
-            const btnInterno = pill.querySelector('.hover-target');
-            if (btnInterno) btnInterno.classList.remove('hover-target');
-
-            // Remove a classe de direção para a transição CSS fazer a pílula encolher
-            pill.className = 'mitosis-pill'; 
-
-            // Quando a animação de recolher acabar (0.5s), deleta o botão da memória
-            pill.addEventListener('transitionend', () => {
-                if (pill.parentNode) pill.remove();
-            }, { once: true });
-            
-            // Rede de segurança contra abas inativas
-            setTimeout(() => { if (pill.parentNode) pill.remove(); }, 600);
+    getMitosisMetrics(options = {}) {
+        return measureIslandBarMitosis(this, {
+            originTop: 15,
+            originWidth: 450,
+            originHeight: 38,
+            copyGap: 7,
+            extraDrop: 22,
+            ...options
         });
+    }
 
-        // Destrava a ilha principal para ela voltar ao comportamento normal
-        this.removeAttribute('inspecting'); 
+    cancelImpactResponse() {
+        this._impactAnimations.forEach(animation => animation.cancel());
+        this._impactAnimations.clear();
+    }
+
+    _trackImpactAnimation(animation) {
+        if (!animation) return;
+
+        this._impactAnimations.add(animation);
+
+        const finalize = () => {
+            this._impactAnimations.delete(animation);
+        };
+
+        animation.addEventListener('finish', finalize, { once: true });
+        animation.addEventListener('cancel', finalize, { once: true });
+    }
+
+    respondToImpact(options = {}) {
+        const container = this.shadowRoot.getElementById('bar-container');
+        if (!container) return;
+
+        const sharedOptions = {
+            sourceRect: options.sourceRect || null,
+            sourceVector: options.sourceVector || null,
+            fallbackVector: options.fallbackVector || { x: 0, y: -1 },
+            duration: options.duration,
+            travel: options.travel,
+            minTravel: options.minTravel,
+            maxTravel: options.maxTravel,
+            squash: options.squash,
+            reboundRatio: options.reboundRatio,
+            settleRatio: options.settleRatio
+        };
+
+        this.cancelImpactResponse();
+
+        this._trackImpactAnimation(playElasticImpact(container, {
+            ...sharedOptions,
+            targetRect: container.getBoundingClientRect(),
+            strength: Number.isFinite(options.strength) ? options.strength : 1
+        }));
+
+        const indicator = this.shadowRoot.getElementById('external-indicator');
+        if (!indicator || getComputedStyle(indicator).display === 'none' || indicator.classList.contains('hidden')) {
+            return;
+        }
+
+        this._trackImpactAnimation(playElasticImpact(indicator, {
+            ...sharedOptions,
+            targetRect: indicator.getBoundingClientRect(),
+            strength: Math.max(0.2, (Number.isFinite(options.strength) ? options.strength : 1) * 0.24),
+            maxTravel: 3
+        }));
+    }
+
+    // ─── Motor de Mitose Modular (DOM Injection) ─────────────────────────────
+
+    mitosis(options) {
+        this.setAttribute('inspecting', 'true');
+        return AnimationEngine.mitosis(this, options);
+    }
+
+    undoMitosis(id = null) {
+        const pills = AnimationEngine.undoMitosis(this, id, {
+            timerProperty: '_animationTimers'
+        });
+        this.removeAttribute('inspecting');
+        return pills;
     }
 
     // ─── Motor de Search (split-down) ────────────────────────────────────────
@@ -170,16 +210,19 @@ class RolfsoundIsland extends HTMLElement {
     openSearch() {
         if (this.isLocked) return;
         const hoverZone = this.shadowRoot.getElementById('hover-zone');
+        if (!hoverZone) return;
         if (this.shadowRoot.getElementById('mitosis-search')) return;
 
         this.setAttribute('inspecting', 'true');
 
-        const pill = document.createElement('div');
-        pill.id = 'mitosis-search';
-        pill.className = 'mitosis-pill';
-        pill.style.setProperty('--mitosis-distance', '55px');
+        const metrics = this.getMitosisMetrics();
+        const searchDrop = Math.max(55, metrics.originHeight + 17);
 
-        pill.innerHTML = `
+        return AnimationEngine.runMitosisStrategy('search-open', { island: this }, {
+            parent: hoverZone,
+            searchDrop,
+            timerProperty: '_animationTimers',
+            containerHTML: `
             <div class="search-bar">
                 <div class="search-icon-static">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none">
@@ -194,44 +237,30 @@ class RolfsoundIsland extends HTMLElement {
                     </svg>
                 </button>
             </div>
-        `;
+        `,
+            onCreate: (pill) => {
+                pill.querySelector('.search-close').addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    this.closeSearch();
+                });
 
-        pill.querySelector('.search-close').addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.closeSearch();
-        });
+                pill.querySelector('#search-input').addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape') this.closeSearch();
+                });
 
-        pill.querySelector('#search-input').addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') this.closeSearch();
-        });
+                pill.querySelector('#search-input').addEventListener('input', (event) => {
+                    this.dispatchEvent(new CustomEvent('rolfsound-search', {
+                        bubbles: true,
+                        composed: true,
+                        detail: { query: event.target.value }
+                    }));
+                });
 
-        pill.querySelector('#search-input').addEventListener('input', (e) => {
-            this.dispatchEvent(new CustomEvent('rolfsound-search', {
-                bubbles: true, composed: true, detail: { query: e.target.value }
-            }));
-        });
-
-        hoverZone.insertBefore(pill, hoverZone.firstChild);
-
-        // Calcula o offset do botão em relação ao centro da hover-zone
-        const btnRect  = this.shadowRoot.getElementById('btn-search').getBoundingClientRect();
-        const zoneRect = hoverZone.getBoundingClientRect();
-        const offset   = (btnRect.left + btnRect.width / 2) - (zoneRect.left + zoneRect.width / 2);
-        pill.style.setProperty('--search-x-offset', `${offset}px`);
-
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                // Etapa 1: lupa desce a partir da posição real do botão
-                pill.classList.add('split-down');
-                setTimeout(() => {
-                    // Etapa 2: expande horizontalmente e centraliza
-                    pill.classList.add('search-expanded');
-                    setTimeout(() => {
-                        const input = pill.querySelector('#search-input');
-                        if (input) input.focus();
-                    }, 350);
-                }, 520);
-            });
+                const btnRect = this.shadowRoot.getElementById('btn-search').getBoundingClientRect();
+                const zoneRect = hoverZone.getBoundingClientRect();
+                const offset = (btnRect.left + btnRect.width / 2) - (zoneRect.left + zoneRect.width / 2);
+                pill.style.setProperty('--search-x-offset', `${offset}px`);
+            }
         });
     }
 
@@ -239,77 +268,79 @@ class RolfsoundIsland extends HTMLElement {
         const pill = this.shadowRoot.getElementById('mitosis-search');
         if (!pill) return;
 
-        // Desarma o cursor do botão fechar antes de animar
-        const closeBtn = pill.querySelector('.hover-target');
-        if (closeBtn) closeBtn.classList.remove('hover-target');
-
         this.removeAttribute('inspecting');
 
-        // Etapa 1: encolhe horizontalmente
-        pill.classList.remove('search-expanded');
-        setTimeout(() => {
-            // Etapa 2: sobe de volta para a ilha
-            pill.className = 'mitosis-pill';
-            pill.addEventListener('transitionend', () => {
-                if (pill.parentNode) pill.remove();
-            }, { once: true });
-            setTimeout(() => { if (pill.parentNode) pill.remove(); }, 600);
-        }, 520);
+        return AnimationEngine.runMitosisStrategy('search-close', { island: this }, {
+            pill,
+            timerProperty: '_animationTimers',
+            onStart: (node) => {
+                const closeBtn = node.querySelector('.hover-target');
+                if (closeBtn) closeBtn.classList.remove('hover-target');
+            },
+            getImpactOptions: ({ impactRect }) => ({
+                sourceRect: impactRect,
+                fallbackVector: { x: 0, y: -1 },
+                strength: 0.9
+            })
+        });
     }
 
     // ─── Motor de Library Mode Toggle (Mitose para direita) ──────────────────────────────
 
     deployLibraryModeToggle() {
-        if (this.shadowRoot.getElementById('library-toggle-mitosis')) return;
+        const existingPill = this.shadowRoot.getElementById('library-toggle-mitosis');
+        if (existingPill) {
+            this.syncLibraryModeToggle();
+            return;
+        }
 
         const hoverZone = this.shadowRoot.getElementById('hover-zone');
         if (!hoverZone) return;
 
-        const pill = document.createElement('div');
-        pill.id = 'library-toggle-mitosis';
-        pill.className = 'mitosis-pill';
-        pill.style.setProperty('--pill-w', '176px');
-        pill.style.setProperty('--pill-h', '38px');
-
-        pill.innerHTML = `
+        return AnimationEngine.runMitosisStrategy('pill-open', { island: this }, {
+            parent: hoverZone,
+            containerId: 'library-toggle-mitosis',
+            className: 'mitosis-pill',
+            splitClass: null,
+            timerProperty: '_animationTimers',
+            containerHTML: `
             <div class="pill-content">
-                <button class="pill-btn active hover-target" data-mode="vinyl">Vinyl</button>
-                <button class="pill-btn hover-target" data-mode="digital">Digital</button>
+                <button class="pill-btn hover-target ${this.libraryMode === 'vinyl' ? 'active' : ''}" data-mode="vinyl">Vinyl</button>
+                <button class="pill-btn hover-target ${this.libraryMode === 'digital' ? 'active' : ''}" data-mode="digital">Digital</button>
             </div>
-        `;
+        `,
+            cssVars: {
+                '--pill-w': '176px',
+                '--pill-h': '38px'
+            },
+            onCreate: (pill) => {
+                pill.querySelectorAll('.pill-btn').forEach(btn => {
+                    btn.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        const mode = btn.dataset.mode === 'digital' ? 'digital' : 'vinyl';
+                        if (mode === this.libraryMode) return;
 
-        pill.querySelectorAll('.pill-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                pill.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                this.closeSearch();
-                this.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
-                    bubbles: true, composed: true, detail: { mode: btn.dataset.mode }
-                }));
-            });
-        });
-
-        hoverZone.insertBefore(pill, hoverZone.firstChild);
-
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
+                        this.setAttribute('library-mode', mode);
+                        this.closeSearch();
+                        this.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
+                            bubbles: true,
+                            composed: true,
+                            detail: { mode }
+                        }));
+                    });
+                });
+            },
+            onEnter: (pill) => {
                 const hostRect = this.getBoundingClientRect();
                 const pillRect = pill.getBoundingClientRect();
-
-                // Posição desejada na viewport (quadrante superior direito)
                 const targetRight = 80;
-
-                // Como :host usa transform, fixed fica relativo ao host transformado.
-                // Compensa isso convertendo viewport -> coordenadas locais do host.
                 const localLeft = (window.innerWidth - targetRight - pillRect.width) - hostRect.left;
-                // Topo exatamente alinhado com a ilha dinâmica.
                 const localTop = 0;
 
                 pill.style.setProperty('--pill-left', `${Math.round(localLeft)}px`);
                 pill.style.setProperty('--pill-top', `${Math.round(localTop)}px`);
                 pill.classList.add('positioned');
-            });
+            }
         });
     }
 
@@ -317,20 +348,17 @@ class RolfsoundIsland extends HTMLElement {
         const pill = this.shadowRoot.getElementById('library-toggle-mitosis');
         if (!pill) return;
 
-        pill.querySelectorAll('.hover-target').forEach(btn => btn.classList.remove('hover-target'));
-
-        // Anima a saída mantendo position: fixed (evita pulo visual)
-        pill.style.opacity = '0';
-        pill.style.transform = 'scale(0.6)';
-        pill.style.pointerEvents = 'none';
-
-        pill.addEventListener('transitionend', () => {
-            if (pill.parentNode) pill.remove();
-        }, { once: true });
-        setTimeout(() => { if (pill.parentNode) pill.remove(); }, 600);
+        return AnimationEngine.runMitosisStrategy('pill-close', { island: this }, {
+            pills: [pill],
+            collapseClassName: null,
+            timerProperty: '_animationTimers',
+            beforeClose: (node) => {
+                node.style.opacity = '0';
+                node.style.transform = 'scale(0.6)';
+                node.style.pointerEvents = 'none';
+            }
+        });
     }
-
-    // ─── Motor de Morph ──────────────────────────────────────────────────────
 
     morph(options) {
         const { width, height = 44, radius = 'var(--radius-dynamic-island)', viewId, islandClass = '', duration = 0 } = options;
@@ -367,21 +395,62 @@ class RolfsoundIsland extends HTMLElement {
         }, 200);
 
         if (duration > 0) {
-            this.morphTimeout = setTimeout(() => this.reset(), duration);
+            this.morphTimeout = setTimeout(() => this.reset({
+                bounce: true,
+                sourceVector: { x: 0, y: -1 },
+                strength: 0.9
+            }), duration);
         }
     }
 
-    reset() {
+    reset(options = {}) {
         const container         = this.shadowRoot.getElementById('bar-container');
         const navContent        = this.shadowRoot.getElementById('bar-content');
         const filtersDrawer     = this.shadowRoot.getElementById('filters-drawer');
         const externalIndicator = this.shadowRoot.getElementById('external-indicator');
         const allViews          = this.shadowRoot.querySelectorAll('.island-view');
+        const {
+            bounce = false,
+            sourceRect = null,
+            sourceVector = null,
+            strength = 0.9,
+            fallbackVector = { x: 0, y: -1 }
+        } = options;
+
+        if (this.morphTimeout) {
+            clearTimeout(this.morphTimeout);
+            this.morphTimeout = null;
+        }
 
         this.isLocked = false;
         allViews.forEach(v => v.classList.remove('visible'));
 
         setTimeout(() => {
+            let impactSettled = false;
+            let impactSafetyId = null;
+
+            const triggerImpact = () => {
+                if (!bounce || impactSettled) return;
+                impactSettled = true;
+                if (impactSafetyId) clearTimeout(impactSafetyId);
+                this.respondToImpact({ sourceRect, sourceVector, strength, fallbackVector });
+            };
+
+            const onTransitionEnd = (e) => {
+                if (e.target !== container) return;
+                if (!['width', 'height', 'border-radius'].includes(e.propertyName)) return;
+                container.removeEventListener('transitionend', onTransitionEnd);
+                triggerImpact();
+            };
+
+            if (bounce) {
+                container.addEventListener('transitionend', onTransitionEnd);
+                impactSafetyId = setTimeout(() => {
+                    container.removeEventListener('transitionend', onTransitionEnd);
+                    triggerImpact();
+                }, 580);
+            }
+
             allViews.forEach(v => v.style.display = 'none');
             navContent.style.display = 'flex';
 
@@ -397,7 +466,14 @@ class RolfsoundIsland extends HTMLElement {
         }, 200);
     }
 
-    hideNotification() { this.reset(); }
+    hideNotification(options = {}) {
+        this.reset({
+            bounce: true,
+            sourceVector: { x: 0, y: -1 },
+            strength: 0.9,
+            ...options
+        });
+    }
 
     showNotification({ text = 'Notificação', spinner = false, duration = 3000 }) {
         const notifContent = this.shadowRoot.getElementById('view-notification');
@@ -447,11 +523,11 @@ class RolfsoundIsland extends HTMLElement {
 
             :host {
                 display: block;
-                --black-studio: rgba(15, 15, 15, 0.85);
-                --white: #ffffff;
-                --gray: rgba(255, 255, 255, 0.4);
-                --border-metal: rgba(255, 255, 255, 0.06);
-                --border-metal-bright: rgba(255, 255, 255, 0.12);
+                --black-studio: var(--color-bg-elevated-strong);
+                --white: var(--color-base-white-strong);
+                --gray: var(--color-text-muted);
+                --border-metal: var(--color-border-subtle);
+                --border-metal-bright: var(--color-border-strong);
 
                 position: fixed; top: 15px; left: 50%; transform: translateX(-50%);
                 z-index: 1000; pointer-events: none;
@@ -470,7 +546,7 @@ class RolfsoundIsland extends HTMLElement {
             }
 
             /* Desativa o Hover de abrir o Menu de Filtros se estiver Inspecionando um disco */
-            :host([active-tab="library"]:not([inspecting])) #hover-zone:hover #bar-container:not(.notifying) {
+            :host([active-tab="library"][library-mode="vinyl"]:not([inspecting])) #hover-zone:hover #bar-container:not(.notifying) {
                 --default-h: 90px;
                 --default-r: var(--radius-dynamic-island-expanded);
             }
@@ -489,7 +565,7 @@ class RolfsoundIsland extends HTMLElement {
                 height: var(--pill-h, 38px);
                 border-radius: var(--pill-r, var(--default-r));
                 background: var(--black-studio);
-                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                backdrop-filter: blur(var(--blur-glass)); -webkit-backdrop-filter: blur(var(--blur-glass));
                 border: 1px solid var(--border-metal);
                 display: flex; align-items: center; justify-content: center;
                 
@@ -497,7 +573,7 @@ class RolfsoundIsland extends HTMLElement {
                 transform: translateX(-50%) scale(0.6);
                 transition: all 0.5s cubic-bezier(0.34, 1.2, 0.64, 1);
                 z-index: 900; 
-                box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+                box-shadow: var(--shadow-soft);
                 overflow: hidden;
             }
             .mitosis-pill.split-right {
@@ -521,7 +597,7 @@ class RolfsoundIsland extends HTMLElement {
                 width: 100%; height: 100%; border-radius: 50%;
                 display: flex; align-items: center; justify-content: center; 
             }
-            .mitosis-btn:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+            .mitosis-btn:hover { color: var(--white); background: var(--color-surface-interactive); }
 
             /* ─ Pill content utils ─ */
             .pill-content {
@@ -534,21 +610,25 @@ class RolfsoundIsland extends HTMLElement {
             .mitosis-pill.split-left .pill-content { opacity: 1; }
 
             .pill-btn {
-                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+                background: transparent; border: 1px solid transparent;
                 color: var(--gray); border-radius: 12px; padding: 6px 14px;
                 font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                 line-height: 1;
                 display: inline-flex; align-items: center; justify-content: center;
                 transition: all 0.2s ease; white-space: nowrap;
             }
-            .pill-btn:hover  { background: rgba(255,255,255,0.1); color: var(--white); }
-            .pill-btn.active { background: var(--white); color: #000; border-color: var(--white); }
+            .pill-btn:hover  { color: var(--white); }
+            .pill-btn.active {
+                background: transparent;
+                color: var(--white);
+                border-color: var(--color-border-strong);
+            }
 
 
             /* ─── ILHA PRINCIPAL ─── */
             #bar-container {
                 background: var(--black-studio);
-                backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                backdrop-filter: blur(var(--blur-glass)); -webkit-backdrop-filter: blur(var(--blur-glass));
                 border: 1px solid var(--border-metal);
 
                 width: var(--island-width, var(--default-w));
@@ -556,7 +636,7 @@ class RolfsoundIsland extends HTMLElement {
                 border-radius: var(--island-radius, var(--default-r));
 
                 display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-                padding: 0 10px; box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+                padding: 0 10px; box-shadow: var(--shadow-soft);
 
                 transition: width  0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
                             height 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
@@ -566,10 +646,26 @@ class RolfsoundIsland extends HTMLElement {
                 position: relative; z-index: 1000;
             }
 
+            :host([division-shell]) #bar-container {
+                background: transparent;
+                border-color: transparent;
+                box-shadow: none;
+                /* Suppress backdrop-filter so it doesn't blur the SVG membrane below */
+                backdrop-filter: none;
+                -webkit-backdrop-filter: none;
+                /* border-color and box-shadow are NOT listed here → they snap instantly.
+                   background-color keeps its 0.5s ease so the bar fades smoothly,
+                   providing visual continuity while the membrane initialises. */
+                transition: width  0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
+                            height 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
+                            border-radius 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
+                            background-color 0.5s ease;
+            }
+
             #bar-container.notifying {
-                background: rgba(10, 10, 10, 0.98);
+                background: var(--color-bg-overlay-strong);
                 border-color: var(--border-metal-bright);
-                box-shadow: 0 12px 35px rgba(0,0,0,0.8);
+                box-shadow: var(--shadow-notification);
             }
 
             #bar-content {
@@ -589,13 +685,13 @@ class RolfsoundIsland extends HTMLElement {
             
             /* Some com o texto de Filters se a Ilha estiver no modo Inspecting */
             :host([inspecting]) #external-indicator,
-            :host([active-tab="library"]:not([inspecting])) #hover-zone:hover #external-indicator {
+            :host([active-tab="library"][library-mode="vinyl"]:not([inspecting])) #hover-zone:hover #external-indicator {
                 opacity: 0; transform: translateY(10px); pointer-events: none;
             }
             #external-indicator.hidden { opacity: 0 !important; pointer-events: none; }
-            :host([active-tab="library"]) #external-indicator { display: flex; }
+            :host([active-tab="library"][library-mode="vinyl"]) #external-indicator { display: flex; }
 
-            .indicator-line  { width: 24px; height: 2px; background: rgba(255,255,255,0.3); border-radius: 2px; }
+            .indicator-line  { width: 24px; height: 2px; background: var(--color-text-faint); border-radius: 2px; }
             .indicator-text  { font-size: var(--fs-2xs, 8px); font-weight: 700; letter-spacing: 0.15em; color: var(--gray); text-transform: uppercase; }
 
             #filters-drawer {
@@ -606,19 +702,20 @@ class RolfsoundIsland extends HTMLElement {
                 width: 100%;
             }
             #filters-drawer.hidden { display: none; }
+            :host(:not([library-mode="vinyl"])) #filters-drawer { display: none; }
 
-            :host([active-tab="library"]:not([inspecting])) #hover-zone:hover #bar-container:not(.notifying) #filters-drawer {
+            :host([active-tab="library"][library-mode="vinyl"]:not([inspecting])) #hover-zone:hover #bar-container:not(.notifying) #filters-drawer {
                 opacity: 1; pointer-events: auto; transform: translateY(0);
             }
 
             .filter-btn {
-                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+                background: var(--color-surface-interactive); border: 1px solid var(--color-border-interactive);
                 color: var(--gray); border-radius: 12px; padding: 6px 10px;
                 font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                 transition: all 0.2s ease; white-space: nowrap;
             }
-            .filter-btn:hover  { background: rgba(255,255,255,0.1); color: var(--white); }
-            .filter-btn.active { background: var(--white); color: var(--black); border-color: var(--white); }
+            .filter-btn:hover  { background: var(--color-surface-interactive-hover); color: var(--white); }
+            .filter-btn.active { background: var(--color-surface-inverse); color: var(--black); border-color: var(--color-surface-inverse); }
 
             .island-view {
                 display: none; position: absolute; inset: 0;
@@ -630,11 +727,11 @@ class RolfsoundIsland extends HTMLElement {
             .island-view.visible { opacity: 1; transform: scale(1); }
 
             #notif-text { font-size: var(--fs-md, 11px); font-weight: 600; color: var(--white); letter-spacing: 0.05em; white-space: nowrap; }
-            .spinner    { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.05); border-top-color: var(--white); border-radius: 50%; animation: spin 0.8s linear infinite; }
+            .spinner    { width: 14px; height: 14px; border: 2px solid var(--color-surface-interactive); border-top-color: var(--white); border-radius: 50%; animation: spin 0.8s linear infinite; }
             @keyframes spin { to { transform: rotate(360deg); } }
 
             .logo-section { display: flex; align-items: center; gap: 8px; margin-left: 8px; position: relative; z-index: 1200; }
-            .logo-led     { width: 4px; height: 4px; background: rgba(255,255,255,0.2); border-radius: 50%; }
+            .logo-led     { width: 4px; height: 4px; background: var(--color-led); border-radius: 50%; }
             .logo-name    { font-weight: 700; font-size: var(--fs-sm, 10px); letter-spacing: 1.5px; text-transform: uppercase; color: var(--white); }
 
             .nav-section {
@@ -651,7 +748,7 @@ class RolfsoundIsland extends HTMLElement {
                 display: flex; align-items: center;
             }
             .nav-link:hover, .nav-link.active { color: var(--white); }
-            .nav-link.active { font-weight: 600; background: rgba(255,255,255,0.05); }
+            .nav-link.active { font-weight: 600; background: var(--color-surface-interactive); }
 
             .nav-icon { flex-shrink: 0; color: inherit; transition: opacity 0.25s ease; }
             .nav-link:hover .nav-icon  { opacity: 0.55; }
@@ -722,7 +819,7 @@ class RolfsoundIsland extends HTMLElement {
                 transition: opacity 0.2s ease 0.35s, transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1) 0.35s,
                             color 0.15s ease, background 0.15s ease;
             }
-            .search-close:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+            .search-close:hover { color: var(--white); background: var(--color-surface-card-hover); }
             .mitosis-pill.search-expanded .search-close { opacity: 1; transform: scale(1); pointer-events: auto; }
         </style>
 

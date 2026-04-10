@@ -46,24 +46,64 @@
         'digital': document.getElementById('view-digital-library'),
         'settings': document.getElementById('view-settings')
     };
+    const STORAGE_KEYS = {
+        libraryMode: 'rolfsound.libraryMode'
+    };
 
-    let libraryMode = 'vinyl'; // 'vinyl' | 'digital'
+    let libraryMode = readStoredLibraryMode(); // 'vinyl' | 'digital'
+    island.setAttribute('library-mode', libraryMode);
+
+    function normalizeLibraryMode(mode) {
+      return mode === 'digital' ? 'digital' : 'vinyl';
+    }
+
+    function readStoredLibraryMode() {
+      try {
+        return normalizeLibraryMode(localStorage.getItem(STORAGE_KEYS.libraryMode));
+      } catch (_) {
+        return 'vinyl';
+      }
+    }
+
+    function persistLibraryMode(mode) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.libraryMode, mode);
+      } catch (_) {}
+    }
+
+    function getActiveLibraryView() {
+      return libraryMode === 'digital' ? views['digital'] : views['library'];
+    }
+
+    function emitLibraryModeChange() {
+      window.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
+        detail: { mode: libraryMode }
+      }));
+    }
+
+    function setLibraryMode(mode, { persist = true, emit = true } = {}) {
+      libraryMode = normalizeLibraryMode(mode);
+      island.setAttribute('library-mode', libraryMode);
+
+      if (persist) {
+        persistLibraryMode(libraryMode);
+      }
+
+      if (island.getAttribute('active-tab') === 'library') {
+        Object.values(views).forEach(v => { if (v) v.classList.remove('active'); });
+        const activeLibraryView = getActiveLibraryView();
+        if (activeLibraryView) activeLibraryView.classList.add('active');
+      }
+
+      if (emit) {
+        emitLibraryModeChange();
+      }
+    }
 
     // Inicia o SearchController apenas quando o custom element estiver registrado
     customElements.whenDefined('rolfsound-island').then(() => {
         window.searchController = new SearchController(island);
     });
-
-    // Ajusta a aba inicial baseada na URL
-    const path = window.location.pathname.replace('/', '') || 'library';
-    if (views[path]) {
-        island.setAttribute('active-tab', path);
-        Object.values(views).forEach(v => v.classList.remove('active'));
-        views[path].classList.add('active');
-    } else if (path === 'playback') {
-        // Playback é renderizado via Mitosis, não tem view dedicada
-        island.setAttribute('active-tab', path);
-    }
 
     // Transição suave quando clica na Ilha
     island.addEventListener('rolfsound-navigate', (e) => {
@@ -72,21 +112,11 @@
 
     // Troca entre Vinyl e Digital library
     island.addEventListener('rolfsound-library-mode-change', (e) => {
-        libraryMode = e.detail.mode;
+        setLibraryMode(e.detail.mode);
 
-        // Move as duas views de library para overlay correto
-        Object.values(views).forEach(v => { if(v) v.classList.remove('active'); });
-
-        if (libraryMode === 'vinyl') {
-            views['library'].classList.add('active');
-        } else if (libraryMode === 'digital') {
-            views['digital'].classList.add('active');
+        if (island.getAttribute('active-tab') === 'library') {
+            window.history.replaceState({}, '', '/library');
         }
-
-        // Dispara um evento que a digital-library.html pode escutar
-        window.dispatchEvent(new CustomEvent('rolfsound-library-mode-change', {
-            detail: { mode: libraryMode }
-        }));
     });
 
     function activateView(view) {
@@ -96,16 +126,47 @@
         return;
       }
 
-      const target = views[view] || views['library'];
-      island.setAttribute('active-tab', view in views ? view : 'library');
-        Object.values(views).forEach(v => v.classList.remove('active'));
+      const normalizedView = view === 'digital' ? 'library' : (view in views ? view : 'library');
+
+      if (view === 'digital') {
+        setLibraryMode('digital');
+      }
+
+      island.setAttribute('active-tab', normalizedView);
+      Object.values(views).forEach(v => v.classList.remove('active'));
+
+      if (normalizedView === 'library') {
+        const target = getActiveLibraryView();
         if (target) target.classList.add('active');
+        emitLibraryModeChange();
+        return;
+      }
+
+      const target = views[normalizedView];
+      if (target) target.classList.add('active');
     }
 
     function navigateTo(view) {
       activateView(view);
-      const newUrl = view === 'library' ? '/library' : `/${view}`;
+      const normalizedView = view === 'digital' ? 'library' : view;
+      const newUrl = normalizedView === 'library' ? '/library' : `/${normalizedView}`;
       window.history.pushState({}, '', newUrl);
+    }
+
+    // Ajusta o estado inicial baseado na URL, tratando /digital como alias legado de /library
+    const initialPath = window.location.pathname.replace('/', '') || 'library';
+    if (initialPath === 'digital') {
+        setLibraryMode('digital', { persist: true, emit: false });
+        window.history.replaceState({}, '', '/library');
+    } else {
+        setLibraryMode(libraryMode, { persist: false, emit: false });
+    }
+
+    if (initialPath === 'playback') {
+        island.setAttribute('active-tab', 'playback');
+        Object.values(views).forEach(v => v.classList.remove('active'));
+    } else {
+        activateView(initialPath);
     }
 
     window.contextMenuController = new ContextMenuController({

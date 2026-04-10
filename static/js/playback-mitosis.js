@@ -3,6 +3,7 @@
 // As animações são delegadas ao AnimationEngine
 
 import AnimationEngine from '/static/js/AnimationEngine.js';
+import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
 
 // ─── Dimensões do layout ───────────────────────────────────────────────────
 const PLAYER_W   = 340;   // largura da capa e da pílula de controles (px)
@@ -10,12 +11,14 @@ const SQUARE_H   = 340;   // altura da capa 1:1 (px)
 const CONTROLS_H = 56;    // altura da pílula de controles (px)
 const GAP        = 10;    // espaço entre os dois blocos (px)
 const TOTAL_H    = SQUARE_H + GAP + CONTROLS_H; // 406px
+const MITOSIS_DROP = 22;  // deslocamento vertical adicional para a cópia (px)
 
 class PlaybackMitosisManager {
   constructor() {
     this.island = null;
     this.isMorphed = false;
     this.playerContainer = null;
+    this.divisionMembrane = null;
 
     // ─── Estado Único (Source of Truth) ───
     this.state = {
@@ -44,6 +47,7 @@ class PlaybackMitosisManager {
     this.rafId = null;
     this.rafPos = -1;
     this.rafTime = '';
+    this.animationTimers = new Set();
 
     // ─── Polling ───
     this.statusPollId = null;
@@ -76,73 +80,155 @@ class PlaybackMitosisManager {
     this.registerAnimations();
     this.findIsland();
     this.attachNavigationListener();
+    // Polling e RAF iniciam sob demanda (morph/unmorph), não no boot
     this.startPolling();
-    this.startRafLoop();
   }
 
   registerAnimations() {
+    // Usa CSS transitions em width/height/top (não scale),
+    // evitando distorção visual. Para um único elemento position:fixed,
+    // o custo de layout é mínimo.
     AnimationEngine.registerKeyframes('cellular', `
-      /* ─── EXPANSÃO ─── */
-      @keyframes cellularExpansion {
-        0% {
-          animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
-          top: 60px; left: 50%;
-          transform: translate(-50%, 0) scaleY(0);
-          width: 450px; height: 38px;
-          border-radius: var(--radius-dynamic-island);
-          opacity: 0;
-        }
-        22% {
-          animation-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-          top: 60px; left: 50%;
-          transform: translate(-50%, 0) scaleY(1);
-          width: 450px; height: 38px;
-          border-radius: var(--radius-dynamic-island);
-          opacity: 1;
-        }
-        100% {
-          top: 50%; left: 50%;
-          transform: translate(-50%, -50%) scaleY(1);
-          width: ${PLAYER_W}px; height: ${TOTAL_H}px;
-          border-radius: 0px;
-          opacity: 1;
-        }
-      }
-
-      /* ─── CONTRAÇÃO ─── */
-      @keyframes cellularContraction {
-        0% {
-          animation-timing-function: cubic-bezier(0.55, 0, 0.1, 1);
-          top: 50%; left: 50%;
-          transform: translate(-50%, -50%) scaleY(1);
-          width: ${PLAYER_W}px;
-          border-radius: 0px;
-          opacity: 1;
-        }
-        82% {
-          animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
-          top: 60px; left: 50%;
-          transform: translate(-50%, 0) scaleY(1);
-          width: 450px; height: 38px;
-          border-radius: var(--radius-dynamic-island);
-          opacity: 1;
-        }
-        100% {
-          top: 60px; left: 50%;
-          transform: translate(-50%, 0) scaleY(0);
-          width: 450px; height: 38px;
-          border-radius: var(--radius-dynamic-island);
-          opacity: 0;
-        }
-      }
-
       #playback-player-container {
         position: fixed !important;
+        left: 50%;
+        transform: translateX(-50%);
         z-index: 996;
-        transform-origin: top center;
-        will-change: transform, opacity;
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        backface-visibility: hidden;
+        will-change: width, height, top, opacity;
       }
     `);
+  }
+
+  getMitosisMetrics() {
+    const base = measureIslandBarMitosis(this.island, {
+      originTop: 15,
+      originWidth: 450,
+      originHeight: 38,
+      copyGap: 7,
+      extraDrop: MITOSIS_DROP
+    });
+
+    base.targetTop = (window.innerHeight - TOTAL_H) / 2;
+    return base;
+  }
+
+  scheduleAnimation(callback, delay) {
+    return AnimationEngine.schedule(this, callback, delay);
+  }
+
+  clearAnimationTimers() {
+    AnimationEngine.clearScheduled(this);
+  }
+
+  _getIslandBarContainer() {
+    return this.island?.shadowRoot?.getElementById('bar-container') || null;
+  }
+
+  _setDivisionShellState(container, active) {
+    const target = container || this.playerContainer;
+
+    if (this.island) {
+      if (active) {
+        this.island.setAttribute('division-shell', 'true');
+      } else {
+        this.island.removeAttribute('division-shell');
+      }
+    }
+
+    if (!target) return;
+
+    if (active) {
+      target.style.setProperty('--division-shell-fill', 'transparent');
+      target.style.setProperty('--division-shell-border-color', 'transparent');
+      target.style.setProperty('--division-shell-shadow', 'none');
+      return;
+    }
+
+    target.style.removeProperty('--division-shell-fill');
+    target.style.removeProperty('--division-shell-border-color');
+    target.style.removeProperty('--division-shell-shadow');
+  }
+
+  _beginDivisionMembrane(container, options = {}) {
+    const islandBar = this._getIslandBarContainer();
+    if (!islandBar || !container) return;
+
+    this._clearDivisionMembrane(container);
+
+    const islandStyle = getComputedStyle(islandBar);
+    this._setDivisionShellState(container, true);
+
+    this.divisionMembrane = AnimationEngine.createDivisionMembrane({
+      topElement: islandBar,
+      bottomElement: container,
+      bridgeElement: options.bridgeElement || null,
+      fillColor: islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
+      strokeColor: islandStyle.borderTopColor || 'rgba(255, 255, 255, 0.06)',
+      zIndex: 995
+    });
+
+    if (!this.divisionMembrane) {
+      this._setDivisionShellState(container, false);
+      return;
+    }
+
+    if (options.mode === 'split') {
+      this.divisionMembrane.setSplit({ bottomElement: container });
+      return;
+    }
+
+    this.divisionMembrane.setConnected({
+      bottomElement: container,
+      bridgeElement: options.bridgeElement || null,
+      neckWidth: options.neckWidth,
+      neckWidthProvider: options.neckWidthProvider
+    });
+  }
+
+  _setDivisionMembraneMode(mode, options = {}) {
+    if (!this.divisionMembrane) return;
+
+    if (mode === 'split') {
+      this.divisionMembrane.setSplit({
+        bottomElement: options.container || this.playerContainer
+      });
+      return;
+    }
+
+    this.divisionMembrane.setConnected({
+      bottomElement: options.container || this.playerContainer,
+      bridgeElement: options.bridgeElement || null,
+      neckWidth: options.neckWidth,
+      neckWidthProvider: options.neckWidthProvider
+    });
+  }
+
+  _endDivisionMembrane(container, fadeMs = 120) {
+    const membrane = this.divisionMembrane;
+    this.divisionMembrane = null;
+
+    if (!membrane) {
+      this._setDivisionShellState(container, false);
+      return;
+    }
+
+    membrane.fadeOut(fadeMs, () => {
+      this._setDivisionShellState(container, false);
+    });
+  }
+
+  _clearDivisionMembrane(container = this.playerContainer) {
+    if (this.divisionMembrane) {
+      this.divisionMembrane.remove();
+      this.divisionMembrane = null;
+    }
+
+    this._setDivisionShellState(container, false);
   }
 
   findIsland() {
@@ -165,72 +251,326 @@ class PlaybackMitosisManager {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // MITOSIS CONTROL
+  // MITOSIS CONTROL — Divisão Celular
+  //
+  // morph():   ilha incha → brota célula-filha → ponte conecta →
+  //            clivagem (ponte estreita) → filha se destaca → cresce
+  // unmorph(): conteúdo some → filha encolhe → sobe até a ilha →
+  //            absorção (height→0) → impacto na ilha
   // ─────────────────────────────────────────────────────────────
+
+  static BUDDING_OVERLAP = 6;   // px de sobreposição com a base da ilha
+  static BUD_HEIGHT      = 52;  // altura visível do broto antes do pinch
+  static PINCH_GAP       = 14;  // espaço entre ilha e filha na clivagem
+  static BRIDGE_PINCH_W  = 14;  // largura da ponte no ponto de clivagem
 
   morph() {
     if (this.isMorphed) return;
     this.isMorphed = true;
+    this.clearAnimationTimers();
+    this._clearDivisionMembrane();
 
     const playerHTML = this.buildPlayerHTML();
+    const metrics    = this.getMitosisMetrics();
+    const islandBottom = metrics.originTop + metrics.originHeight;
+    const OVERLAP      = PlaybackMitosisManager.BUDDING_OVERLAP;
+    const BUD_H        = PlaybackMitosisManager.BUD_HEIGHT;
+    const PINCH_GAP    = PlaybackMitosisManager.PINCH_GAP;
+    const BRIDGE_W     = PlaybackMitosisManager.BRIDGE_PINCH_W;
 
-    this.playerContainer = AnimationEngine.createMitosis(this.island, {
-      containerHTML: playerHTML,
-      startAnimation: 'cellularExpansion',
-      containerId: 'playback-player-container',
-      duration: 850,
-      initialStyle: `
-        position: fixed;
-        top: 60px;
-        left: 50%;
-        transform: translate(-50%, 0) scaleY(0);
-        transform-origin: top center;
-        width: 450px;
-        height: 38px;
-        border-radius: var(--radius-dynamic-island);
-        opacity: 0;
-        z-index: 996;
-        pointer-events: none;
-        overflow: hidden;
-      `,
-      onComplete: () => {
-        if (this.playerContainer) {
-          this.playerContainer.style.height = 'auto';
-          this.playerContainer.style.overflow = 'visible';
-          this.playerContainer.style.pointerEvents = 'auto';
+    return AnimationEngine.runMitosisStrategy('playback-division-open', {
+      island: this.island,
+      owner: this
+    }, {
+      staleIds: ['playback-player-container', 'mitosis-bridge'],
+      preImpactOptions: {
+        sourceVector: { x: 0, y: 1 },
+        strength: 0.88,
+        duration: 480
+      },
+      createContainer: {
+        containerId: 'playback-player-container',
+        containerHTML: playerHTML,
+        initialStyle: `
+      position: fixed;
+      top: ${islandBottom - OVERLAP}px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: ${metrics.originWidth}px;
+      height: 0px;
+      border-radius: 0 0 var(--radius-dynamic-island) var(--radius-dynamic-island);
+      background: var(--division-shell-fill, var(--color-playback-shell));
+      border: 1px solid var(--division-shell-border-color, var(--color-border-subtle));
+      border-top: none;
+      box-shadow: var(--division-shell-shadow, none);
+      z-index: 996;
+      overflow: hidden;
+      pointer-events: none;
+      opacity: 1;
+      will-change: width, height, top, border-radius;
+      transition: height 0.36s var(--ease-emphasized);
+    `
+      },
+      createBridge: {
+        containerId: 'mitosis-bridge',
+        initialStyle: `
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      width: ${metrics.originWidth - 2}px;
+      top: ${islandBottom - 1}px;
+      height: 2px;
+      background: transparent;
+      z-index: 996;
+      border-radius: 0;
+      pointer-events: none;
+      opacity: 0;
+      will-change: width, border-radius, opacity;
+      transition:
+        width 0.32s var(--ease-standard),
+        height 0.3s var(--ease-standard),
+        border-radius 0.28s ease,
+        opacity 0.14s ease;
+    `
+      },
+      isActive: (container) => container === this.playerContainer,
+      onCreated: ({ container, bridge }) => {
+        this.playerContainer = container;
+        this._beginDivisionMembrane(container, {
+          mode: 'connected',
+          bridgeElement: bridge
+        });
+      },
+      onBud: ({ container }) => {
+        container.style.height = `${BUD_H + OVERLAP}px`;
+      },
+      onPinch: ({ container, bridge }) => {
+        container.style.transition = `
+        top 0.38s var(--ease-standard),
+        height 0.38s var(--ease-standard),
+        width 0.52s var(--ease-standard),
+        border-radius 0.34s cubic-bezier(0.25, 1, 0.5, 1),
+        border-top 0.1s ease,
+        box-shadow 0.3s ease
+      `;
+      container.style.top    = `${islandBottom + PINCH_GAP}px`;
+      container.style.height = `${BUD_H}px`;
+      container.style.borderRadius = 'var(--radius-dynamic-island)';
+      container.style.borderTop   = '1px solid var(--division-shell-border-color, var(--color-border-subtle))';
+      container.style.boxShadow   = 'var(--division-shell-shadow, var(--shadow-elevated))';
+
+      bridge.style.height       = `${PINCH_GAP + 2}px`;
+      bridge.style.width        = `${BRIDGE_W}px`;
+      bridge.style.borderRadius = `${BRIDGE_W / 2}px`;
+      },
+      onBridgeFade: ({ bridge }) => {
+        if (!bridge) return;
+        bridge.style.opacity = '0';
+        bridge.style.width = '0px';
+      },
+      onGrow: ({ container, bridge }) => {
+        this._setDivisionMembraneMode('split', { container });
+        if (bridge && bridge.parentNode) bridge.remove();
+        container.style.transition = `
+        width 0.58s var(--ease-standard),
+        height 0.58s var(--ease-standard),
+        top 0.58s var(--ease-standard),
+        border-radius 0.46s cubic-bezier(0.25, 1, 0.5, 1)
+      `;
+      container.style.width  = `${PLAYER_W}px`;
+      container.style.height = `${TOTAL_H}px`;
+      container.style.top    = `${metrics.targetTop}px`;
+      },
+      onReveal: (container) => {
+        this._endDivisionMembrane(container);
+        this._revealPlayerStage(container);
+      },
+      onSettled: (container) => {
+        this._settlePlayer(container);
+      },
+      onCursorReset: () => {
+        if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
+          window.meuCursor.resetHover();
         }
-        this.cacheDomElements();
       }
     });
-
-    if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
-      window.meuCursor.resetHover();
-    }
   }
+
+  /** Finaliza a expansão: revela conteúdo e remove casca visual */
+  _revealPlayerStage(container) {
+    if (!container || !container.parentNode || container !== this.playerContainer) return;
+
+    container.style.overflow   = 'visible';
+    container.style.background = 'transparent';
+    container.style.border     = 'none';
+    container.style.boxShadow  = 'none';
+
+    const cover    = container.querySelector('#playback-cover-shell');
+    const controls = container.querySelector('#playback-controls-shell');
+
+    if (cover) {
+      cover.style.opacity   = '1';
+      cover.style.transform = 'translateY(0) scale(1)';
+    }
+
+    this.scheduleAnimation(() => {
+      if (!controls || !container.parentNode || container !== this.playerContainer) return;
+      controls.style.opacity   = '1';
+      controls.style.transform = 'translateY(0) scale(1)';
+    }, 170);
+  }
+
+  /** Finaliza a expansão: libera interação e garante estado final */
+  _settlePlayer(container) {
+    if (!container || !container.parentNode || container !== this.playerContainer) return;
+    container.style.transition   = 'none';
+    container.style.overflow     = 'visible';
+    container.style.pointerEvents = 'auto';
+    container.style.background   = 'transparent';
+    container.style.border       = 'none';
+    container.style.boxShadow    = 'none';
+
+    const cover    = container.querySelector('#playback-cover-shell');
+    const controls = container.querySelector('#playback-controls-shell');
+    if (cover) {
+      cover.style.opacity   = '1';
+      cover.style.transform = 'translateY(0) scale(1)';
+    }
+    if (controls) {
+      controls.style.opacity   = '1';
+      controls.style.transform = 'translateY(0) scale(1)';
+    }
+
+    this.cacheDomElements();
+    this.startRafLoop();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // UNMORPH — Absorção reversa (célula-filha volta para a ilha)
+  // ─────────────────────────────────────────────────────────────
 
   unmorph() {
     if (!this.isMorphed) return;
     this.isMorphed = false;
+    this.stopRafLoop();
+    this.clearAnimationTimers();
 
-    if (this.playerContainer) {
-      const h = this.playerContainer.getBoundingClientRect().height;
-      this.playerContainer.style.height = h + 'px';
-      this.playerContainer.style.overflow = 'hidden';
-      this.playerContainer.style.pointerEvents = 'none';
+    const container = this.playerContainer;
+    if (!container) {
+      this.clearDomReferences();
+      return;
     }
 
-    AnimationEngine.destroyMitosis(this.playerContainer, {
-      endAnimation: 'cellularContraction',
-      duration: 750,
+    const metrics      = this.getMitosisMetrics();
+    const islandBottom = metrics.originTop + metrics.originHeight;
+    const OVERLAP      = PlaybackMitosisManager.BUDDING_OVERLAP;
+
+    return AnimationEngine.runMitosisStrategy('playback-division-close', {
+      island: this.island,
+      owner: this
+    }, {
+      container,
+      isActive: (node) => node === this.playerContainer,
+      onMissing: () => {
+        this._clearDivisionMembrane();
+        this.clearDomReferences();
+      },
+      onStart: (activeContainer) => {
+        this._beginDivisionMembrane(activeContainer, {
+          mode: 'split'
+        });
+
+        const cover = activeContainer.querySelector('#playback-cover-shell');
+        const controls = activeContainer.querySelector('#playback-controls-shell');
+
+        if (controls) {
+          controls.style.opacity = '0';
+          controls.style.transform = `translateY(-${CONTROLS_H + GAP}px) scale(0.94)`;
+        }
+
+        if (cover) {
+          cover.style.opacity = '0';
+          cover.style.transform = 'translateY(10px) scale(0.985)';
+        }
+      },
+      onShrink: (activeContainer) => {
+        activeContainer.style.transition = 'none';
+        activeContainer.style.overflow = 'hidden';
+        activeContainer.style.pointerEvents = 'none';
+        activeContainer.style.background = 'var(--division-shell-fill, var(--color-playback-shell))';
+        activeContainer.style.border = '1px solid var(--division-shell-border-color, var(--color-border-subtle))';
+        activeContainer.style.boxShadow = 'var(--division-shell-shadow, var(--shadow-elevated))';
+
+        activeContainer.getBoundingClientRect();
+
+        AnimationEngine.afterFrames(() => {
+          if (!activeContainer.parentNode || activeContainer !== this.playerContainer) return;
+          activeContainer.style.transition = `
+          width 0.46s var(--ease-standard),
+          height 0.46s var(--ease-standard),
+          top 0.46s var(--ease-standard),
+          border-radius 0.38s cubic-bezier(0.25, 1, 0.5, 1)
+        `;
+          activeContainer.style.width = `${metrics.originWidth}px`;
+          activeContainer.style.height = `${metrics.originHeight}px`;
+          activeContainer.style.top = `${islandBottom + 4}px`;
+          activeContainer.style.borderRadius = 'var(--radius-dynamic-island)';
+        });
+      },
+      onAbsorb: (activeContainer) => {
+        this._setDivisionMembraneMode('connected', {
+          container: activeContainer,
+          neckWidthProvider: ({ topRect, bottomRect }) => Math.min(topRect.width, bottomRect.width)
+        });
+
+        activeContainer.style.transition = `
+        height 0.3s var(--ease-standard),
+        top 0.3s var(--ease-standard),
+        border-radius 0.24s ease,
+        border-top 0.08s ease,
+        opacity 0.16s ease 0.14s
+      `;
+        activeContainer.style.top = `${islandBottom - OVERLAP}px`;
+        activeContainer.style.height = '0px';
+        activeContainer.style.borderRadius = '0 0 var(--radius-dynamic-island) var(--radius-dynamic-island)';
+        activeContainer.style.borderTop = 'none';
+        activeContainer.style.opacity = '0';
+      },
+      onCleanup: (activeContainer) => {
+        this._removePlayer(activeContainer, {
+        sourceVector: { x: 0, y: 1 },
+        fallbackVector: { x: 0, y: -1 },
+        strength: 1.0,
+        maxTravel: 9
+        });
+      },
+      onCursorReset: () => {
+        if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
+          window.meuCursor.resetHover();
+        }
+      }
+    });
+  }
+
+  /** Remove o container do player do DOM */
+  _removePlayer(container, impactOptions = null) {
+    this.clearAnimationTimers();
+    this._clearDivisionMembrane(container);
+    if (impactOptions && this.island) {
+      AnimationEngine.respondToImpact(this.island, impactOptions);
+    }
+    const bridge = document.getElementById('mitosis-bridge');
+    if (bridge) {
+      AnimationEngine.destroyMitosis(bridge, { duration: 0, endAnimation: '' });
+    }
+    AnimationEngine.destroyMitosis(container, {
+      duration: 0,
+      endAnimation: '',
       onComplete: () => {
         this.playerContainer = null;
         this.clearDomReferences();
       }
     });
-
-    if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
-      window.meuCursor.resetHover();
-    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -251,21 +591,42 @@ class PlaybackMitosisManager {
           height: ${CH}px;
           flex-shrink: 0;
           overflow: visible;
+          opacity: 0;
+          transform: translateY(-${CH + G}px) scale(0.94);
+          transform-origin: top center;
+          z-index: 1;
+          transition:
+            opacity 0.24s ease,
+            transform 0.52s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+
+        #playback-cover-shell {
+          position: relative;
+          width: ${W}px;
+          height: ${SQ}px;
+          flex-shrink: 0;
+          opacity: 0;
+          transform: translateY(10px) scale(0.985);
+          transform-origin: top center;
+          z-index: 2;
+          transition:
+            opacity 0.24s ease,
+            transform 0.58s cubic-bezier(0.32, 0.72, 0, 1);
         }
 
         #playback-controls-pill {
           width: 100%;
           height: 100%;
-          background: rgba(12,12,12,0.88);
-          backdrop-filter: blur(24px);
-          -webkit-backdrop-filter: blur(24px);
-          border: 1px solid rgba(255,255,255,0.07);
+          background: var(--color-playback-pill);
+          backdrop-filter: blur(var(--blur-playback));
+          -webkit-backdrop-filter: blur(var(--blur-playback));
+          border: 1px solid var(--color-border-soft);
           border-radius: var(--radius-dynamic-island);
           display: flex;
           align-items: center;
           justify-content: space-evenly;
           padding: 0 10px;
-          box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+          box-shadow: var(--shadow-playback-pill);
         }
 
         .playback-control-btn {
@@ -277,8 +638,8 @@ class PlaybackMitosisManager {
           padding: 0;
           background: transparent;
           border: none;
-          border-radius: 10px;
-          color: rgba(255,255,255,0.74);
+          border-radius: var(--radius-lg);
+          color: var(--color-text-control);
           transition: color 0.18s ease, transform 0.18s ease;
           position: relative;
           flex: 0 0 auto;
@@ -298,7 +659,7 @@ class PlaybackMitosisManager {
         .playback-control-btn-main {
           width: 42px;
           height: 42px;
-          color: rgba(255,255,255,0.96);
+          color: var(--color-text-control-strong);
         }
 
         .playback-control-btn-main svg {
@@ -315,13 +676,13 @@ class PlaybackMitosisManager {
           width: ${CH}px;
           height: ${CH}px;
           padding: 0;
-          border: 1px solid rgba(255,255,255,0.07);
+          border: 1px solid var(--color-border-soft);
           border-radius: var(--radius-dynamic-island);
-          background: rgba(12,12,12,0.88);
-          backdrop-filter: blur(24px);
-          -webkit-backdrop-filter: blur(24px);
-          color: rgba(255,255,255,0.74);
-          box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+          background: var(--color-playback-pill);
+          backdrop-filter: blur(var(--blur-playback));
+          -webkit-backdrop-filter: blur(var(--blur-playback));
+          color: var(--color-text-control);
+          box-shadow: var(--shadow-playback-pill);
           opacity: 0;
           pointer-events: none;
           transition:
@@ -351,21 +712,21 @@ class PlaybackMitosisManager {
           min-width: 14px;
           height: 14px;
           padding: 0 4px;
-          border-radius: 999px;
+          border-radius: var(--radius-full);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 8px;
+          font-size: var(--fs-2xs);
           font-weight: 700;
           letter-spacing: 0.04em;
-          color: #000;
-          background: rgba(255,255,255,0.88);
+          color: var(--color-badge-text);
+          background: var(--color-badge-bg);
           opacity: 0;
           transition: opacity 0.18s ease;
         }
       </style>
 
-      <div style="
+      <div id="playback-inner-wrapper" style="
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -373,117 +734,119 @@ class PlaybackMitosisManager {
         width: ${W}px;
         background: transparent;
         box-sizing: border-box;
+        opacity: 1;
       ">
 
         <!-- ── CAPA 1:1 ── -->
-        <div style="
-          position: relative;
-          width: ${W}px;
-          height: ${SQ}px;
-          border-radius: var(--radius-dynamic-island);
-          overflow: hidden;
-          flex-shrink: 0;
-          background: #0f0f0f;
-          border: 1px solid rgba(255,255,255,0.06);
-          box-shadow: 0 16px 48px rgba(0,0,0,0.7);
-        ">
-
-          <!-- Thumbnail (preenche o quadrado inteiro) -->
-          <div id="playback-thumbnail" style="
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #0f0f0f;
-          ">
-            <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.12)" style="width: 72px; height: 72px; stroke-width: 1.0;">
-              <circle cx="12" cy="12" r="10"/>
-              <polygon points="10,8 16,12 10,16"/>
-            </svg>
-          </div>
-
-          <!-- Gradiente + info (canto inferior esquerdo) -->
+        <div id="playback-cover-shell">
           <div style="
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            padding: 40px 16px 14px 16px;
-            background: linear-gradient(
-              to top,
-              rgba(0,0,0,0.82) 0%,
-              rgba(0,0,0,0.30) 60%,
-              transparent 100%
-            );
-            z-index: 2;
-            pointer-events: none;
+            position: relative;
+            width: ${W}px;
+            height: ${SQ}px;
+            border-radius: var(--radius-dynamic-island);
+            overflow: hidden;
+            flex-shrink: 0;
+            background: var(--color-playback-cover);
+            border: 1px solid var(--color-border-subtle);
+            box-shadow: var(--shadow-cover);
           ">
-            <div id="playback-title" style="
-              font-size: 15px;
-              font-weight: 700;
-              color: #fff;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-              margin-bottom: 3px;
-              letter-spacing: -0.01em;
-            ">Nothing playing</div>
 
-            <div id="playback-artist" style="
-              font-size: 11px;
-              color: rgba(255,255,255,0.55);
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-              letter-spacing: 0.01em;
-            ">—</div>
-          </div>
-
-          <!-- Tempo (canto inferior direito, acima da barra) -->
-          <div style="
-            position: absolute;
-            bottom: 7px;
-            right: 12px;
-            z-index: 3;
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            pointer-events: none;
-          ">
-            <span id="current-time" style="font-size: 9px; color: rgba(255,255,255,0.45); font-family: 'Courier New', monospace; letter-spacing: 0.04em;">0:00</span>
-            <span style="font-size: 9px; color: rgba(255,255,255,0.22); font-family: 'Courier New', monospace;">/</span>
-            <span id="total-time" style="font-size: 9px; color: rgba(255,255,255,0.45); font-family: 'Courier New', monospace; letter-spacing: 0.04em;">0:00</span>
-          </div>
-
-          <!-- Barra de progresso: aresta inferior do quadrado -->
-          <!-- Wrapper clicável com área de toque maior -->
-          <div id="progress-bar" style="
-            position: absolute;
-            bottom: 0; left: 0; right: 0;
-            height: 12px;
-            cursor: pointer;
-            z-index: 4;
-            display: flex;
-            align-items: flex-end;
-          ">
-            <!-- Trilha visual (apenas 2px visíveis no fundo) -->
-            <div style="
-              width: 100%;
-              height: 2px;
-              background: rgba(255,255,255,0.12);
-              position: relative;
-              overflow: hidden;
+            <!-- Thumbnail (preenche o quadrado inteiro) -->
+            <div id="playback-thumbnail" style="
+              position: absolute;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: var(--color-playback-cover);
             ">
-              <div id="progress-fill" style="
-                position: absolute;
-                inset: 0;
-                width: 0%;
-                background: rgba(255,255,255,0.9);
-                transition: width 0.08s linear;
-                border-radius: 0 1px 1px 0;
-              "></div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--color-playback-icon-muted)" style="width: 72px; height: 72px; stroke-width: 1.0;">
+                <circle cx="12" cy="12" r="10"/>
+                <polygon points="10,8 16,12 10,16"/>
+              </svg>
+            </div>
+
+            <!-- Gradiente + info (canto inferior esquerdo) -->
+            <div style="
+              position: absolute;
+              bottom: 0; left: 0; right: 0;
+              padding: 40px 16px 14px 16px;
+              background: linear-gradient(
+                to top,
+                var(--color-playback-gradient-start) 0%,
+                var(--color-playback-gradient-mid) 60%,
+                transparent 100%
+              );
+              z-index: 2;
+              pointer-events: none;
+            ">
+              <div id="playback-title" style="
+                font-size: var(--font-size-title-sm);
+                font-weight: 700;
+                color: var(--color-text-primary);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                margin-bottom: 3px;
+                letter-spacing: -0.01em;
+              ">Nothing playing</div>
+
+              <div id="playback-artist" style="
+                font-size: var(--fs-md);
+                color: var(--color-text-soft);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                letter-spacing: 0.01em;
+              ">—</div>
+            </div>
+
+            <!-- Tempo (canto inferior direito, acima da barra) -->
+            <div style="
+              position: absolute;
+              bottom: 7px;
+              right: 12px;
+              z-index: 3;
+              display: flex;
+              align-items: center;
+              gap: 3px;
+              pointer-events: none;
+            ">
+              <span id="current-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">0:00</span>
+              <span style="font-size: var(--fs-xs); color: var(--color-text-disabled); font-family: var(--font-mono);">/</span>
+              <span id="total-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">0:00</span>
+            </div>
+
+            <!-- Barra de progresso: aresta inferior do quadrado -->
+            <!-- Wrapper clicável com área de toque maior -->
+            <div id="progress-bar" style="
+              position: absolute;
+              bottom: 0; left: 0; right: 0;
+              height: 12px;
+              cursor: pointer;
+              z-index: 4;
+              display: flex;
+              align-items: flex-end;
+            ">
+              <!-- Trilha visual (apenas 2px visíveis no fundo) -->
+              <div style="
+                width: 100%;
+                height: 2px;
+                background: var(--color-progress-track);
+                position: relative;
+                overflow: hidden;
+              ">
+                <div id="progress-fill" style="
+                  position: absolute;
+                  inset: 0;
+                  width: 0%;
+                  background: var(--color-progress-fill);
+                  transition: width 0.08s linear;
+                  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+                "></div>
+              </div>
             </div>
           </div>
-
         </div>
 
         <!-- ── PÍLULA DE CONTROLES ── -->
@@ -495,7 +858,7 @@ class PlaybackMitosisManager {
               <span id="shuffle-dot" style="
                 position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
                 width: 3px; height: 3px; border-radius: 50%;
-                background: white; opacity: 0;
+                background: var(--color-base-white-strong); opacity: 0;
                 transition: opacity 0.2s ease;
               "></span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -538,7 +901,7 @@ class PlaybackMitosisManager {
               <span id="repeat-dot" style="
                 position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
                 width: 3px; height: 3px; border-radius: 50%;
-                background: white; opacity: 0;
+                background: var(--color-base-white-strong); opacity: 0;
                 transition: opacity 0.2s ease;
               "></span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -611,14 +974,14 @@ class PlaybackMitosisManager {
   syncToggleButtons() {
     if (this.dom.btnShuffle) {
       this.dom.btnShuffle.style.color = this.state.shuffle
-        ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.3)';
+        ? 'var(--color-control-active)' : 'var(--color-control-inactive)';
     }
     if (this.dom.shuffleDot) {
       this.dom.shuffleDot.style.opacity = this.state.shuffle ? '1' : '0';
     }
     if (this.dom.btnRepeat) {
       this.dom.btnRepeat.style.color = this.state.repeat
-        ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.3)';
+        ? 'var(--color-control-active)' : 'var(--color-control-inactive)';
     }
     if (this.dom.repeatDot) {
       this.dom.repeatDot.style.opacity = this.state.repeat ? '1' : '0';
@@ -633,8 +996,8 @@ class PlaybackMitosisManager {
       this.dom.btnQueue.title = label;
       this.dom.btnQueue.setAttribute('aria-label', label);
       this.dom.btnQueue.style.color = count
-        ? 'rgba(255,255,255,0.82)'
-        : 'rgba(255,255,255,0.48)';
+        ? 'var(--color-queue-active)'
+        : 'var(--color-queue-inactive)';
     }
 
     if (this.dom.queueCount) {
@@ -682,6 +1045,7 @@ class PlaybackMitosisManager {
 
   startPolling() {
     this.pollStatus();
+    // Polling adaptativo: rápido quando visível e tocando, lento quando em background
     this.statusPollId = setInterval(() => this.pollStatus(), this.pollInterval);
   }
 
@@ -693,11 +1057,22 @@ class PlaybackMitosisManager {
   }
 
   async pollStatus() {
+    // Pula polling se a aba do navegador não estiver visível
+    if (document.hidden) return;
+
     try {
       const response = await fetch('/api/status');
       if (!response.ok) return;
       const status = await response.json();
       this.applyServerStatus(status);
+
+      // Polling adaptativo: 3s quando idle/paused, 1.5s quando tocando
+      const idealInterval = (status.state === 'playing') ? 1500 : 3000;
+      if (idealInterval !== this.pollInterval) {
+        this.pollInterval = idealInterval;
+        this.stopPolling();
+        this.statusPollId = setInterval(() => this.pollStatus(), this.pollInterval);
+      }
     } catch (error) {
       console.error('Status poll error:', error);
     }
@@ -762,11 +1137,19 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
 
   startRafLoop() {
+    if (this.rafId) return;
     const tick = () => {
       this.tickProgress();
       this.rafId = requestAnimationFrame(tick);
     };
     tick();
+  }
+
+  stopRafLoop() {
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
   }
 
   tickProgress() {
@@ -847,7 +1230,7 @@ class PlaybackMitosisManager {
     if (!this.dom.thumbnail) return;
     if (!this.dom.thumbnail.querySelector('svg')) {
       this.dom.thumbnail.innerHTML = `
-        <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.12)"
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--color-playback-icon-muted)"
              style="width: 72px; height: 72px; stroke-width: 1.0;">
           <circle cx="12" cy="12" r="10"/>
           <polygon points="10,8 16,12 10,16"/>
@@ -955,7 +1338,7 @@ class PlaybackMitosisManager {
 
   destroy() {
     this.stopPolling();
-    if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.stopRafLoop();
   }
 }
 
