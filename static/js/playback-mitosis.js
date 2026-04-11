@@ -43,6 +43,10 @@ class PlaybackMitosisManager {
       }
     };
 
+    // ─── Thumbnail crossfade state ───
+    this._thumbCurrentEl = null;  // <img> atualmente visível
+    this._thumbPendingEl = null;  // <img> sendo carregado (cancelável)
+
     // ─── RAF Loop ───
     this.rafId = null;
     this.rafPos = -1;
@@ -957,6 +961,13 @@ class PlaybackMitosisManager {
 
   clearDomReferences() {
     Object.keys(this.dom).forEach(key => { this.dom[key] = null; });
+    // Cancela qualquer carga pendente e limpa referências de crossfade
+    if (this._thumbPendingEl) {
+      this._thumbPendingEl.onload  = null;
+      this._thumbPendingEl.onerror = null;
+      this._thumbPendingEl = null;
+    }
+    this._thumbCurrentEl = null;
   }
 
   attachControlListeners() {
@@ -1134,11 +1145,19 @@ class PlaybackMitosisManager {
     }
 
     this.state.queue = status.queue || [];
-    this.state.currentTrack = {
-      title:     status.title     || '',
-      artist:    status.artist    || '',
-      thumbnail: status.thumbnail || ''
-    };
+
+    // Só atualiza metadados da faixa com dados do servidor quando NÃO estamos
+    // sob guard OU quando o servidor já convergiu para a mesma faixa.
+    // Isso previne que um poll stale (servidor ainda reportando a faixa anterior)
+    // sobrescreva os metadados otimistas com título/artista/capa da faixa antiga.
+    const serverTrackMatches = !isGuarded || nextTrackId === this.state.currentId;
+    if (serverTrackMatches) {
+      this.state.currentTrack = {
+        title:     status.title     || '',
+        artist:    status.artist    || '',
+        thumbnail: status.thumbnail || ''
+      };
+    }
 
     // Sync shuffle/repeat do servidor se disponível
     if (typeof status.shuffle !== 'undefined') this.state.shuffle = !!status.shuffle;
@@ -1149,9 +1168,13 @@ class PlaybackMitosisManager {
     // Notifica o sistema de tema reativo quando a faixa muda ou a fila termina.
     // NÃO dispara para troca de play/pause — essas são tratadas diretamente
     // em togglePlayPause() para evitar race conditions com o estado do servidor.
-    const wentToIdle = newState === 'idle' && prevState !== 'idle';
-    if (trackChanged || wentToIdle) {
-      this._dispatchThemeEvent();
+    // Só dispara quando NÃO estamos sob guard — durante guard, o update otimista
+    // já disparou o evento. Polls stale causariam dispatches redundantes.
+    if (!isGuarded) {
+      const wentToIdle = newState === 'idle' && prevState !== 'idle';
+      if (trackChanged || wentToIdle) {
+        this._dispatchThemeEvent();
+      }
     }
   }
 
@@ -1298,41 +1321,81 @@ class PlaybackMitosisManager {
       return;
     }
 
-    let img = this.dom.thumbnail.querySelector('img');
-    if (!img) {
-      this.dom.thumbnail.innerHTML = '';
-      img = document.createElement('img');
-      img.style.cssText = `
-          width: 100%; height: 100%;
-          object-fit: cover;
-          display: block;
-        `;
-      this.dom.thumbnail.appendChild(img);
+    const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
+
+    // Já visível com a key certa — nada a fazer
+    if (this._thumbCurrentEl && this._thumbCurrentEl.dataset.thumbKey === thumbKey) return;
+
+    // Já a carregar a key certa — não duplicar
+    if (this._thumbPendingEl && this._thumbPendingEl.dataset.thumbKey === thumbKey) return;
+
+    // Cancela qualquer carga em curso (skip rápido)
+    if (this._thumbPendingEl) {
+      this._thumbPendingEl.onload  = null;
+      this._thumbPendingEl.onerror = null;
+      this._thumbPendingEl.remove();
+      this._thumbPendingEl = null;
     }
 
-    const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
-    if (img.dataset.thumbKey === thumbKey) return;
-    img.dataset.thumbKey = thumbKey;
-    img.style.opacity = '0';
+    const container = this.dom.thumbnail;
+    if (getComputedStyle(container).position === 'static') {
+      container.style.position = 'relative';
+    }
+
+    const incoming = document.createElement('img');
+    incoming.dataset.thumbKey = thumbKey;
+    incoming.style.cssText = `
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
+      opacity: 0; transition: opacity 0.32s ease;
+    `;
+    this._thumbPendingEl = incoming;
 
     const tryLoad = (index = 0) => {
       const src = candidates[index];
       if (!src) {
+        // Todos os candidatos falharam — mantém o que já está visível
+        if (this._thumbPendingEl === incoming) this._thumbPendingEl = null;
         this.resetThumbnail();
         return;
       }
 
-      img.onload = () => {
-        img.dataset.src = src;
-        img.style.transition = 'opacity 0.4s ease';
-        img.style.opacity = '1';
+      incoming.onload = () => {
+        // Descarta se outra carga mais recente ganhou a corrida
+        if (this._thumbPendingEl !== incoming) return;
+        this._thumbPendingEl = null;
+
+        incoming.dataset.src = src;
+        container.appendChild(incoming);
+        incoming.getBoundingClientRect(); // força reflow para a transição funcionar
+        incoming.style.opacity = '1';
+
+        const prev = this._thumbCurrentEl;
+        this._thumbCurrentEl = incoming;
+
+        // Remove o anterior após a transição. Safety timeout de 500ms caso
+        // transitionend não dispare (reflow race, display:none, etc.)
+        const cleanupPrev = () => {
+          if (prev && prev.parentNode === container) prev.remove();
+          if (incoming.parentNode === container && this._thumbCurrentEl === incoming) {
+            incoming.style.position   = '';
+            incoming.style.inset      = '';
+            incoming.style.transition = '';
+          }
+        };
+        let cleaned = false;
+        const safeCleanup = () => { if (!cleaned) { cleaned = true; cleanupPrev(); } };
+        incoming.addEventListener('transitionend', safeCleanup, { once: true });
+        setTimeout(safeCleanup, 500);
       };
 
-      img.onerror = () => {
+      incoming.onerror = () => {
+        if (this._thumbPendingEl !== incoming) return;
         tryLoad(index + 1);
       };
 
-      img.src = src;
+      incoming.src = src;
     };
 
     tryLoad();
@@ -1358,22 +1421,39 @@ class PlaybackMitosisManager {
 
     const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
 
+    // Cancela qualquer thumb pendente — _prefillPlayerContent assume o controle
+    if (this._thumbPendingEl) {
+      this._thumbPendingEl.onload  = null;
+      this._thumbPendingEl.onerror = null;
+      this._thumbPendingEl = null;
+    }
+
     const img = document.createElement('img');
     img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0;';
     img.dataset.thumbKey = thumbKey;
+    this._thumbPendingEl = img;
 
     const tryLoad = (index = 0) => {
       const src = candidates[index];
-      if (!src) return; // deixa o SVG placeholder no lugar
+      if (!src) {
+        if (this._thumbPendingEl === img) this._thumbPendingEl = null;
+        return;
+      }
 
       img.onload = () => {
-        // Só substitui se o container ainda existir e o trackKey não tiver mudado
         if (!container.isConnected) return;
+        // Descarta se outra carga mais recente ganhou a corrida
+        if (this._thumbPendingEl !== img) return;
+        this._thumbPendingEl = null;
+
         img.dataset.src = src;
         thumbEl.innerHTML = '';
         thumbEl.appendChild(img);
         img.style.transition = 'opacity 0.4s ease';
         img.style.opacity = '1';
+
+        // Registra como imagem ativa — evita que updateThumbnail crie duplicatas
+        this._thumbCurrentEl = img;
       };
 
       img.onerror = () => tryLoad(index + 1);
@@ -1385,6 +1465,15 @@ class PlaybackMitosisManager {
 
   resetThumbnail() {
     if (!this.dom.thumbnail) return;
+
+    // Cancela qualquer carga pendente e limpa referências
+    if (this._thumbPendingEl) {
+      this._thumbPendingEl.onload  = null;
+      this._thumbPendingEl.onerror = null;
+      this._thumbPendingEl = null;
+    }
+    this._thumbCurrentEl = null;
+
     if (!this.dom.thumbnail.querySelector('svg')) {
       this.dom.thumbnail.innerHTML = `
         <svg viewBox="0 0 24 24" fill="none" stroke="var(--color-playback-icon-muted)"
@@ -1457,18 +1546,76 @@ class PlaybackMitosisManager {
 
   async skipForward() {
     this.state.guardUntilMs = Date.now() + 3000;
+
+    // Atualização otimista: transiciona imediatamente para a próxima faixa da queue
+    // sem esperar o poll — elimina o delay de ~600ms antes da capa/tema mudarem.
+    const nextIdx   = this.state.currentQueueIdx + 1;
+    const nextTrack = this.state.queue[nextIdx];
+    if (nextTrack) this._applyOptimisticTrackChange(nextTrack, nextIdx);
+
     try {
       await fetch('/api/skip', { method: 'POST' });
-      setTimeout(() => this.pollStatus(), 600);
+      setTimeout(() => this.pollStatus(), 250);
     } catch (e) { console.error('Skip failed:', e); }
   }
 
   async skipBack() {
     this.state.guardUntilMs = Date.now() + 3000;
-    try {
-      await fetch('/api/queue/previous', { method: 'POST' });
-      setTimeout(() => this.pollStatus(), 600);
-    } catch (e) { console.error('Skip back failed:', e); }
+
+    // Lógica padrão de players: se a posição atual > 3s, reinicia a faixa;
+    // senão vai para a faixa anterior da queue.
+    const prevIdx    = this.state.currentQueueIdx - 1;
+    const shouldRestart = this.getDeadReckonedPos() > 3 || prevIdx < 0;
+
+    if (shouldRestart) {
+      // Reinicia a faixa atual — zera o slider e manda seek(0) ao core
+      this.state.sliderPos      = 0;
+      this.state.sliderAnchorMs = this.state.playState === 'playing' ? Date.now() : 0;
+
+      try {
+        await fetch('/api/seek', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ position: 0 })
+        });
+        setTimeout(() => this.pollStatus(), 250);
+      } catch (e) { console.error('Seek-to-start failed:', e); }
+    } else {
+      // Vai para a faixa anterior
+      const prevTrack = this.state.queue[prevIdx];
+      if (prevTrack) this._applyOptimisticTrackChange(prevTrack, prevIdx);
+
+      try {
+        await fetch('/api/queue/previous', { method: 'POST' });
+        setTimeout(() => this.pollStatus(), 250);
+      } catch (e) { console.error('Skip back failed:', e); }
+    }
+  }
+
+  /**
+   * Aplica otimisticamente os metadados de uma faixa antes da confirmação do servidor.
+   * Atualiza thumbnail, título, artista e dispara o evento de tema imediatamente.
+   * O guard window (3000ms) garante que o poll subsequente não sobrescreva este estado.
+   */
+  _applyOptimisticTrackChange(track, newIdx) {
+    const prevId = this.state.currentId;
+    const newId  = track.id ?? track.track_id ?? '';
+
+    this.state.currentId       = newId;
+    this.state.currentQueueIdx = newIdx;
+    this.state.currentTrack    = {
+      title:     track.title     || '',
+      artist:    track.artist    || '',
+      thumbnail: track.thumbnail || ''
+    };
+    this.state.sliderPos      = 0;
+    this.state.sliderAnchorMs = Date.now();
+    this.state.duration       = 0;  // incerto até o poll confirmar
+
+    this.render();
+
+    // Dispara evento de tema apenas se a faixa é diferente
+    if (newId !== prevId) this._dispatchThemeEvent();
   }
 
   async handleSeek(event) {

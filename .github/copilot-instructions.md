@@ -53,8 +53,36 @@ The main playback controller with the mitosis animation.
 - Views contribute actions by listening to the `rolfsound-context-build` window event and pushing `{ id, label, action }` objects into `e.detail.items[]`.
 - `_buildContext(sourceTarget)` exposes `{ activeView, selectedText, trackId, cardElement }` to action handlers.
 - **Only suppress the native context menu when items actually exist.** Calling `e.preventDefault()` unconditionally would break right-click on inputs and text — build items first, then decide.
+- **Visual design:** vertical pill (`width: 52px`, expands to `200px` on hover). Items have `.rs-context-item-icon` + `.rs-context-item-label` structure. Destructive actions use `danger: true` → class `rs-context-item--danger` (red). Text fades in with `transition-delay: 0.08s`.
 
-### `SearchController` (`SearchController.js`)
+### Reactive Theme System
+Four modules implement the "light box" ambient theming — neutral when idle, vivid gradient when playing:
+
+#### `ColorPaletteExtractor` (`ColorPaletteExtractor.js`) — Static
+- `static async extract(srcUrl, cacheKey)` → `{ base, accent, contrast }` or `null`
+- Draws image onto a 64×64 canvas, runs k-means++ (3 clusters, 12 iterations), assigns roles.
+- Returns colors as `'R G B'` channel strings (not hex) so they compose with `rgba(var(--x) / 0.4)`.
+- LRU cache (max 64 entries), keyed by `cacheKey`.
+- Fails silently on `SecurityError` (CORS-tainted canvas) — returns `null`, caller cascades.
+
+#### `PaletteNormalizer` (`PaletteNormalizer.js`) — Static
+- `static normalize({ base, accent, contrast })` → normalized palette, same shape.
+- Clamps: base → dark/desaturated (`l: 0.04–0.22`), accent → vibrant (`s: 0.40–0.90`), contrast → distinct hue (≥30° from accent).
+- Prevents radioactive neon UI — always call this before passing raw palette to backdrop.
+
+#### `ReactiveBackdropController` (`ReactiveBackdropController.js`)
+- Creates 3 fixed DOM layers (`#rs-bg-base`, `#rs-bg-accent`, `#rs-bg-contrast`) at z-index 1/2/3 — behind all UI.
+- `applyPalette(palette, key)` — starts a RAF loop that lerps each RGB channel frame-by-frame (CSS cannot interpolate `radial-gradient` strings). Uses `ease-in-out` quadratic.
+- `applyNeutral(instant?)` — fades layers to opacity 0.
+- Publishes `--rs-theme-base-rgb`, `--rs-theme-accent-rgb`, `--rs-theme-contrast-rgb`, `--rs-theme-intensity` on `:root`, updated every frame during transitions.
+- **Do NOT use CSS `transition: background` on these layers** — it has no effect on gradient strings.
+
+#### `NowPlayingThemeController` (`NowPlayingThemeController.js`)
+- Instantiates `ReactiveBackdropController` internally. Boot: `new NowPlayingThemeController()` in `index.html`.
+- Listens to `rolfsound-now-playing-changed`. Applies colors only when `state === 'playing'` — any other state → `applyNeutral()`.
+- Cascades cover URL candidates: `maxresdefault → hqdefault → local /thumbs/`. CORS fallback is automatic.
+- `_preextractTrack(nextTrack)` — fire-and-forget pre-extraction while current track plays, so next transition starts instantly.
+- **Race condition guard:** compares `_pendingKey` before and after every `await`. Stale results are discarded.
 - Debounced (300ms), tab-aware: knows which view is active and routes queries accordingly.
 - Fetches `/api/search?q=&tab=` via Server-Sent Events (SSE) for streaming results.
 - Uses `AbortController` to cancel in-flight requests on subsequent keystrokes.
@@ -66,14 +94,20 @@ The main playback controller with the mitosis animation.
 
 All inter-module communication uses `window.dispatchEvent` / `window.addEventListener` with typed `CustomEvent`s. **Never pass direct object references or callbacks across module boundaries** — this preserves loose coupling and makes teardown trivial.
 
-| Event                         | Emitter              | Payload                          | Consumer(s)            |
-|-------------------------------|----------------------|----------------------------------|------------------------|
-| `rolfsound-navigate`          | Island               | `{ tab }`                        | Views, controllers     |
-| `rolfsound-filter`            | Island               | `{ filter }`                     | Active view            |
-| `rolfsound-search`            | Island               | `{ query }`                      | SearchController       |
-| `rolfsound-search-results`    | SearchController     | `{ results[], tab }`             | Active view            |
-| `rolfsound-library-mode-change` | Island             | `{ mode: 'vinyl'\|'digital' }`   | Library views          |
-| `rolfsound-context-build`     | ContextMenuController | `{ context, items[] }`          | Active view (pushes items) |
+| Event                           | Emitter                    | Payload                                              | Consumer(s)               |
+|---------------------------------|----------------------------|------------------------------------------------------|---------------------------|
+| `rolfsound-navigate`            | Island                     | `{ tab }`                                            | Views, controllers        |
+| `rolfsound-filter`              | Island                     | `{ filter }`                                         | Active view               |
+| `rolfsound-search`              | Island                     | `{ query }`                                          | SearchController          |
+| `rolfsound-search-results`      | SearchController           | `{ results[], tab }`                                 | Active view               |
+| `rolfsound-library-mode-change` | Island                     | `{ mode: 'vinyl'\|'digital' }`                       | Library views             |
+| `rolfsound-context-build`       | ContextMenuController      | `{ context, items[] }`                               | Active view (pushes items)|
+| `rolfsound-now-playing-changed` | PlaybackMitosisManager     | `{ trackId, thumbnail, source, state, nextTrack }`   | NowPlayingThemeController |
+| `rolfsound-theme-change`        | NowPlayingThemeController  | `{ palette, trackKey }`                              | Any reactive component    |
+
+**Theme event rules:**
+- `rolfsound-now-playing-changed` is dispatched from `_dispatchThemeEvent()` in two cases only: (1) `trackChanged` or natural `wentToIdle` in `applyServerStatus`, (2) direct user action in `togglePlayPause`. **Never dispatch on every poll** — oscillations in server state would cause flickering.
+- Pause/resume must fire the event **before** the `await fetch()` (optimistic UI intent) so the backdrop reacts instantly.
 
 ---
 
@@ -153,6 +187,15 @@ Always use these variables for island shapes — never hardcode pixel values or 
 --radius-dynamic-island: 16px
 --radius-dynamic-island-expanded: 24px
 ```
+
+Reactive theme tokens (published by `ReactiveBackdropController`, do not set manually):
+```css
+--rs-theme-base-rgb:     /* 'R G B' — dominant dark color */
+--rs-theme-accent-rgb:   /* 'R G B' — vibrant accent */
+--rs-theme-contrast-rgb: /* 'R G B' — second accent pole */
+--rs-theme-intensity:    /* 0 → 1, animates during fade in/out */
+```
+Usage pattern: `rgba(var(--rs-theme-accent-rgb) / 0.4)` — the space-separated format is required for this CSS syntax.
 
 ### Event delegation rules
 - **Web Components:** ONE listener on `shadowRoot`. Use `e.target.closest('.selector')` to identify the target. Never attach listeners to dynamic child elements.
