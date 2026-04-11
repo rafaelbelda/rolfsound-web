@@ -18,13 +18,13 @@
 
   <div id="cursor-dot"></div>
   <rolfsound-island active-tab="library"></rolfsound-island>
-  <div class="bg-layer active" style="background-color: var(--black);"></div>
+  <div class="bg-layer active"></div>
 
   <section id="view-vinyl-library" class="view-layer active">
     {% include 'views/vinyl-library.html' %}
   </section>
 
-  <section id="view-digital-library" class="view-layer" style="background: var(--black);">
+  <section id="view-digital-library" class="view-layer">
     {% include 'views/digital-library.html' %}
   </section>
 
@@ -172,6 +172,11 @@
     window.contextMenuController = new ContextMenuController({
       island,
       onNavigate: navigateTo
+    });
+
+    // Sistema de tema reativo — ambient lighting com as cores do álbum em reprodução
+    import('/static/js/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {
+      window.nowPlayingThemeController = new NowPlayingThemeController();
     });
 
     window.addEventListener('popstate', () => {

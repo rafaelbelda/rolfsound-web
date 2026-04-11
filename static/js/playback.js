@@ -265,24 +265,75 @@ class PlaybackManager {
     }
   }
 
+  thumbSrc(thumbnail) {
+    if (!thumbnail) return null;
+    if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
+    return '/thumbs/' + thumbnail.split(/[\\/]/).pop();
+  }
+
+  getThumbnailCandidates(thumbnail, trackId = '') {
+    const normalized = this.thumbSrc(thumbnail);
+    const candidates = [];
+    const youtubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId)
+      ? trackId
+      : '';
+
+    if (youtubeId) {
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`);
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
+    }
+
+    if (normalized) {
+      if (normalized.includes('i.ytimg.com/vi/')) {
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
+      }
+      candidates.push(normalized);
+    }
+
+    return [...new Set(candidates.filter(Boolean))];
+  }
+
   updateThumbnail() {
     if (!this.dom.thumbnail) return;
 
-    const src = this.state.currentTrack.thumbnail;
-    if (src) {
-      let img = this.dom.thumbnail.querySelector('img');
-      if (!img) {
-        this.dom.thumbnail.innerHTML = '';
-        img = document.createElement('img');
-        img.className = 'track-thumbnail-image';
-        this.dom.thumbnail.appendChild(img);
-      }
-      if (img.src !== src) {
-        img.src = src;
-      }
-    } else {
+    const candidates = this.getThumbnailCandidates(this.state.currentTrack.thumbnail, this.state.currentId);
+    if (!candidates.length) {
       this.resetThumbnail();
+      return;
     }
+
+    let img = this.dom.thumbnail.querySelector('img');
+    if (!img) {
+      this.dom.thumbnail.innerHTML = '';
+      img = document.createElement('img');
+      img.className = 'track-thumbnail-image';
+      this.dom.thumbnail.appendChild(img);
+    }
+
+    const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
+    if (img.dataset.thumbKey === thumbKey) return;
+    img.dataset.thumbKey = thumbKey;
+
+    const tryLoad = (index = 0) => {
+      const src = candidates[index];
+      if (!src) {
+        this.resetThumbnail();
+        return;
+      }
+
+      img.onload = () => {
+        img.dataset.src = src;
+      };
+
+      img.onerror = () => {
+        tryLoad(index + 1);
+      };
+
+      img.src = src;
+    };
+
+    tryLoad();
   }
 
   resetThumbnail() {

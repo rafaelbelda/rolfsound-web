@@ -144,6 +144,13 @@
   --impact-rebound-ratio: 0.24;
   --impact-settle-ratio: 0.08;
 
+  /* ── Tema Reativo (gerenciado por NowPlayingThemeController) ── */
+  /* Formato: "R G B" — permite rgba(var(--rs-theme-accent-rgb) / 0.4)     */
+  --rs-theme-base-rgb:     5 5 5;
+  --rs-theme-accent-rgb:   18 18 18;
+  --rs-theme-contrast-rgb: 12 12 12;
+  --rs-theme-intensity:    0;
+
   /* Compatibilidade com tokens legados */
   --black: var(--color-bg-canvas);
   --white: var(--color-text-primary);
@@ -376,30 +383,31 @@ html, body {
 .notice { margin-top: 16px; padding: 16px; background: var(--color-surface-ghost); border: 1px solid var(--color-border-subtle); border-left: 3px solid var(--color-border-focus); border-radius: var(--radius-md); font-size: var(--fs-md); color: var(--color-text-tertiary); line-height: 1.6; }
 .notice a { color: var(--color-text-primary); text-underline-offset: 3px; }
 
-/* ── Custom Context Menu ── */
+/* ── Custom Context Menu — pílula vertical com ícones, expande no hover ── */
 .rs-context-menu {
   position: fixed;
   left: 0;
   top: 0;
-  min-width: 220px;
-  max-width: min(320px, calc(100vw - 24px));
-  padding: 8px;
+  width: 52px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   opacity: 0;
   transform: scale(0.96);
   transform-origin: var(--rs-origin-x, 16px) var(--rs-origin-y, 16px);
   pointer-events: none;
-  border-radius: var(--radius-2xl);
+  border-radius: 26px;
   border: 1px solid var(--color-border-strong);
   background: var(--color-bg-overlay);
   backdrop-filter: blur(var(--blur-overlay));
   -webkit-backdrop-filter: blur(var(--blur-overlay));
   box-shadow: var(--shadow-overlay);
-  transition: opacity 0.14s ease,
-              transform var(--duration-base) var(--ease-snappy),
-              border-radius var(--duration-base) var(--ease-snappy);
+  overflow: hidden;
+  transition: width 0.28s var(--ease-snappy),
+              border-radius 0.28s var(--ease-snappy),
+              opacity 0.14s ease,
+              transform 0.2s var(--ease-snappy);
   z-index: 10001;
 }
 
@@ -412,8 +420,14 @@ html, body {
 .rs-context-menu.active {
   opacity: 1;
   transform: scale(1);
-  border-radius: var(--radius-2xl);
+  border-radius: 26px;
   pointer-events: auto;
+}
+
+/* Expande para mostrar labels ao passar o mouse */
+.rs-context-menu.active:hover {
+  width: 200px;
+  border-radius: var(--radius-2xl);
 }
 
 .rs-context-menu.opening .rs-context-item,
@@ -435,12 +449,15 @@ html, body {
   width: 100%;
   border: 0;
   border-radius: var(--radius-lg);
-  padding: 10px 12px;
+  padding: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   text-align: left;
-  font-size: var(--fs-md);
-  letter-spacing: 0.03em;
   color: var(--color-text-strong);
   background: transparent;
+  overflow: hidden;
+  white-space: nowrap;
   transition: background-color 0.16s ease, color 0.16s ease;
 }
 
@@ -454,6 +471,41 @@ html, body {
 .rs-context-item:disabled {
   opacity: 0.45;
   pointer-events: none;
+}
+
+/* Ação destrutiva */
+.rs-context-item--danger {
+  color: var(--color-accent-danger);
+}
+
+.rs-context-item--danger:hover,
+.rs-context-item--danger:focus-visible {
+  background: var(--color-accent-danger-soft);
+  color: var(--color-accent-danger-strong);
+}
+
+/* Slot de ícone — largura fixa para o item não saltar ao expandir */
+.rs-context-item-icon {
+  flex: 0 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Label oculto em estado colapsado, revela junto com a expansão */
+.rs-context-item-label {
+  font-size: var(--fs-md);
+  letter-spacing: 0.03em;
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition: opacity 0.18s ease 0.08s,
+              transform 0.18s var(--ease-snappy) 0.08s;
+}
+
+.rs-context-menu.active:hover .rs-context-item-label {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .rs-context-separator {

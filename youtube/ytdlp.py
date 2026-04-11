@@ -48,15 +48,16 @@ def _best_thumbnail(data: dict) -> str:
         valid = [t for t in thumbs if isinstance(t, dict) and t.get("url")]
         if valid:
             def _score(t):
-                h = t.get("height") or 0
-                if h == 180: return 0
-                if h == 480: return 1
-                if h == 720: return 2
-                if 0 < h < 360: return 3
-                if h > 360: return 4
-                if h == 360: return 5
-                return 6
-            valid.sort(key=_score)
+                url = str(t.get("url") or "")
+                width = int(t.get("width") or 0)
+                height = int(t.get("height") or 0)
+                area = width * height
+                # Prefer real high-res artwork first, then fall back by size.
+                is_maxres = 1 if "maxres" in url else 0
+                is_hq_or_sd = 1 if ("hqdefault" in url or "sddefault" in url) else 0
+                return (is_maxres, is_hq_or_sd, area, height, width)
+
+            valid.sort(key=_score, reverse=True)
             return valid[0]["url"]
     single = data.get("thumbnail", "")
     return single if isinstance(single, str) else ""

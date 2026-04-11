@@ -340,6 +340,8 @@ class PlaybackMitosisManager {
           mode: 'connected',
           bridgeElement: bridge
         });
+        // Pré-carrega o thumbnail antes de cacheDomElements — evita flash de "Nothing playing"
+        this._prefillPlayerContent(container);
       },
       onBud: ({ container }) => {
         container.style.height = `${BUD_H + OVERLAP}px`;
@@ -789,7 +791,7 @@ class PlaybackMitosisManager {
                 white-space: nowrap;
                 margin-bottom: 3px;
                 letter-spacing: -0.01em;
-              ">Nothing playing</div>
+              ">${this.escapeHtml(this.state.currentTrack.title || this.state.currentId || 'Nothing playing')}</div>
 
               <div id="playback-artist" style="
                 font-size: var(--fs-md);
@@ -798,7 +800,7 @@ class PlaybackMitosisManager {
                 text-overflow: ellipsis;
                 white-space: nowrap;
                 letter-spacing: 0.01em;
-              ">—</div>
+              ">${this.escapeHtml(this.state.currentTrack.artist || '—')}</div>
             </div>
 
             <!-- Tempo (canto inferior direito, acima da barra) -->
@@ -812,9 +814,9 @@ class PlaybackMitosisManager {
               gap: 3px;
               pointer-events: none;
             ">
-              <span id="current-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">0:00</span>
+              <span id="current-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">${this.formatTime(this.getDeadReckonedPos())}</span>
               <span style="font-size: var(--fs-xs); color: var(--color-text-disabled); font-family: var(--font-mono);">/</span>
-              <span id="total-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">0:00</span>
+              <span id="total-time" style="font-size: var(--fs-xs); color: var(--color-text-time); font-family: var(--font-mono); letter-spacing: 0.04em;">${this.formatTime(this.state.duration)}</span>
             </div>
 
             <!-- Barra de progresso: aresta inferior do quadrado -->
@@ -1084,21 +1086,48 @@ class PlaybackMitosisManager {
     const newState  = status.state || 'idle';
     const prevState = this.state.playState;
 
+    // Captura trackId anterior ANTES de atualizar o estado
+    const prevTrackId  = this.state.currentId;
+    const nextTrackId  = status.track_id || null;
+    const trackChanged = nextTrackId !== prevTrackId;
+
     if (!isGuarded) {
       const wasPlaying = prevState === 'playing';
       const nowPlaying = newState  === 'playing';
 
-      if (!wasPlaying && nowPlaying) {
+      // Compensa o lag entre quando o core mediu a posição e quando a recebemos.
+      // position_updated_at é o timestamp Unix (s) da última medição no core.
+      const posUpdatedAt = status.position_updated_at || 0;
+      const networkLag   = (posUpdatedAt > 0 && nowPlaying)
+        ? Math.max(0, Date.now() / 1000 - posUpdatedAt)
+        : 0;
+      const serverPos = Math.min(
+        (status.position || 0) + networkLag,
+        status.duration || Infinity
+      );
+
+      if (prevState === 'idle') {
+        // Sincronização inicial: carrega posição do servidor independente do estado
         this.state.sliderPos      = status.position || 0;
+        this.state.sliderAnchorMs = nowPlaying ? Date.now() : 0;
+      } else if (!wasPlaying && nowPlaying) {
+        // Iniciou/resumiu: ancora a partir da posição compensada do servidor
+        this.state.sliderPos      = serverPos;
         this.state.sliderAnchorMs = Date.now();
       } else if (wasPlaying && !nowPlaying) {
+        // Pausou/parou: congela no valor dead-reckoned atual
         this.state.sliderPos      = this.getDeadReckonedPos();
         this.state.sliderAnchorMs = 0;
+      } else if (wasPlaying && nowPlaying && trackChanged) {
+        // Faixa trocou enquanto tocava (skip): ancora na nova posição
+        this.state.sliderPos      = serverPos;
+        this.state.sliderAnchorMs = Date.now();
       }
+      // paused→paused e playing→playing (mesma faixa): deixa sozinhos
 
-      this.state.playState      = newState;
-      this.state.duration       = status.duration > 0 ? status.duration : this.state.duration;
-      this.state.currentId      = status.track_id || null;
+      this.state.playState       = newState;
+      this.state.duration        = status.duration > 0 ? status.duration : this.state.duration;
+      this.state.currentId       = nextTrackId;
       this.state.currentQueueIdx = status.queue_current_index ?? -1;
 
       this.setPlayIcon(!status.paused && newState === 'playing');
@@ -1116,6 +1145,40 @@ class PlaybackMitosisManager {
     if (typeof status.repeat  !== 'undefined') this.state.repeat  = !!status.repeat;
 
     this.render();
+
+    // Notifica o sistema de tema reativo quando a faixa muda ou a fila termina.
+    // NÃO dispara para troca de play/pause — essas são tratadas diretamente
+    // em togglePlayPause() para evitar race conditions com o estado do servidor.
+    const wentToIdle = newState === 'idle' && prevState !== 'idle';
+    if (trackChanged || wentToIdle) {
+      this._dispatchThemeEvent();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // TEMA REATIVO
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Emite `rolfsound-now-playing-changed` com o estado atual.
+   * Chamado de: applyServerStatus (mudança de faixa / idle natural)
+   * e togglePlayPause (intent imediato do utilizador).
+   */
+  _dispatchThemeEvent() {
+    const nextQueueIdx = this.state.currentQueueIdx + 1;
+    const nextTrack    = (nextQueueIdx >= 0 && nextQueueIdx < this.state.queue.length)
+      ? this.state.queue[nextQueueIdx]
+      : null;
+
+    window.dispatchEvent(new CustomEvent('rolfsound-now-playing-changed', {
+      detail: {
+        trackId:   this.state.currentId,
+        thumbnail: this.state.currentTrack.thumbnail,
+        source:    this.state.currentId?.length === 11 ? 'youtube' : 'local',
+        state:     this.state.playState,
+        nextTrack
+      }
+    }));
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1197,33 +1260,127 @@ class PlaybackMitosisManager {
     this.syncQueueButton();
   }
 
+  thumbSrc(thumbnail) {
+    if (!thumbnail) return null;
+    if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
+    return '/thumbs/' + thumbnail.split(/[\\/]/).pop();
+  }
+
+  getThumbnailCandidates(thumbnail, trackId = '') {
+    const normalized = this.thumbSrc(thumbnail);
+    const candidates = [];
+    const youtubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId)
+      ? trackId
+      : '';
+
+    if (youtubeId) {
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`);
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
+    }
+
+    if (normalized) {
+      if (normalized.includes('i.ytimg.com/vi/')) {
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
+      }
+      candidates.push(normalized);
+    }
+
+    return [...new Set(candidates.filter(Boolean))];
+  }
+
   updateThumbnail() {
     if (!this.dom.thumbnail) return;
 
-    const src = this.state.currentTrack.thumbnail;
-    if (src) {
-      let img = this.dom.thumbnail.querySelector('img');
-      if (!img) {
-        this.dom.thumbnail.innerHTML = '';
-        img = document.createElement('img');
-        img.style.cssText = `
+    const candidates = this.getThumbnailCandidates(this.state.currentTrack.thumbnail, this.state.currentId);
+    if (!candidates.length) {
+      this.resetThumbnail();
+      return;
+    }
+
+    let img = this.dom.thumbnail.querySelector('img');
+    if (!img) {
+      this.dom.thumbnail.innerHTML = '';
+      img = document.createElement('img');
+      img.style.cssText = `
           width: 100%; height: 100%;
           object-fit: cover;
           display: block;
         `;
-        this.dom.thumbnail.appendChild(img);
-      }
-      if (img.src !== src) {
-        img.style.opacity = '0';
-        img.src = src;
-        img.onload = () => {
-          img.style.transition = 'opacity 0.4s ease';
-          img.style.opacity = '1';
-        };
-      }
-    } else {
-      this.resetThumbnail();
+      this.dom.thumbnail.appendChild(img);
     }
+
+    const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
+    if (img.dataset.thumbKey === thumbKey) return;
+    img.dataset.thumbKey = thumbKey;
+    img.style.opacity = '0';
+
+    const tryLoad = (index = 0) => {
+      const src = candidates[index];
+      if (!src) {
+        this.resetThumbnail();
+        return;
+      }
+
+      img.onload = () => {
+        img.dataset.src = src;
+        img.style.transition = 'opacity 0.4s ease';
+        img.style.opacity = '1';
+      };
+
+      img.onerror = () => {
+        tryLoad(index + 1);
+      };
+
+      img.src = src;
+    };
+
+    tryLoad();
+  }
+
+  /**
+   * Pré-carrega o thumbnail no container imediatamente após ser criado,
+   * antes de cacheDomElements() ser chamado. Usa a mesma thumbKey que
+   * updateThumbnail() verifica — quando ela for chamada mais tarde, vai
+   * detectar que a imagem já está carregada e pular o reload.
+   */
+  _prefillPlayerContent(container) {
+    if (!this.state.currentId) return;
+
+    const thumbEl = container.querySelector('#playback-thumbnail');
+    if (!thumbEl) return;
+
+    const candidates = this.getThumbnailCandidates(
+      this.state.currentTrack.thumbnail,
+      this.state.currentId
+    );
+    if (!candidates.length) return;
+
+    const thumbKey = `${this.state.currentId || ''}|${this.state.currentTrack.thumbnail || ''}`;
+
+    const img = document.createElement('img');
+    img.style.cssText = 'width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0;';
+    img.dataset.thumbKey = thumbKey;
+
+    const tryLoad = (index = 0) => {
+      const src = candidates[index];
+      if (!src) return; // deixa o SVG placeholder no lugar
+
+      img.onload = () => {
+        // Só substitui se o container ainda existir e o trackKey não tiver mudado
+        if (!container.isConnected) return;
+        img.dataset.src = src;
+        thumbEl.innerHTML = '';
+        thumbEl.appendChild(img);
+        img.style.transition = 'opacity 0.4s ease';
+        img.style.opacity = '1';
+      };
+
+      img.onerror = () => tryLoad(index + 1);
+      img.src = src;
+    };
+
+    tryLoad();
   }
 
   resetThumbnail() {
@@ -1250,39 +1407,56 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
 
   async togglePlayPause() {
-    this.state.guardUntilMs = Date.now() + 1500;
+    this.state.guardUntilMs = Date.now() + 3000;
 
     if (this.state.playState === 'playing') {
       this.state.sliderPos      = this.getDeadReckonedPos();
       this.state.sliderAnchorMs = 0;
       this.state.playState      = 'paused';
       this.setPlayIcon(false);
+      this._dispatchThemeEvent();  // intent imediato — fundo vai a neutro já
       try { await fetch('/api/pause', { method: 'POST' }); }
       catch (e) { console.error('Pause failed:', e); }
     } else if (this.state.playState === 'paused') {
-      this.state.sliderAnchorMs = Date.now();
-      this.state.playState      = 'playing';
+      // /pause é toggle no core: pausa quando tocando, retoma quando pausado.
+      // NÃO chamar /play aqui — ele recomeça a faixa do zero.
+      // Ancora APÓS a API confirmar — evita que o timer corra antes do áudio retomar.
+      this.state.playState = 'playing';
       this.setPlayIcon(true);
-      try { await fetch('/api/play', { method: 'POST' }); }
-      catch (e) { console.error('Play failed:', e); }
+      this._dispatchThemeEvent();  // intent imediato — fundo reativa cores já
+      try {
+        await fetch('/api/pause', { method: 'POST' });
+        this.state.sliderAnchorMs = Date.now();
+      } catch (e) {
+        // Reverte se a chamada falhou
+        this.state.playState = 'paused';
+        this.setPlayIcon(false);
+        this._dispatchThemeEvent();  // reverte o tema também
+        console.error('Resume failed:', e);
+      }
     } else {
       if (!this.state.queue.length) {
         this.state.guardUntilMs = 0;
         return;
       }
-      this.state.sliderPos      = 0;
-      this.state.sliderAnchorMs = Date.now();
-      this.state.playState      = 'playing';
+      this.state.sliderPos  = 0;
+      this.state.playState  = 'playing';
       this.setPlayIcon(true);
-      try { await fetch('/api/play', { method: 'POST' }); }
-      catch (e) { console.error('Play failed:', e); }
+      try {
+        await fetch('/api/play', { method: 'POST' });
+        this.state.sliderAnchorMs = Date.now();
+      } catch (e) {
+        this.state.playState = 'idle';
+        this.setPlayIcon(false);
+        console.error('Play failed:', e);
+      }
     }
 
     setTimeout(() => this.pollStatus(), 600);
   }
 
   async skipForward() {
-    this.state.guardUntilMs = Date.now() + 1500;
+    this.state.guardUntilMs = Date.now() + 3000;
     try {
       await fetch('/api/skip', { method: 'POST' });
       setTimeout(() => this.pollStatus(), 600);
@@ -1290,7 +1464,7 @@ class PlaybackMitosisManager {
   }
 
   async skipBack() {
-    this.state.guardUntilMs = Date.now() + 1500;
+    this.state.guardUntilMs = Date.now() + 3000;
     try {
       await fetch('/api/queue/previous', { method: 'POST' });
       setTimeout(() => this.pollStatus(), 600);

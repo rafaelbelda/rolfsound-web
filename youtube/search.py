@@ -159,8 +159,8 @@ def _prefix_cache_lookup(query: str, max_results: int, prefix: str) -> list | No
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _thumb(video_id: str) -> str:
-    """mqdefault — 320x180, native 16:9, never 404s on any video ID."""
-    return f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+    """hqdefault — 480x360, sharper than mqdefault and broadly available."""
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
 
 def _parse_iso_duration(iso: str) -> int | None:

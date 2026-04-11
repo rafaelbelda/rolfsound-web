@@ -206,17 +206,105 @@
   const grid = document.getElementById('tracks-grid');
   const loadingEl = document.getElementById('digital-library-loading');
   const emptyEl = document.getElementById('digital-library-empty');
+  const emptyTitleEl = emptyEl?.querySelector('div');
+  const emptySubtextEl = emptyEl?.querySelector('.empty-subtext');
+  const island = document.querySelector('rolfsound-island');
 
   let allTracks = [];
   let libraryMode = 'vinyl'; // 'vinyl' | 'digital'
 
-  // Normalise a thumbnail value to a browser-usable URL.
-  // Local paths (anything not starting with 'http') are served via the
-  // /thumbs/ static mount that maps to the music directory.
   function thumbSrc(t) {
     if (!t) return null;
-    if (t.startsWith('http')) return t;
-    return '/thumbs/' + t.split('/').pop();
+    if (t.startsWith('http') || t.startsWith('/thumbs/')) return t;
+    return '/thumbs/' + t.split(/[\\/]/).pop();
+  }
+
+  function getThumbnailCandidates(track) {
+    const normalized = thumbSrc(track?.thumbnail || '');
+    const trackId = getTrackId(track);
+    const candidates = [];
+    const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
+
+    if (isYouTubeId) {
+      candidates.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
+      candidates.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
+    }
+
+    if (normalized) {
+      if (normalized.includes('i.ytimg.com/vi/')) {
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
+        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
+      }
+      candidates.push(normalized);
+    }
+
+    return [...new Set(candidates.filter(Boolean))];
+  }
+
+  function hydrateTrackThumbnails(tracks) {
+    const images = grid.querySelectorAll('.track-thumbnail img[data-track-id]');
+
+    images.forEach((img, index) => {
+      const track = tracks[index];
+      const candidates = getThumbnailCandidates(track);
+      if (!candidates.length) return;
+
+      let candidateIndex = 0;
+      img.onerror = () => {
+        candidateIndex += 1;
+        if (candidateIndex >= candidates.length) {
+          img.onerror = null;
+          return;
+        }
+        img.src = candidates[candidateIndex];
+      };
+    });
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value ?? '';
+    return div.innerHTML;
+  }
+
+  function getTrackId(track) {
+    return track?.id || track?.track_id || '';
+  }
+
+  function getTrackPath(track) {
+    return track?.file_path || track?.filepath || '';
+  }
+
+  function getCurrentSearchQuery() {
+    return (island?.shadowRoot?.getElementById('search-input')?.value || '').trim().toLowerCase();
+  }
+
+  function notify(text, spinner = false, duration = 2200) {
+    if (typeof island?.showNotification === 'function') {
+      island.showNotification({ text, spinner, duration });
+    }
+  }
+
+  function refreshPlaybackStatus(delay = 200) {
+    if (typeof window.playbackMitosisManager?.pollStatus === 'function') {
+      window.setTimeout(() => window.playbackMitosisManager.pollStatus(), delay);
+    }
+  }
+
+  function setEmptyState(title, subtitle = 'Search and download music to build your library') {
+    if (emptyTitleEl) emptyTitleEl.textContent = title;
+    if (emptySubtextEl) emptySubtextEl.textContent = subtitle;
+    emptyEl.style.display = 'flex';
+  }
+
+  function clearEmptyState() {
+    emptyEl.style.display = 'none';
+    if (emptyTitleEl) emptyTitleEl.textContent = 'No tracks yet';
+    if (emptySubtextEl) emptySubtextEl.textContent = 'Search and download music to build your library';
+  }
+
+  function findTrackById(trackId) {
+    return allTracks.find(track => getTrackId(track) === trackId) || null;
   }
 
   // Escuta mudanças de modo (vinyl <-> digital)
@@ -229,7 +317,7 @@
 
   // Busca vinda da ilha (fallback) e do SearchController (preferencial)
   window.addEventListener('rolfsound-search', (e) => {
-    const query = e.detail.query.toLowerCase();
+    const query = (e.detail.query || '').toLowerCase();
     if (libraryMode === 'digital') {
       filterTracks(query);
     }
@@ -241,35 +329,102 @@
     // Se vier do controller para outra aba, ignora.
     if (e.detail?.tab && e.detail.tab !== 'digital' && e.detail.tab !== 'library') return;
 
-    const query = (document.querySelector('rolfsound-island')
-      ?.shadowRoot?.getElementById('search-input')?.value || '').toLowerCase();
-    filterTracks(query);
+    filterTracks(getCurrentSearchQuery());
+  });
+
+  const onContextBuild = (e) => {
+    const context = e.detail?.context;
+    const items = e.detail?.items;
+
+    if (!context || !Array.isArray(items)) return;
+    if (libraryMode !== 'digital' || !container?.classList.contains('active')) return;
+
+    const card = context.cardElement || context.target?.closest?.('.track-card');
+    if (!card || !grid.contains(card)) return;
+
+    const track = findTrackById(card.dataset.trackId || '');
+    if (!track) return;
+
+    const trackId = getTrackId(track) || 'track';
+
+    const playIcon   = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+    const queueIcon  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 9v2h14V9H7z"/></svg>`;
+    const deleteIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
+
+    items.push(
+      {
+        id: `play-${trackId}`,
+        label: 'Play',
+        icon: playIcon,
+        action: () => playTrack(track)
+      },
+      {
+        id: `queue-${trackId}`,
+        label: 'Add to Queue',
+        icon: queueIcon,
+        action: () => queueTrack(track)
+      },
+      { type: 'separator' },
+      {
+        id: `delete-${trackId}`,
+        label: 'Delete',
+        icon: deleteIcon,
+        danger: true,
+        action: () => deleteTrack(track)
+      }
+    );
+  };
+
+  window.addEventListener('rolfsound-context-build', onContextBuild);
+  window.addEventListener('pagehide', () => {
+    window.removeEventListener('rolfsound-context-build', onContextBuild);
+  }, { once: true });
+
+  grid?.addEventListener('click', async (event) => {
+    const actionBtn = event.target.closest('.play-btn');
+    if (!actionBtn) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const card = actionBtn.closest('.track-card');
+    const track = findTrackById(card?.dataset.trackId || '');
+
+    if (!track) {
+      console.warn('Digital library play action failed: track not found');
+      notify('Track unavailable');
+      return;
+    }
+
+    await playTrack(track);
   });
 
   async function loadTracks() {
     loadingEl.style.display = 'flex';
     grid.innerHTML = '';
+    clearEmptyState();
 
     try {
       const response = await fetch('/api/library');
-      if (!response.ok) throw new Error('Failed to fetch library');
-      
+      if (!response.ok) throw new Error(`Failed to fetch library (${response.status})`);
+
       const data = await response.json();
-      allTracks = data.tracks || [];
+      allTracks = Array.isArray(data.tracks) ? data.tracks : [];
 
       loadingEl.style.display = 'none';
 
       if (allTracks.length === 0) {
-        emptyEl.style.display = 'flex';
+        setEmptyState('No tracks yet');
         grid.innerHTML = '';
-      } else {
-        emptyEl.style.display = 'none';
-        renderTracks(allTracks);
+        return;
       }
+
+      filterTracks(getCurrentSearchQuery());
     } catch (error) {
       console.error('Error loading tracks:', error);
       loadingEl.style.display = 'none';
-      emptyEl.style.display = 'flex';
+      grid.innerHTML = '';
+      setEmptyState('Failed to load', 'Please try again in a moment');
     }
   }
 
@@ -287,118 +442,138 @@
 
     if (filtered.length === 0) {
       grid.innerHTML = '';
-      emptyEl.style.display = 'flex';
-      emptyEl.querySelector('div').textContent = 'No results';
-    } else {
-      emptyEl.style.display = 'none';
-      renderTracks(filtered);
+      setEmptyState('No results', 'Try another title or artist');
+      return;
     }
+
+    renderTracks(filtered);
   }
 
   function renderTracks(tracks) {
-    grid.innerHTML = tracks.map(track => `
-      <div class="track-card" data-track-id="${track.track_id || ''}">
-        <div class="track-thumbnail">
-          ${thumbSrc(track.thumbnail) ? `
-            <img src="${thumbSrc(track.thumbnail)}" alt="${track.title}" loading="lazy" />
-          ` : `
-            <div class="track-thumbnail-fallback">♫</div>
-          `}
-          <div class="track-actions">
-            <button class="track-action-btn play-btn" title="Play" aria-label="Play track">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-            </button>
-            <button class="track-action-btn queue-btn" title="Add to Queue" aria-label="Add to queue">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="8" y1="6" x2="21" y2="6"/>
-                <line x1="8" y1="12" x2="21" y2="12"/>
-                <line x1="8" y1="18" x2="21" y2="18"/>
-                <line x1="3" y1="6" x2="3.01" y2="6"/>
-                <line x1="3" y1="12" x2="3.01" y2="12"/>
-                <line x1="3" y1="18" x2="3.01" y2="18"/>
-              </svg>
-            </button>
-            <button class="track-action-btn delete-btn" title="Delete" aria-label="Delete track">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                <line x1="10" y1="11" x2="10" y2="17"/>
-                <line x1="14" y1="11" x2="14" y2="17"/>
-              </svg>
-            </button>
+    if (!Array.isArray(tracks) || tracks.length === 0) {
+      grid.innerHTML = '';
+      setEmptyState('No tracks yet');
+      return;
+    }
+
+    clearEmptyState();
+
+    grid.innerHTML = tracks.map(track => {
+      const trackId = getTrackId(track);
+      const title = escapeHtml(track.title || 'Unknown');
+      const artist = escapeHtml(track.artist || 'Unknown Artist');
+      const thumbnailCandidates = getThumbnailCandidates(track);
+      const primaryThumbnail = thumbnailCandidates[0] || null;
+
+      return `
+        <div class="track-card" data-track-id="${escapeHtml(trackId)}">
+          <div class="track-thumbnail">
+            ${primaryThumbnail ? `
+              <img src="${escapeHtml(primaryThumbnail)}" data-track-id="${escapeHtml(trackId)}" alt="${title}" loading="lazy" />
+            ` : `
+              <div class="track-thumbnail-fallback">♫</div>
+            `}
+            <div class="track-actions">
+              <button class="track-action-btn play-btn" title="Play" aria-label="Play track">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="track-info">
+            <div class="track-title">${title}</div>
+            <div class="track-artist">${artist}</div>
           </div>
         </div>
-        <div class="track-info">
-          <div class="track-title">${track.title || 'Unknown'}</div>
-          <div class="track-artist">${track.artist || 'Unknown Artist'}</div>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
-    // Atach event listeners
-    grid.querySelectorAll('.track-card').forEach(card => {
-      const trackId = card.dataset.trackId;
-      const track = tracks.find(t => t.track_id === trackId);
-
-      card.querySelector('.play-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        playTrack(track);
-      });
-
-      card.querySelector('.queue-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        queueTrack(track);
-      });
-
-      card.querySelector('.delete-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteTrack(track);
-      });
-    });
+    hydrateTrackThumbnails(tracks);
   }
 
-  function playTrack(track) {
-    console.log('Play:', track);
-    // TODO: Integrar com playback-mitosis.js
-    fetch('/api/play', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        track_id: track.track_id,
-        filepath: track.file_path,
-        title: track.title,
-        thumbnail: track.thumbnail
-      })
-    }).catch(e => console.error('Play error:', e));
+  async function playTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: trackId,
+          filepath: getTrackPath(track)
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Play failed (${response.status})`);
+      }
+
+      notify('Playing now');
+      refreshPlaybackStatus(150);
+    } catch (e) {
+      console.error('Play error:', e);
+      notify('Play failed');
+    }
   }
 
-  function queueTrack(track) {
-    console.log('Queue:', track);
-    fetch('/api/queue/add', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        track_id: track.track_id,
-        filepath: track.file_path,
-        title: track.title,
-        thumbnail: track.thumbnail
-      })
-    }).catch(e => console.error('Queue error:', e));
+  async function queueTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/queue/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: trackId,
+          filepath: getTrackPath(track),
+          title: track.title || '',
+          thumbnail: track.thumbnail || ''
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Queue failed (${response.status})`);
+      }
+
+      notify('Added to queue');
+      refreshPlaybackStatus(120);
+    } catch (e) {
+      console.error('Queue error:', e);
+      notify('Queue failed');
+    }
   }
 
   async function deleteTrack(track) {
-    if (!confirm(`Delete "${track.title}"?`)) return;
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    if (!confirm(`Delete "${track.title || 'this track'}"?`)) return;
 
     try {
-      const response = await fetch(`/api/library/${track.track_id}`, { method: 'DELETE' });
-      if (response.ok) {
-        allTracks = allTracks.filter(t => t.track_id !== track.track_id);
-        renderTracks(allTracks);
+      const response = await fetch(`/api/library/${encodeURIComponent(trackId)}`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error(`Delete failed (${response.status})`);
       }
+
+      allTracks = allTracks.filter(t => getTrackId(t) !== trackId);
+      filterTracks(getCurrentSearchQuery());
+      notify('Deleted');
+      refreshPlaybackStatus(120);
     } catch (e) {
       console.error('Delete error:', e);
+      notify('Delete failed');
     }
   }
 

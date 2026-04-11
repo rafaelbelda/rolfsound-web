@@ -4,7 +4,6 @@
 export default class ContextMenuController {
     constructor(options = {}) {
         this._island = options.island || null;
-        this._onNavigate = options.onNavigate || (() => {});
 
         this._menuEl = null;
         this._isOpen = false;
@@ -16,7 +15,6 @@ export default class ContextMenuController {
         this._boundOnKeydown = this._onKeydown.bind(this);
         this._boundClose = this.close.bind(this);
 
-        this._registerDefaultItems();
         this._attach();
     }
 
@@ -45,59 +43,8 @@ export default class ContextMenuController {
         document.addEventListener('scroll', this._boundClose, true);
     }
 
-    _registerDefaultItems() {
-        this.registerItem({
-            id: 'go-library',
-            label: 'Ir para Biblioteca',
-            when: (ctx) => ctx.activeView !== 'library',
-            action: () => this._navigate('library')
-        });
-
-        this.registerItem({
-            id: 'go-settings',
-            label: 'Ir para Configuracoes',
-            when: (ctx) => ctx.activeView !== 'settings',
-            action: () => this._navigate('settings')
-        });
-
-        this.registerItem({
-            id: 'go-playback',
-            label: 'Ir para Playback',
-            when: (ctx) => ctx.activeView !== 'playback',
-            action: () => this._navigate('playback')
-        });
-
-        this.registerItem({ type: 'separator' });
-
-        this.registerItem({
-            id: 'copy-selection',
-            label: 'Copiar texto selecionado',
-            when: (ctx) => !!ctx.selectedText,
-            action: async (ctx) => {
-                if (!ctx.selectedText) return;
-                try {
-                    await navigator.clipboard.writeText(ctx.selectedText);
-                } catch {
-                    // Fallback para navegadores sem acesso ao clipboard async.
-                    const helper = document.createElement('textarea');
-                    helper.value = ctx.selectedText;
-                    helper.style.position = 'fixed';
-                    helper.style.opacity = '0';
-                    document.body.appendChild(helper);
-                    helper.focus();
-                    helper.select();
-                    document.execCommand('copy');
-                    helper.remove();
-                }
-            }
-        });
-
-        this.registerItem({
-            id: 'refresh-dashboard',
-            label: 'Atualizar Dashboard',
-            action: () => window.location.reload()
-        });
-    }
+    // Intentionally no default items.
+    // Views contribute context-specific actions through `rolfsound-context-build`.
 
     _onContextMenu(e) {
         if (e.defaultPrevented) return;
@@ -108,8 +55,15 @@ export default class ContextMenuController {
             return;
         }
 
+        const context = this._buildContext(target);
+        const items = this._buildVisibleItems(context);
+        if (!items.length) {
+            this.close();
+            return;
+        }
+
         e.preventDefault();
-        this.openAt(e.clientX, e.clientY, target);
+        this.openAt(e.clientX, e.clientY, target, { context, items });
     }
 
     _onDocumentClick(e) {
@@ -127,29 +81,27 @@ export default class ContextMenuController {
         const keyboardContextMenu = e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10');
         if (!keyboardContextMenu) return;
 
-        e.preventDefault();
         const focused = document.activeElement || document.body;
         const rect = focused.getBoundingClientRect();
         const x = Math.round(rect.left + Math.min(rect.width / 2, 20));
         const y = Math.round(rect.top + Math.min(rect.height / 2, 20));
-        this.openAt(x, y, focused);
+
+        if (this.openAt(x, y, focused)) {
+            e.preventDefault();
+        }
     }
 
-    _navigate(view) {
-        this._onNavigate(view);
-    }
-
-    openAt(x, y, sourceTarget) {
+    openAt(x, y, sourceTarget, prepared = null) {
         this._ensureMenu();
         this._menuEl.classList.remove('active');
         this._menuEl.classList.remove('opening');
 
-        const context = this._buildContext(sourceTarget);
-        const items = this._buildVisibleItems(context);
+        const context = prepared?.context || this._buildContext(sourceTarget);
+        const items = prepared?.items || this._buildVisibleItems(context);
 
         if (!items.length) {
             this.close();
-            return;
+            return false;
         }
 
         this._context = context;
@@ -170,6 +122,8 @@ export default class ContextMenuController {
         window.dispatchEvent(new CustomEvent('rolfsound-context-open', {
             detail: { context, x, y }
         }));
+
+        return true;
     }
 
     close() {
@@ -201,12 +155,15 @@ export default class ContextMenuController {
     _buildContext(sourceTarget) {
         const selectedText = (window.getSelection?.().toString() || '').trim();
         const activeView = this._island?.getAttribute('active-tab') || 'library';
+        const cardElement = sourceTarget?.closest?.('.track-card') || null;
 
         return {
             activeView,
             selectedText,
             target: sourceTarget,
-            targetTag: sourceTarget?.tagName?.toLowerCase() || ''
+            targetTag: sourceTarget?.tagName?.toLowerCase() || '',
+            cardElement,
+            trackId: cardElement?.dataset?.trackId || ''
         };
     }
 
@@ -244,9 +201,26 @@ export default class ContextMenuController {
 
             const button = document.createElement('button');
             button.className = 'rs-context-item hover-target';
+            if (item.danger) button.classList.add('rs-context-item--danger');
             button.type = 'button';
             button.setAttribute('role', 'menuitem');
-            button.textContent = item.label || item.id;
+            button.setAttribute('title', item.label || item.id);
+
+            const iconEl = document.createElement('span');
+            iconEl.className = 'rs-context-item-icon';
+            iconEl.setAttribute('aria-hidden', 'true');
+            if (item.icon) {
+                iconEl.innerHTML = item.icon;
+            } else {
+                iconEl.textContent = (item.label || item.id || '·')[0].toUpperCase();
+            }
+
+            const labelEl = document.createElement('span');
+            labelEl.className = 'rs-context-item-label';
+            labelEl.textContent = item.label || item.id;
+
+            button.appendChild(iconEl);
+            button.appendChild(labelEl);
 
             if (typeof item.disabled === 'function' ? item.disabled(this._context) : !!item.disabled) {
                 button.disabled = true;
@@ -284,8 +258,10 @@ export default class ContextMenuController {
 
         const rect = this._menuEl.getBoundingClientRect();
         const margin = 12;
+        // Reserve space for the expanded pill width so it never clips on hover.
+        const expandedWidth = 200;
 
-        const safeX = Math.min(x, window.innerWidth - rect.width - margin);
+        const safeX = Math.min(x, window.innerWidth - expandedWidth - margin);
         const safeY = Math.min(y, window.innerHeight - rect.height - margin);
 
         this._menuEl.style.left = `${Math.max(margin, safeX)}px`;
