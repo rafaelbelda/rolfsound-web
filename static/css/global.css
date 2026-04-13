@@ -127,9 +127,11 @@
   --blur-view-inactive: 15px;
 
   /* ── Motion ── */
-  --ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-emphasized: cubic-bezier(0.34, 1.2, 0.64, 1);
-  --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard:   cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.28, 0.64, 1);
+  --ease-exit:       cubic-bezier(0.3, 0, 1, 1);
+  --ease-snappy:     cubic-bezier(0.16, 1, 0.3, 1);
   --duration-impact: 0.42s;
   --duration-fast: 0.15s;
   --duration-base: 0.2s;
@@ -150,6 +152,21 @@
   --rs-theme-accent-rgb:   18 18 18;
   --rs-theme-contrast-rgb: 12 12 12;
   --rs-theme-intensity:    0;
+
+  /* ── Geometria dos gradientes do backdrop (tunável via DevTools/CSS override) ─── */
+  /* Mudar estes vars e chamar backdrop.refreshGradientConfig() aplica em tempo real */
+  --rs-backdrop-base-shape:      130% 100%;   /* largura% altura% do ellipse base    */
+  --rs-backdrop-base-pos:        50% 60%;     /* posição focal do bloom base          */
+  --rs-backdrop-base-op-mid:     0.5;         /* opacidade na parada de 65%           */
+  --rs-backdrop-base-op-edge:    0.95;        /* opacidade na borda (escurece bordas) */
+  --rs-backdrop-accent-shape:    80% 55%;     /* ellipse do bloom de accent            */
+  --rs-backdrop-accent-pos:      25% 8%;      /* canto superior-esquerdo              */
+  --rs-backdrop-accent-op-peak:  0.55;        /* pico de opacidade do accent          */
+  --rs-backdrop-accent-op-fade:  0.15;        /* fade exterior do accent              */
+  --rs-backdrop-contrast-shape:  70% 50%;     /* ellipse do bloom de contrast          */
+  --rs-backdrop-contrast-pos:    78% 95%;     /* canto inferior-direito               */
+  --rs-backdrop-contrast-op-peak: 0.45;       /* pico de opacidade do contrast        */
+  --rs-backdrop-contrast-op-fade: 0.12;       /* fade exterior do contrast            */
 
   /* Compatibilidade com tokens legados */
   --black: var(--color-bg-canvas);
@@ -221,8 +238,8 @@ html, body {
               background-color 0.3s ease,
               border 0.3s ease;
 
-  /* PERFORMANCE */
-  will-change: transform, width, height;
+  /* PERFORMANCE — only compositor-safe props; width/height are layout, never in will-change */
+  will-change: transform, opacity;
   backface-visibility: hidden;
   transform-style: preserve-3d;
 }
@@ -531,4 +548,25 @@ html, body {
   border: 1px solid var(--color-border-cursor) !important;
   background-color: var(--color-surface-card-hover) !important;
   opacity: 0;
+}
+
+/* ─── REDUCED MOTION ──────────────────────────────────────────────────────── */
+/* Respeita prefers-reduced-motion: reduce — Apple/WCAG requirement.           */
+/* Desativa transições CSS globais. WAAPI duration é zerado via JS (ver        */
+/* Animator.resolveEasing / AnimationEngine). O cursor ainda se move mas       */
+/* sem interpolação — rastrea o ponteiro frame a frame.                        */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  /* O cursor DOM permanece visível mas sem slow-lerp — já é gerenciado via JS */
+  #cursor-dot {
+    transition: none !important;
+  }
 }

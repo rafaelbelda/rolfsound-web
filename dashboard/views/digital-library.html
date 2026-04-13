@@ -24,6 +24,35 @@
     background: var(--color-library-scroll-thumb-hover);
   }
 
+  .digital-library-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dl-filter-btn {
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-interactive);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm, 10px);
+    font-weight: 600;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: transform 0.15s var(--ease-standard, ease), opacity 0.15s var(--ease-standard, ease), border-color 0.15s var(--ease-standard, ease), background-color 0.15s var(--ease-standard, ease);
+  }
+
+  .dl-filter-btn:hover {
+    border-color: var(--color-border-stronger);
+    color: var(--color-text-primary);
+  }
+
+  .dl-filter-btn.active {
+    background: var(--color-surface-card-pressed);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-stronger);
+  }
+
   #tracks-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -31,39 +60,61 @@
     margin-top: 20px;
   }
 
-  .track-card {
+  .track-card,
+  .playlist-card {
     background: var(--color-surface-card);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(var(--blur-glass));
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-xl);
     overflow: hidden;
-    transition: all 0.2s ease;
+    transition: transform 0.2s var(--ease-standard, ease), background-color 0.2s var(--ease-standard, ease), border-color 0.2s var(--ease-standard, ease), box-shadow 0.2s var(--ease-standard, ease);
     cursor: pointer;
     display: flex;
     flex-direction: column;
   }
 
-  .track-card:hover {
+  .track-card:hover,
+  .playlist-card:hover {
     background: var(--color-surface-card-hover);
     border-color: var(--color-border-stronger);
     transform: translateY(-4px);
   }
 
-  .track-thumbnail {
+  .track-thumbnail,
+  .playlist-covers {
     width: 100%;
     aspect-ratio: 1;
     background: linear-gradient(135deg, var(--color-library-thumb-gradient-start), var(--color-library-thumb-gradient-end));
-    object-fit: cover;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
   }
 
-  .track-thumbnail img {
+  .track-thumbnail img,
+  .playlist-cover img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .playlist-covers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    padding: 2px;
+  }
+
+  .playlist-cover {
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--color-library-thumb-fallback-start), var(--color-library-thumb-fallback-end));
+    color: var(--color-led);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
   }
 
   .track-thumbnail-fallback {
@@ -86,13 +137,14 @@
     justify-content: center;
     gap: 8px;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity 0.18s var(--ease-standard, ease);
   }
 
   .track-card:hover .track-actions {
     opacity: 1;
   }
 
+  /* Action buttons spring in individually when the actions overlay appears */
   .track-action-btn {
     width: 36px;
     height: 36px;
@@ -104,15 +156,27 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transform: scale(0.72);
+    transition: transform 0.28s var(--ease-spring, cubic-bezier(0.34, 1.28, 0.64, 1)),
+                background-color 0.15s var(--ease-standard, ease);
   }
+
+  .track-card:hover .track-action-btn {
+    transform: scale(1);
+  }
+
+  /* Stagger each button slightly — creates a cascade effect */
+  .track-card:hover .track-action-btn:nth-child(1) { transition-delay: 0ms; }
+  .track-card:hover .track-action-btn:nth-child(2) { transition-delay: 40ms; }
+  .track-card:hover .track-action-btn:nth-child(3) { transition-delay: 80ms; }
 
   .track-action-btn:hover {
     background: var(--color-surface-interactive-strong);
-    transform: scale(1.1);
+    transform: scale(1.12);
   }
 
-  .track-info {
+  .track-info,
+  .playlist-info {
     flex: 1;
     padding: 10px;
     display: flex;
@@ -120,7 +184,8 @@
     min-height: 60px;
   }
 
-  .track-title {
+  .track-title,
+  .playlist-title {
     font-size: var(--fs-sm, 10px);
     font-weight: 600;
     color: var(--color-text-primary);
@@ -134,7 +199,8 @@
     margin-bottom: 4px;
   }
 
-  .track-artist {
+  .track-artist,
+  .playlist-meta {
     font-size: var(--fs-2xs, 8px);
     color: var(--color-text-tertiary);
     white-space: normal;
@@ -172,6 +238,8 @@
   .empty-subtext {
     font-size: var(--fs-sm, 10px);
     opacity: 0.6;
+    text-transform: none;
+    letter-spacing: 0;
   }
 
   .spinner {
@@ -184,34 +252,263 @@
     margin-right: 8px;
   }
 
+  .playlist-folder-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 380;
+    background: rgba(0, 0, 0, 0);
+    transition: background 0.22s ease;
+  }
+
+  .playlist-folder-backdrop.active {
+    background: rgba(0, 0, 0, 0.62);
+  }
+
+  .playlist-folder {
+    position: fixed;
+    z-index: 381;
+    border-radius: var(--radius-dynamic-island-expanded);
+    border: 1px solid var(--color-border-strong);
+    background: rgba(8, 8, 8, 0.92);
+    backdrop-filter: blur(18px);
+    overflow: hidden;
+    box-shadow: var(--shadow-overlay);
+    transform-origin: center center;
+    transition: transform 0.34s var(--ease-standard), opacity 0.18s ease;
+  }
+
+  .playlist-folder-inner {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .playlist-folder-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+
+  .playlist-folder-header h3 {
+    font-size: var(--fs-lg, 12px);
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+
+  .folder-close-btn {
+    border: none;
+    background: var(--color-surface-interactive);
+    color: var(--color-text-secondary);
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-round);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .folder-close-btn:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-interactive-hover);
+  }
+
+  .playlist-folder-tracks {
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    overflow: auto;
+    flex: 1;
+  }
+
+  .playlist-folder-track {
+    border: 1px solid var(--color-border-default);
+    background: var(--color-surface-card);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+  }
+
+  .playlist-folder-track:hover {
+    border-color: var(--color-border-stronger);
+  }
+
+  .playlist-folder-track-thumb {
+    aspect-ratio: 1;
+    width: 100%;
+    background: linear-gradient(135deg, var(--color-library-thumb-fallback-start), var(--color-library-thumb-fallback-end));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-led);
+  }
+
+  .playlist-folder-track-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .playlist-folder-track-title {
+    font-size: var(--fs-xs, 9px);
+    color: var(--color-text-secondary);
+    padding: 8px;
+    line-height: 1.2;
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 32px;
+  }
+
+  #playlist-picker {
+    position: fixed;
+    z-index: 390;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #playlist-picker.active {
+    display: flex;
+  }
+
+  .playlist-picker-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.58);
+  }
+
+  .playlist-picker-card {
+    position: relative;
+    width: min(380px, calc(100vw - 40px));
+    max-height: min(420px, calc(100vh - 100px));
+    overflow: auto;
+    background: rgba(10, 10, 10, 0.96);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-overlay);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .playlist-picker-title {
+    font-size: var(--fs-lg, 12px);
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+
+  .playlist-picker-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .playlist-picker-item {
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-card);
+    color: var(--color-text-secondary);
+    padding: 8px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: var(--fs-sm, 10px);
+  }
+
+  .playlist-picker-item:hover {
+    border-color: var(--color-border-stronger);
+    color: var(--color-text-primary);
+  }
+
+  .playlist-picker-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .playlist-picker-actions button {
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-interactive);
+    color: var(--color-text-secondary);
+    padding: 7px 10px;
+    font-size: var(--fs-sm, 10px);
+    cursor: pointer;
+  }
+
+  .playlist-picker-actions button:hover {
+    color: var(--color-text-primary);
+    border-color: var(--color-border-stronger);
+  }
+
   @keyframes spin {
     to { transform: rotate(360deg); }
   }
 </style>
 
 <div id="digital-library-container">
+  <div class="digital-library-toolbar">
+    <button class="dl-filter-btn active" data-filter="all">All</button>
+    <button class="dl-filter-btn" data-filter="tracks">Tracks</button>
+    <button class="dl-filter-btn" data-filter="playlists">Playlists</button>
+  </div>
+
   <div id="digital-library-loading" style="display: none;">
     <div class="spinner"></div>
     Loading...
   </div>
+
   <div id="digital-library-empty" style="display: none;">
-    <div>No tracks yet</div>
+    <div>No items</div>
     <div class="empty-subtext">Search and download music to build your library</div>
   </div>
+
   <div id="tracks-grid"></div>
+</div>
+
+<div id="playlist-picker" aria-hidden="true">
+  <div class="playlist-picker-backdrop"></div>
+  <div class="playlist-picker-card">
+    <div class="playlist-picker-title">Add to playlist</div>
+    <div class="playlist-picker-list" id="playlist-picker-list"></div>
+    <div class="playlist-picker-actions">
+      <button id="playlist-picker-create" type="button">New playlist</button>
+      <button id="playlist-picker-close" type="button">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script type="module">
   const container = document.getElementById('view-digital-library');
+  const root = document.getElementById('digital-library-container');
   const grid = document.getElementById('tracks-grid');
   const loadingEl = document.getElementById('digital-library-loading');
   const emptyEl = document.getElementById('digital-library-empty');
   const emptyTitleEl = emptyEl?.querySelector('div');
   const emptySubtextEl = emptyEl?.querySelector('.empty-subtext');
+  const picker = document.getElementById('playlist-picker');
+  const pickerList = document.getElementById('playlist-picker-list');
+  const pickerCreate = document.getElementById('playlist-picker-create');
+  const pickerClose = document.getElementById('playlist-picker-close');
   const island = document.querySelector('rolfsound-island');
 
   let allTracks = [];
-  let libraryMode = 'vinyl'; // 'vinyl' | 'digital'
+  let allPlaylists = [];
+  let libraryMode = 'vinyl';
+  let activeFilter = 'all';
+  let pickerTrackId = '';
+  let folderState = null;
 
   function thumbSrc(t) {
     if (!t) return null;
@@ -241,24 +538,17 @@
     return [...new Set(candidates.filter(Boolean))];
   }
 
-  function hydrateTrackThumbnails(tracks) {
-    const images = grid.querySelectorAll('.track-thumbnail img[data-track-id]');
-
-    images.forEach((img, index) => {
-      const track = tracks[index];
-      const candidates = getThumbnailCandidates(track);
-      if (!candidates.length) return;
-
-      let candidateIndex = 0;
-      img.onerror = () => {
-        candidateIndex += 1;
-        if (candidateIndex >= candidates.length) {
-          img.onerror = null;
-          return;
-        }
-        img.src = candidates[candidateIndex];
-      };
-    });
+  function cascadeImage(img, candidates) {
+    if (!img || !Array.isArray(candidates) || !candidates.length) return;
+    let idx = 0;
+    img.onerror = () => {
+      idx += 1;
+      if (idx >= candidates.length) {
+        img.onerror = null;
+        return;
+      }
+      img.src = candidates[idx];
+    };
   }
 
   function escapeHtml(value) {
@@ -299,7 +589,7 @@
 
   function clearEmptyState() {
     emptyEl.style.display = 'none';
-    if (emptyTitleEl) emptyTitleEl.textContent = 'No tracks yet';
+    if (emptyTitleEl) emptyTitleEl.textContent = 'No items';
     if (emptySubtextEl) emptySubtextEl.textContent = 'Search and download music to build your library';
   }
 
@@ -307,30 +597,467 @@
     return allTracks.find(track => getTrackId(track) === trackId) || null;
   }
 
-  // Escuta mudanças de modo (vinyl <-> digital)
-  window.addEventListener('rolfsound-library-mode-change', (e) => {
-    libraryMode = e.detail.mode;
-    if (libraryMode === 'digital') {
-      loadTracks();
+  async function loadData() {
+    loadingEl.style.display = 'flex';
+    grid.innerHTML = '';
+    clearEmptyState();
+
+    try {
+      const [tracksRes, playlistsRes] = await Promise.all([
+        fetch('/api/library'),
+        fetch('/api/playlists')
+      ]);
+
+      if (!tracksRes.ok) throw new Error(`Failed to fetch library (${tracksRes.status})`);
+
+      const tracksData = await tracksRes.json();
+      allTracks = Array.isArray(tracksData.tracks) ? tracksData.tracks : [];
+
+      if (playlistsRes.ok) {
+        const playlistsData = await playlistsRes.json();
+        allPlaylists = Array.isArray(playlistsData.playlists) ? playlistsData.playlists : [];
+      } else {
+        allPlaylists = [];
+      }
+
+      loadingEl.style.display = 'none';
+      renderLibrary(getCurrentSearchQuery());
+    } catch (error) {
+      console.error('Error loading library:', error);
+      loadingEl.style.display = 'none';
+      grid.innerHTML = '';
+      setEmptyState('Failed to load', 'Please try again in a moment');
     }
-  });
+  }
 
-  // Busca vinda da ilha (fallback) e do SearchController (preferencial)
-  window.addEventListener('rolfsound-search', (e) => {
-    const query = (e.detail.query || '').toLowerCase();
-    if (libraryMode === 'digital') {
-      filterTracks(query);
+  function renderLibrary(query = '') {
+    const q = (query || '').trim().toLowerCase();
+
+    const filteredTracks = allTracks.filter((track) => {
+      if (!q) return true;
+      const title = (track.title || '').toLowerCase();
+      const artist = (track.artist || '').toLowerCase();
+      return title.includes(q) || artist.includes(q);
+    });
+
+    const filteredPlaylists = allPlaylists.filter((playlist) => {
+      if (!q) return true;
+      return (playlist.name || '').toLowerCase().includes(q);
+    });
+
+    const showTracks = activeFilter === 'all' || activeFilter === 'tracks';
+    const showPlaylists = activeFilter === 'all' || activeFilter === 'playlists';
+
+    const visibleTracks = showTracks ? filteredTracks : [];
+    const visiblePlaylists = showPlaylists ? filteredPlaylists : [];
+
+    if (!visibleTracks.length && !visiblePlaylists.length) {
+      grid.innerHTML = '';
+      if (q) {
+        setEmptyState('No results', 'Try another title, artist, or playlist name');
+      } else if (activeFilter === 'playlists') {
+        setEmptyState('No playlists yet', 'Right click a track and choose Add to playlist');
+      } else {
+        setEmptyState('No tracks yet');
+      }
+      return;
     }
-  });
 
-  window.addEventListener('rolfsound-search-results', (e) => {
-    if (libraryMode !== 'digital') return;
+    clearEmptyState();
 
-    // Se vier do controller para outra aba, ignora.
-    if (e.detail?.tab && e.detail.tab !== 'digital' && e.detail.tab !== 'library') return;
+    const playlistCards = visiblePlaylists.map((playlist) => {
+      const playlistId = Number(playlist.id || 0);
+      const trackCount = Number(playlist.track_count || 0);
+      return `
+        <div class="playlist-card" data-playlist-id="${playlistId}">
+          <div class="playlist-covers">
+            <div class="playlist-cover" data-playlist-id="${playlistId}" data-slot="0">♫</div>
+            <div class="playlist-cover" data-playlist-id="${playlistId}" data-slot="1">♫</div>
+            <div class="playlist-cover" data-playlist-id="${playlistId}" data-slot="2">♫</div>
+            <div class="playlist-cover" data-playlist-id="${playlistId}" data-slot="3">♫</div>
+          </div>
+          <div class="playlist-info">
+            <div class="playlist-title">${escapeHtml(playlist.name || 'Playlist')}</div>
+            <div class="playlist-meta">${trackCount} tracks</div>
+          </div>
+        </div>
+      `;
+    }).join('');
 
-    filterTracks(getCurrentSearchQuery());
-  });
+    const trackCards = visibleTracks.map((track) => {
+      const trackId = getTrackId(track);
+      const title = escapeHtml(track.title || 'Unknown');
+      const artist = escapeHtml(track.artist || 'Unknown Artist');
+      const thumbnailCandidates = getThumbnailCandidates(track);
+      const primaryThumbnail = thumbnailCandidates[0] || null;
+
+      return `
+        <div class="track-card" data-track-id="${escapeHtml(trackId)}">
+          <div class="track-thumbnail">
+            ${primaryThumbnail ? `
+              <img src="${escapeHtml(primaryThumbnail)}" data-track-id="${escapeHtml(trackId)}" alt="${title}" loading="lazy" />
+            ` : `
+              <div class="track-thumbnail-fallback">♫</div>
+            `}
+            <div class="track-actions">
+              <button class="track-action-btn play-btn" title="Play" aria-label="Play track">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="track-info">
+            <div class="track-title">${title}</div>
+            <div class="track-artist">${artist}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    grid.innerHTML = playlistCards + trackCards;
+
+    hydrateTrackThumbnails(visibleTracks);
+    hydratePlaylistCovers(visiblePlaylists);
+  }
+
+  function hydrateTrackThumbnails(tracks) {
+    const images = grid.querySelectorAll('.track-thumbnail img[data-track-id]');
+
+    images.forEach((img, index) => {
+      const track = tracks[index];
+      const candidates = getThumbnailCandidates(track);
+      if (!candidates.length) return;
+      cascadeImage(img, candidates);
+    });
+  }
+
+  async function hydratePlaylistCovers(playlists) {
+    await Promise.all(playlists.map(async (playlist) => {
+      const playlistId = Number(playlist.id || 0);
+      if (!playlistId) return;
+
+      try {
+        const res = await fetch(`/api/playlists/${playlistId}/tracks`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const tracks = Array.isArray(data.tracks) ? data.tracks.slice(0, 4) : [];
+        const slots = grid.querySelectorAll(`.playlist-cover[data-playlist-id="${playlistId}"]`);
+        slots.forEach((slot, slotIndex) => {
+          const track = tracks[slotIndex];
+          if (!track) {
+            slot.textContent = '♫';
+            return;
+          }
+          const candidates = getThumbnailCandidates(track);
+          if (!candidates.length) {
+            slot.textContent = '♫';
+            return;
+          }
+          slot.innerHTML = `<img src="${escapeHtml(candidates[0])}" loading="lazy" alt="cover" />`;
+          const img = slot.querySelector('img');
+          cascadeImage(img, candidates);
+        });
+      } catch (error) {
+        console.debug('playlist cover hydrate failed', error);
+      }
+    }));
+  }
+
+  function closePlaylistPicker() {
+    picker.classList.remove('active');
+    picker.setAttribute('aria-hidden', 'true');
+    pickerTrackId = '';
+  }
+
+  function openPlaylistPicker(trackId) {
+    pickerTrackId = trackId;
+    pickerList.innerHTML = allPlaylists.map((playlist) => {
+      const playlistId = Number(playlist.id || 0);
+      const count = Number(playlist.track_count || 0);
+      return `
+        <div class="playlist-picker-item" data-playlist-id="${playlistId}">
+          <span>${escapeHtml(playlist.name || 'Playlist')}</span>
+          <span>${count}</span>
+        </div>
+      `;
+    }).join('');
+
+    if (!allPlaylists.length) {
+      pickerList.innerHTML = `<div class="playlist-picker-item" style="cursor:default; opacity:.65;">No playlists yet</div>`;
+    }
+
+    picker.classList.add('active');
+    picker.setAttribute('aria-hidden', 'false');
+  }
+
+  async function addTrackToPlaylist(trackId, playlistId) {
+    try {
+      const response = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_id: trackId })
+      });
+      if (!response.ok) throw new Error(`Add to playlist failed (${response.status})`);
+      notify('Added to playlist');
+      await loadData();
+    } catch (error) {
+      console.error('Add to playlist error:', error);
+      notify('Failed to add to playlist');
+    }
+  }
+
+  async function createPlaylistAndMaybeAddTrack(trackId = '') {
+    let name = '';
+    if (typeof island?.promptPlaylistName === 'function') {
+      name = (await island.promptPlaylistName({
+        title: 'New playlist',
+        placeholder: 'Type playlist name',
+        confirmLabel: 'Create'
+      }) || '').trim();
+    } else {
+      name = (window.prompt('Playlist name') || '').trim();
+    }
+
+    if (!name) return;
+
+    try {
+      const createRes = await fetch('/api/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+
+      if (!createRes.ok) throw new Error(`Create playlist failed (${createRes.status})`);
+      const playlist = await createRes.json();
+      const playlistId = Number(playlist.id || 0);
+
+      if (trackId && playlistId) {
+        await addTrackToPlaylist(trackId, playlistId);
+      } else {
+        notify('Playlist created');
+        await loadData();
+      }
+
+      window.dispatchEvent(new CustomEvent('rolfsound-playlist-created', {
+        detail: { playlist }
+      }));
+    } catch (error) {
+      console.error('Create playlist error:', error);
+      notify('Failed to create playlist');
+    }
+  }
+
+  async function playTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: trackId,
+          filepath: getTrackPath(track)
+        })
+      });
+
+      if (!response.ok) throw new Error(`Play failed (${response.status})`);
+
+      notify('Playing now');
+      refreshPlaybackStatus(150);
+    } catch (e) {
+      console.error('Play error:', e);
+      notify('Play failed');
+    }
+  }
+
+  async function queueTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/queue/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: trackId,
+          filepath: getTrackPath(track),
+          title: track.title || '',
+          thumbnail: track.thumbnail || ''
+        })
+      });
+
+      if (!response.ok) throw new Error(`Queue failed (${response.status})`);
+
+      notify('Added to queue');
+      refreshPlaybackStatus(120);
+    } catch (e) {
+      console.error('Queue error:', e);
+      notify('Queue failed');
+    }
+  }
+
+  async function deleteTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Invalid track');
+      return;
+    }
+
+    if (!confirm(`Delete "${track.title || 'this track'}"?`)) return;
+
+    try {
+      const response = await fetch(`/api/library/${encodeURIComponent(trackId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Delete failed (${response.status})`);
+
+      allTracks = allTracks.filter(t => getTrackId(t) !== trackId);
+      renderLibrary(getCurrentSearchQuery());
+      notify('Deleted');
+      refreshPlaybackStatus(120);
+    } catch (e) {
+      console.error('Delete error:', e);
+      notify('Delete failed');
+    }
+  }
+
+  async function playPlaylist(playlistId) {
+    try {
+      const response = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`);
+      if (!response.ok) throw new Error(`Playlist fetch failed (${response.status})`);
+      const data = await response.json();
+      const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+      if (!tracks.length) {
+        notify('Playlist is empty');
+        return;
+      }
+
+      await playTrack(tracks[0]);
+      for (let i = 1; i < tracks.length; i += 1) {
+        await queueTrack(tracks[i]);
+      }
+      notify(`Playing playlist (${tracks.length} tracks)`);
+    } catch (error) {
+      console.error('Play playlist error:', error);
+      notify('Failed to play playlist');
+    }
+  }
+
+  function buildFolderTrackCard(track) {
+    const trackId = getTrackId(track);
+    const title = escapeHtml(track.title || 'Unknown');
+    const candidates = getThumbnailCandidates(track);
+    const thumbnail = candidates[0] || null;
+
+    return `
+      <div class="playlist-folder-track" data-track-id="${escapeHtml(trackId)}">
+        <div class="playlist-folder-track-thumb">
+          ${thumbnail ? `<img src="${escapeHtml(thumbnail)}" loading="lazy" alt="${title}" />` : '♫'}
+        </div>
+        <div class="playlist-folder-track-title">${title}</div>
+      </div>
+    `;
+  }
+
+  function closeFolder() {
+    if (!folderState) return;
+
+    const { backdrop, panel } = folderState;
+    panel.style.opacity = '0';
+    panel.style.transform = 'translate(-50%, -50%) scale(.82)';
+    backdrop.classList.remove('active');
+
+    window.setTimeout(() => {
+      panel.remove();
+      backdrop.remove();
+    }, 210);
+
+    folderState = null;
+  }
+
+  function openPlaylistFolder(playlistCard, playlist, tracks) {
+    closeFolder();
+
+    const cardRect = playlistCard.getBoundingClientRect();
+    const targetW = Math.min(window.innerWidth * 0.74, 860);
+    const targetH = Math.min(window.innerHeight * 0.72, 560);
+
+    const startScaleX = Math.max(0.18, cardRect.width / targetW);
+    const startScaleY = Math.max(0.18, cardRect.height / targetH);
+
+    const targetCenterX = window.innerWidth / 2;
+    const targetCenterY = window.innerHeight / 2;
+    const cardCenterX = cardRect.left + cardRect.width / 2;
+    const cardCenterY = cardRect.top + cardRect.height / 2;
+
+    const offsetX = cardCenterX - targetCenterX;
+    const offsetY = cardCenterY - targetCenterY;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'playlist-folder-backdrop';
+    document.body.appendChild(backdrop);
+
+    const panel = document.createElement('div');
+    panel.className = 'playlist-folder';
+    panel.style.width = `${targetW}px`;
+    panel.style.height = `${targetH}px`;
+    panel.style.left = '50%';
+    panel.style.top = '50%';
+    panel.style.opacity = '0';
+    panel.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) scale(${startScaleX}, ${startScaleY})`;
+
+    panel.innerHTML = `
+      <div class="playlist-folder-inner">
+        <div class="playlist-folder-header">
+          <h3>${escapeHtml(playlist.name || 'Playlist')}</h3>
+          <button class="folder-close-btn hover-target" type="button" aria-label="Close playlist">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="playlist-folder-tracks">
+          ${tracks.map(buildFolderTrackCard).join('') || '<div class="playlist-folder-track-title">Playlist is empty</div>'}
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    const folderImages = panel.querySelectorAll('.playlist-folder-track-thumb img');
+    folderImages.forEach((img, i) => {
+      const candidates = getThumbnailCandidates(tracks[i]);
+      cascadeImage(img, candidates);
+    });
+
+    requestAnimationFrame(() => {
+      backdrop.classList.add('active');
+      panel.style.opacity = '1';
+      panel.style.transform = 'translate(-50%, -50%) scale(1, 1)';
+    });
+
+    panel.querySelector('.folder-close-btn')?.addEventListener('click', closeFolder);
+    backdrop.addEventListener('click', closeFolder);
+
+    panel.querySelector('.playlist-folder-tracks')?.addEventListener('click', async (event) => {
+      const trackCard = event.target.closest('.playlist-folder-track');
+      if (!trackCard) return;
+      const track = findTrackById(trackCard.dataset.trackId || '');
+      if (!track) {
+        notify('Track unavailable');
+        return;
+      }
+      await playTrack(track);
+    });
+
+    folderState = { backdrop, panel };
+  }
 
   const onContextBuild = (e) => {
     const context = e.detail?.context;
@@ -340,15 +1067,15 @@
     if (libraryMode !== 'digital' || !container?.classList.contains('active')) return;
 
     const card = context.cardElement || context.target?.closest?.('.track-card');
-    if (!card || !grid.contains(card)) return;
+    if (!card || !grid.contains(card) || !card.classList.contains('track-card')) return;
 
     const track = findTrackById(card.dataset.trackId || '');
     if (!track) return;
 
     const trackId = getTrackId(track) || 'track';
 
-    const playIcon   = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
-    const queueIcon  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 9v2h14V9H7z"/></svg>`;
+    const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+    const queueIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 9v2h14V9H7z"/></svg>`;
     const deleteIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
 
     items.push(
@@ -380,205 +1107,122 @@
     window.removeEventListener('rolfsound-context-build', onContextBuild);
   }, { once: true });
 
-  grid?.addEventListener('click', async (event) => {
-    const actionBtn = event.target.closest('.play-btn');
-    if (!actionBtn) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const card = actionBtn.closest('.track-card');
-    const track = findTrackById(card?.dataset.trackId || '');
-
-    if (!track) {
-      console.warn('Digital library play action failed: track not found');
-      notify('Track unavailable');
+  root?.addEventListener('click', (event) => {
+    const filterBtn = event.target.closest('.dl-filter-btn');
+    if (filterBtn) {
+      root.querySelectorAll('.dl-filter-btn').forEach((btn) => btn.classList.remove('active'));
+      filterBtn.classList.add('active');
+      activeFilter = filterBtn.dataset.filter || 'all';
+      renderLibrary(getCurrentSearchQuery());
       return;
     }
 
-    await playTrack(track);
-  });
-
-  async function loadTracks() {
-    loadingEl.style.display = 'flex';
-    grid.innerHTML = '';
-    clearEmptyState();
-
-    try {
-      const response = await fetch('/api/library');
-      if (!response.ok) throw new Error(`Failed to fetch library (${response.status})`);
-
-      const data = await response.json();
-      allTracks = Array.isArray(data.tracks) ? data.tracks : [];
-
-      loadingEl.style.display = 'none';
-
-      if (allTracks.length === 0) {
-        setEmptyState('No tracks yet');
-        grid.innerHTML = '';
+    const actionBtn = event.target.closest('.play-btn');
+    if (actionBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const card = actionBtn.closest('.track-card');
+      const track = findTrackById(card?.dataset.trackId || '');
+      if (!track) {
+        notify('Track unavailable');
         return;
       }
-
-      filterTracks(getCurrentSearchQuery());
-    } catch (error) {
-      console.error('Error loading tracks:', error);
-      loadingEl.style.display = 'none';
-      grid.innerHTML = '';
-      setEmptyState('Failed to load', 'Please try again in a moment');
-    }
-  }
-
-  function filterTracks(query) {
-    if (!query) {
-      renderTracks(allTracks);
+      playTrack(track);
       return;
     }
 
-    const filtered = allTracks.filter(track => {
-      const title = (track.title || '').toLowerCase();
-      const artist = (track.artist || '').toLowerCase();
-      return title.includes(query) || artist.includes(query);
-    });
-
-    if (filtered.length === 0) {
-      grid.innerHTML = '';
-      setEmptyState('No results', 'Try another title or artist');
-      return;
-    }
-
-    renderTracks(filtered);
-  }
-
-  function renderTracks(tracks) {
-    if (!Array.isArray(tracks) || tracks.length === 0) {
-      grid.innerHTML = '';
-      setEmptyState('No tracks yet');
-      return;
-    }
-
-    clearEmptyState();
-
-    grid.innerHTML = tracks.map(track => {
-      const trackId = getTrackId(track);
-      const title = escapeHtml(track.title || 'Unknown');
-      const artist = escapeHtml(track.artist || 'Unknown Artist');
-      const thumbnailCandidates = getThumbnailCandidates(track);
-      const primaryThumbnail = thumbnailCandidates[0] || null;
-
-      return `
-        <div class="track-card" data-track-id="${escapeHtml(trackId)}">
-          <div class="track-thumbnail">
-            ${primaryThumbnail ? `
-              <img src="${escapeHtml(primaryThumbnail)}" data-track-id="${escapeHtml(trackId)}" alt="${title}" loading="lazy" />
-            ` : `
-              <div class="track-thumbnail-fallback">♫</div>
-            `}
-            <div class="track-actions">
-              <button class="track-action-btn play-btn" title="Play" aria-label="Play track">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="track-info">
-            <div class="track-title">${title}</div>
-            <div class="track-artist">${artist}</div>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    hydrateTrackThumbnails(tracks);
-  }
-
-  async function playTrack(track) {
-    const trackId = getTrackId(track);
-    if (!trackId) {
-      notify('Invalid track');
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/play', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_id: trackId,
-          filepath: getTrackPath(track)
+    const playlistCard = event.target.closest('.playlist-card');
+    if (playlistCard) {
+      const playlistId = Number(playlistCard.dataset.playlistId || 0);
+      if (!playlistId) return;
+      fetch(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`)
+        .then((res) => {
+          if (!res.ok) throw new Error('Failed to load playlist');
+          return res.json();
         })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Play failed (${response.status})`);
-      }
-
-      notify('Playing now');
-      refreshPlaybackStatus(150);
-    } catch (e) {
-      console.error('Play error:', e);
-      notify('Play failed');
-    }
-  }
-
-  async function queueTrack(track) {
-    const trackId = getTrackId(track);
-    if (!trackId) {
-      notify('Invalid track');
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/queue/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_id: trackId,
-          filepath: getTrackPath(track),
-          title: track.title || '',
-          thumbnail: track.thumbnail || ''
+        .then((data) => {
+          const playlist = allPlaylists.find((p) => Number(p.id) === playlistId) || { id: playlistId, name: 'Playlist' };
+          const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+          openPlaylistFolder(playlistCard, playlist, tracks);
         })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Queue failed (${response.status})`);
-      }
-
-      notify('Added to queue');
-      refreshPlaybackStatus(120);
-    } catch (e) {
-      console.error('Queue error:', e);
-      notify('Queue failed');
+        .catch((error) => {
+          console.error('Open playlist folder error:', error);
+          notify('Failed to open playlist');
+        });
     }
-  }
+  });
 
-  async function deleteTrack(track) {
-    const trackId = getTrackId(track);
-    if (!trackId) {
-      notify('Invalid track');
-      return;
+  pickerList?.addEventListener('click', async (event) => {
+    const item = event.target.closest('.playlist-picker-item');
+    if (!item || !pickerTrackId || item.style.cursor === 'default') return;
+    const playlistId = Number(item.dataset.playlistId || 0);
+    if (!playlistId) return;
+    await addTrackToPlaylist(pickerTrackId, playlistId);
+    closePlaylistPicker();
+  });
+
+  pickerCreate?.addEventListener('click', async () => {
+    const currentTrack = pickerTrackId;
+    closePlaylistPicker();
+    await createPlaylistAndMaybeAddTrack(currentTrack);
+  });
+
+  pickerClose?.addEventListener('click', closePlaylistPicker);
+  picker?.querySelector('.playlist-picker-backdrop')?.addEventListener('click', closePlaylistPicker);
+
+  window.addEventListener('rolfsound-library-mode-change', (e) => {
+    libraryMode = e.detail.mode;
+    if (libraryMode === 'digital') {
+      loadData();
+    } else {
+      closeFolder();
+      closePlaylistPicker();
     }
+  });
 
-    if (!confirm(`Delete "${track.title || 'this track'}"?`)) return;
-
-    try {
-      const response = await fetch(`/api/library/${encodeURIComponent(trackId)}`, { method: 'DELETE' });
-      if (!response.ok) {
-        throw new Error(`Delete failed (${response.status})`);
-      }
-
-      allTracks = allTracks.filter(t => getTrackId(t) !== trackId);
-      filterTracks(getCurrentSearchQuery());
-      notify('Deleted');
-      refreshPlaybackStatus(120);
-    } catch (e) {
-      console.error('Delete error:', e);
-      notify('Delete failed');
+  window.addEventListener('rolfsound-search', (e) => {
+    const query = (e.detail.query || '').toLowerCase();
+    if (libraryMode === 'digital') {
+      renderLibrary(query);
     }
-  }
+  });
 
-  // Load digital library ao entrar nessa view
+  window.addEventListener('rolfsound-search-results', (e) => {
+    if (libraryMode !== 'digital') return;
+    if (e.detail?.tab && e.detail.tab !== 'digital' && e.detail.tab !== 'library') return;
+    renderLibrary(getCurrentSearchQuery());
+  });
+
+  window.addEventListener('rolfsound-playlist-picker-request', (e) => {
+    if (libraryMode !== 'digital') return;
+    const trackId = e.detail?.trackId || '';
+    if (!trackId) return;
+    openPlaylistPicker(trackId);
+  });
+
+  window.addEventListener('rolfsound-playlist-deleted', async () => {
+    closeFolder();
+    await loadData();
+  });
+
+  window.addEventListener('rolfsound-playlist-created', async () => {
+    await loadData();
+  });
+
+  window.addEventListener('rolfsound-playlist-play', async (e) => {
+    const playlistId = Number(e.detail?.playlistId || 0);
+    if (!playlistId) return;
+    await playPlaylist(playlistId);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeFolder();
+      closePlaylistPicker();
+    }
+  });
+
   if (container && container.classList.contains('active')) {
-    loadTracks();
+    loadData();
   }
 </script>

@@ -1,4 +1,5 @@
 // static/js/Cursor.js
+import AnimationEngine from '/static/js/AnimationEngine.js';
 
 export default class Cursor {
   constructor() {
@@ -13,41 +14,41 @@ export default class Cursor {
     this.isContextRing = false;
     this.isContextMorphing = false;
     this.currentTarget = null;
-    this.targetRect = null; 
+    this.targetRect = null;
     this.contextMorphTimer = null;
-    
+
+    // Bound refs — stored once so they can be removed in destroy()
+    this._renderBound        = this.render.bind(this);
+    this._onMouseMove        = (e) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.checkHoverState(e); };
+    this._onMouseLeave       = () => this.resetHover();
+    this._onScroll           = () => { if (this.isHovering && this.currentTarget && this.currentTarget.isConnected) { this.targetRect = this.currentTarget.getBoundingClientRect(); } };
+    this._onContextOpen      = (e) => { this.startContextMorph(e.detail?.x, e.detail?.y); };
+    this._onContextClose     = () => this.stopContextMorph();
+    this._rafId              = null;
+
     this.init();
   }
 
   init() {
     if (!this.dot) return;
 
-    window.addEventListener('mousemove', (e) => {
-      this.mouse.x = e.clientX;
-      this.mouse.y = e.clientY;
-      this.checkHoverState(e);
-    });
+    window.addEventListener('mousemove',            this._onMouseMove);
+    document.addEventListener('mouseleave',         this._onMouseLeave);
+    window.addEventListener('scroll',               this._onScroll, { capture: true, passive: true });
+    window.addEventListener('rolfsound-context-open',  this._onContextOpen);
+    window.addEventListener('rolfsound-context-close', this._onContextClose);
 
-    // Cursor sai da janela do browser → força reset para não ficar travado
-    document.addEventListener('mouseleave', () => this.resetHover());
+    this._rafId = requestAnimationFrame(this._renderBound);
+  }
 
-    window.addEventListener('scroll', () => {
-      if (this.isHovering && this.currentTarget && this.currentTarget.isConnected) {
-        this.targetRect = this.currentTarget.getBoundingClientRect();
-      }
-    }, { capture: true, passive: true });
-
-    window.addEventListener('rolfsound-context-open', (e) => {
-      const x = e.detail?.x;
-      const y = e.detail?.y;
-      this.startContextMorph(x, y);
-    });
-
-    window.addEventListener('rolfsound-context-close', () => {
-      this.stopContextMorph();
-    });
-
-    this.render();
+  destroy() {
+    window.removeEventListener('mousemove',            this._onMouseMove);
+    document.removeEventListener('mouseleave',         this._onMouseLeave);
+    window.removeEventListener('scroll',               this._onScroll, { capture: true });
+    window.removeEventListener('rolfsound-context-open',  this._onContextOpen);
+    window.removeEventListener('rolfsound-context-close', this._onContextClose);
+    if (this._rafId !== null) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    AnimationEngine.clearScheduled(this, 'contextMorphTimer');
   }
 
   // ─── FUNÇÃO NOVA: Limpa o estado do cursor com segurança ───
@@ -134,7 +135,7 @@ export default class Cursor {
     }
 
     if (this.contextMorphTimer) {
-      clearTimeout(this.contextMorphTimer);
+      AnimationEngine.clearScheduled(this, 'contextMorphTimer');
       this.contextMorphTimer = null;
     }
 
@@ -144,20 +145,18 @@ export default class Cursor {
     this.isContextMorphing = true;
     this.dot.classList.add('context-morphing');
 
-    this.contextMorphTimer = setTimeout(() => {
+    AnimationEngine.schedule(this, () => {
       this.dot.classList.remove('context-morphing');
       this.isContextMorphing = false;
       this.contextMorphTimer = null;
-    }, 220);
+    }, 220, 'contextMorphTimer');
   }
 
   stopContextMorph() {
     if (!this.dot) return;
 
-    if (this.contextMorphTimer) {
-      clearTimeout(this.contextMorphTimer);
-      this.contextMorphTimer = null;
-    }
+    AnimationEngine.clearScheduled(this, 'contextMorphTimer');
+    this.contextMorphTimer = null;
 
     this.isContextMorphing = false;
     this.dot.classList.remove('context-morphing');
@@ -209,7 +208,7 @@ export default class Cursor {
 
     // Usando translate3d força a renderização via Hardware (GPU)
     this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0)`;
-    
-    requestAnimationFrame(this.render.bind(this));
+
+    this._rafId = requestAnimationFrame(this._renderBound);
   }
 }

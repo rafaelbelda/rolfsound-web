@@ -58,11 +58,54 @@ export default class ReactiveBackdropController {
       contrast: null
     };
 
+    // ── Ambient breathing loop ──
+    // Simula reatividade ao áudio (grave/médio/agudo) sem acesso ao stream
+    // (reprodução é server-side via sounddevice). Roda só durante playback.
+    this._ambientRafId = null;
+    this._ambientStart = 0;
+    this._ambientBound = this._ambientTick.bind(this); // bound once — zero GC per frame
+
     this._ensureLayers();
+    this._readGradientConfig();
     this._applyNeutral(/* instant */ true);
   }
 
   // ─── API pública ─────────────────────────────────────────────────────────
+
+  /**
+   * Lê os CSS vars de geometria do backdrop e os armazena em `this._gc`.
+   * Chamado no constructor e ao chamar `refreshGradientConfig()`.
+   * Leitura única (não por frame) — custo de `getComputedStyle` é irrelevante aqui.
+   */
+  _readGradientConfig() {
+    const s   = getComputedStyle(document.documentElement);
+    const str = (v, d) => s.getPropertyValue(v).trim() || d;
+    const num = (v, d) => { const p = parseFloat(s.getPropertyValue(v)); return isFinite(p) ? p : d; };
+
+    this._gc = {
+      baseShape:         str('--rs-backdrop-base-shape',         '130% 100%'),
+      basePos:           str('--rs-backdrop-base-pos',           '50% 60%'),
+      baseOpMid:         num('--rs-backdrop-base-op-mid',        0.5),
+      baseOpEdge:        num('--rs-backdrop-base-op-edge',       0.95),
+      accentShape:       str('--rs-backdrop-accent-shape',       '80% 55%'),
+      accentPos:         str('--rs-backdrop-accent-pos',         '25% 8%'),
+      accentOpPeak:      num('--rs-backdrop-accent-op-peak',     0.55),
+      accentOpFade:      num('--rs-backdrop-accent-op-fade',     0.15),
+      contrastShape:     str('--rs-backdrop-contrast-shape',     '70% 50%'),
+      contrastPos:       str('--rs-backdrop-contrast-pos',       '78% 95%'),
+      contrastOpPeak:    num('--rs-backdrop-contrast-op-peak',   0.45),
+      contrastOpFade:    num('--rs-backdrop-contrast-op-fade',   0.12),
+    };
+  }
+
+  /**
+   * Re-reads CSS gradient geometry vars.
+   * Call this if you override the `--rs-backdrop-*` vars at runtime and want
+   * the new values to take effect immediately on the next rendered frame.
+   */
+  refreshGradientConfig() {
+    this._readGradientConfig();
+  }
 
   /**
    * Aplica uma paleta normalizada ao fundo.
@@ -87,6 +130,7 @@ export default class ReactiveBackdropController {
     // Interpola cada canal RGB frame-a-frame → cross-fade real de gradiente
     this._startColorTransition(targetRgb, this._transitionMs);
     this._animateIntensityTo(1, this._intensityOnMs);
+    this._startAmbientLoop();
   }
 
   /**
@@ -95,12 +139,71 @@ export default class ReactiveBackdropController {
    */
   applyNeutral(instant = false) {
     this._currentKey = null;
+    this._stopAmbientLoop();
     this._applyNeutral(instant);
+  }
+
+  // ─── Ambient breathing loop ─────────────────────────────────────────────
+  //
+  // Como o áudio é reproduzido pelo backend (sounddevice/PortAudio), o browser
+  // não tem acesso ao stream para análise real. Em vez disso, usamos ondas seno
+  // em frequências incomensurabilizadas (nenhum par tem razão racional simples)
+  // para gerar padrões que nunca se repetem exatamente — simula grave/médio/agudo.
+  //
+  // Frequências:   0.41 Hz  ≈ sub-grave (peso lento)
+  //                0.73 Hz  ≈ grave      (batida orgânica)
+  //                1.97 Hz  ≈ médio      (presença)
+  //                5.13 Hz  ≈ agudo      (brilho sutil)
+  //
+  // Amplitudes máximas: accent ±7%, contrast ±5.5%  →  variação perceptível mas sutil.
+  // Accent e contrast têm fases distintas — criam contramovimento de profundidade.
+  //
+  // Tecnicamente: filter:brightness() por RAF (GPU compositor), sem layout recalc.
+
+  _startAmbientLoop() {
+    if (this._ambientRafId) return;           // já rodando (track change não reinicia)
+    this._ambientStart = performance.now();
+    this._ambientRafId = requestAnimationFrame(this._ambientBound);
+  }
+
+  _stopAmbientLoop() {
+    if (this._ambientRafId) {
+      cancelAnimationFrame(this._ambientRafId);
+      this._ambientRafId = null;
+    }
+    // Limpa o filtro residual para não travar num brightness != 1
+    if (this._layers.accent)   this._layers.accent.style.filter   = '';
+    if (this._layers.contrast) this._layers.contrast.style.filter = '';
+  }
+
+  _ambientTick(ts) {
+    this._ambientRafId = requestAnimationFrame(this._ambientBound);
+    const t = (ts - this._ambientStart) * 0.001; // ms → segundos
+
+    // Constantes pré-calculadas: 2π × frequência
+    //   2π×0.41  ≈ 2.576   2π×1.97  ≈ 12.38
+    //   2π×0.73  ≈ 4.587   2π×5.13  ≈ 32.23
+
+    // Camada accent — quente, guiada pelo sub-grave
+    const bassA = Math.sin(t * 2.576)  * 0.045;  // sub-grave: ±4.5%
+    const midA  = Math.sin(t * 12.38)  * 0.018;  // médio:     ±1.8%
+    const hiA   = Math.sin(t * 32.23)  * 0.007;  // agudo:     ±0.7%
+
+    // Camada contrast — fora de fase, cria contramovimento
+    const bassC = Math.sin(t * 4.587)          * 0.038;  // grave:  ±3.8%  (freq diferente)
+    const midC  = Math.sin(t * 12.38 + 1.99)   * 0.017;  // médio: ±1.7%  (fase deslocada)
+
+    const bAccent   = (1 + bassA + midA + hiA).toFixed(3);
+    const bContrast = (1 + bassC + midC).toFixed(3);
+
+    if (this._layers.accent)   this._layers.accent.style.filter   = `brightness(${bAccent})`;
+    if (this._layers.contrast) this._layers.contrast.style.filter = `brightness(${bContrast})`;
   }
 
   destroy() {
     this._cancelColorRaf();
     this._cancelIntensityRaf();
+    this._stopAmbientLoop();
 
     Object.values(this._layers).forEach(el => el?.remove());
     this._layers = { base: null, accent: null, contrast: null };
@@ -114,7 +217,7 @@ export default class ReactiveBackdropController {
 
   _ensureLayers() {
     // Insere atrás de tudo mas na frente de <body> — usa #rs-bg-* IDs para idempotência
-    const insert = (id, zIndex, extra = '') => {
+    const insert = (id, zIndex, willChange = 'opacity') => {
       let el = document.getElementById(id);
       if (!el) {
         el = document.createElement('div');
@@ -126,18 +229,17 @@ export default class ReactiveBackdropController {
           pointer-events: none;
           z-index: ${zIndex};
           opacity: 0;
-          will-change: opacity;
+          will-change: ${willChange};
         `;
         document.body.insertBefore(el, document.body.firstChild);
       }
       return el;
     };
 
-    // Ordem: base (mais atrás), depois accent, depois contrast (mais à frente das camadas de cor)
-    // z-index 1 fica atrás das view-layers (z 50) e bg-layer original
-    this._layers.base     = insert('rs-bg-base',     1);
-    this._layers.accent   = insert('rs-bg-accent',   2);
-    this._layers.contrast = insert('rs-bg-contrast', 3);
+    // Accent + contrast layers animam filter:brightness() a cada frame — promove a filter
+    this._layers.base     = insert('rs-bg-base',     1, 'opacity');
+    this._layers.accent   = insert('rs-bg-accent',   2, 'opacity, filter');
+    this._layers.contrast = insert('rs-bg-contrast', 3, 'opacity, filter');
   }
 
   // Reconstrói os gradientes com os valores RGB atualmente interpolados.
@@ -147,31 +249,32 @@ export default class ReactiveBackdropController {
     const a = ReactiveBackdropController._fmtRgb(this._renderedRgb.accent);
     const c = ReactiveBackdropController._fmtRgb(this._renderedRgb.contrast);
     const { base: lBase, accent: lAccent, contrast: lContrast } = this._layers;
+    const g = this._gc;
 
     if (lBase) {
       lBase.style.background = `
-        radial-gradient(ellipse 130% 100% at 50% 60%,
+        radial-gradient(ellipse ${g.baseShape} at ${g.basePos},
           rgb(${b}) 0%,
           rgb(${b}) 30%,
-          rgba(${b} / 0.5) 65%,
-          rgba(5 5 5 / 0.95) 100%
+          rgba(${b} / ${g.baseOpMid}) 65%,
+          rgba(5 5 5 / ${g.baseOpEdge}) 100%
         )
       `;
     }
     if (lAccent) {
       lAccent.style.background = `
-        radial-gradient(ellipse 80% 55% at 25% 8%,
-          rgba(${a} / 0.55) 0%,
-          rgba(${a} / 0.15) 50%,
+        radial-gradient(ellipse ${g.accentShape} at ${g.accentPos},
+          rgba(${a} / ${g.accentOpPeak}) 0%,
+          rgba(${a} / ${g.accentOpFade}) 50%,
           transparent 100%
         )
       `;
     }
     if (lContrast) {
       lContrast.style.background = `
-        radial-gradient(ellipse 70% 50% at 78% 95%,
-          rgba(${c} / 0.45) 0%,
-          rgba(${c} / 0.12) 50%,
+        radial-gradient(ellipse ${g.contrastShape} at ${g.contrastPos},
+          rgba(${c} / ${g.contrastOpPeak}) 0%,
+          rgba(${c} / ${g.contrastOpFade}) 50%,
           transparent 100%
         )
       `;

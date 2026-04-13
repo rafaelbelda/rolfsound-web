@@ -25,7 +25,7 @@ from youtube.search import close_client as close_search_client
 from utils import core_client
 from utils.monitor_accumulator import get_accumulator
 
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,7 @@ def create_app() -> FastAPI:
     app.include_router(monitor.router,    prefix="/api")
     app.include_router(recordings.router, prefix="/api")
     app.include_router(discogs.router,    prefix="/api")
+    app.include_router(playlists.router,  prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)
@@ -257,19 +258,17 @@ def create_app() -> FastAPI:
     @app.get("/{full_path:path}", response_class=HTMLResponse)
     async def serve_dashboard(request: Request, full_path: str): 
         path = full_path.strip("/")
-        
+
         # ─── ROTEAMENTO DA SPA (APP SHELL) ───
-        # Se o usuário acessar a Home (""), a Library ou as Configurações, 
-        # nós sempre devolvemos a "Casca" (index.html).
-        if path in ["", "library", "vinyl-library", "settings"]:
-            return templates.TemplateResponse(request=request, name="index.html")
-        # ─── FALLBACK PARA OUTRAS PÁGINAS ───
+        # Qualquer path que não seja um arquivo real existente é tratado como rota
+        # da SPA e devolve sempre o index.html, deixando o roteamento client-side
+        # (history API) cuidar da UI. Isso evita 404 em hard-refresh de qualquer view.
         filename = f"{path}.html"
         filepath = DASHBOARD_DIR / filename
-        
+
         if filepath.exists():
             return HTMLResponse(content=filepath.read_text(encoding="utf-8"))
-            
-        return HTMLResponse(content=f"<h1>404 - Página '{filename}' não encontrada</h1>", status_code=404)
+
+        return templates.TemplateResponse(request=request, name="index.html")
 
     return app 

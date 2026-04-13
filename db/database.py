@@ -87,6 +87,20 @@ def _create_tables(conn):
             year            INTEGER,
             date_added      TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS playlists (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            created_at  INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+            playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+            track_id    TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            position    INTEGER NOT NULL DEFAULT 0,
+            added_at    INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, track_id)
+        );
     """)
 
 
@@ -283,3 +297,74 @@ def delete_discogs_release(conn, release_id: int) -> None:
 
 def clear_discogs_collection(conn) -> None:
     conn.execute("DELETE FROM discogs_collection")
+
+
+# ── Playlists ───────────────────────────────────────────────────────────────
+
+def list_playlists(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT p.id, p.name, p.created_at, COUNT(pt.track_id) AS track_count
+        FROM playlists p
+        LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_playlist(conn, playlist_id: int):
+    row = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_playlist(conn, name: str) -> int:
+    import time
+
+    cursor = conn.execute(
+        "INSERT INTO playlists (name, created_at) VALUES (?, ?)",
+        (name.strip(), int(time.time()))
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def delete_playlist(conn, playlist_id: int) -> None:
+    conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+    conn.commit()
+
+
+def add_track_to_playlist(conn, playlist_id: int, track_id: str) -> None:
+    import time
+
+    row = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) AS max_position FROM playlist_tracks WHERE playlist_id = ?",
+        (playlist_id,)
+    ).fetchone()
+    next_position = (row["max_position"] + 1) if row else 0
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position, added_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (playlist_id, track_id, next_position, int(time.time()))
+    )
+    conn.commit()
+
+
+def remove_track_from_playlist(conn, playlist_id: int, track_id: str) -> None:
+    conn.execute(
+        "DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
+        (playlist_id, track_id)
+    )
+    conn.commit()
+
+
+def get_playlist_tracks(conn, playlist_id: int) -> list[dict]:
+    rows = conn.execute("""
+        SELECT t.*, pt.position, pt.added_at
+        FROM playlist_tracks pt
+        JOIN tracks t ON t.id = pt.track_id
+        WHERE pt.playlist_id = ?
+        ORDER BY pt.position ASC, pt.added_at ASC
+    """, (playlist_id,)).fetchall()
+    return [dict(r) for r in rows]

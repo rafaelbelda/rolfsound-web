@@ -155,7 +155,7 @@ export default class ContextMenuController {
     _buildContext(sourceTarget) {
         const selectedText = (window.getSelection?.().toString() || '').trim();
         const activeView = this._island?.getAttribute('active-tab') || 'library';
-        const cardElement = sourceTarget?.closest?.('.track-card') || null;
+        const cardElement = sourceTarget?.closest?.('.track-card, .playlist-card') || null;
 
         return {
             activeView,

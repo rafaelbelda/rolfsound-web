@@ -36,6 +36,7 @@
     import Cursor from '/static/js/Cursor.js';
     import SearchController from '/static/js/SearchController.js';
     import ContextMenuController from '/static/js/ContextMenuController.js';
+    import PlaylistController from '/static/js/PlaylistController.js';
 
     const meuCursor = new Cursor();
     window.meuCursor = meuCursor;
@@ -174,6 +175,8 @@
       onNavigate: navigateTo
     });
 
+    window.playlistController = new PlaylistController();
+
     // Sistema de tema reativo — ambient lighting com as cores do álbum em reprodução
     import('/static/js/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {
       window.nowPlayingThemeController = new NowPlayingThemeController();
@@ -182,12 +185,15 @@
     window.addEventListener('popstate', () => {
         const view = window.location.pathname.replace('/', '') || 'library';
         if (view === 'playback') {
-            // Playback triggered via popstate
             island.setAttribute('active-tab', 'playback');
             Object.values(views).forEach(v => v.classList.remove('active'));
         } else {
             activateView(view);
         }
+        // Let island and PlaybackMitosisManager react via the same event channel
+        island.dispatchEvent(new CustomEvent('rolfsound-navigate', {
+            bubbles: true, composed: true, detail: { view }
+        }));
     });
   </script>
 </body>

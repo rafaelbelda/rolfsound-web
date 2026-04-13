@@ -4,6 +4,8 @@
 
 import AnimationEngine from '/static/js/AnimationEngine.js';
 import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
+import Animator from '/static/js/Animator.js';
+import { DivisionAnimator } from '/static/js/DivisionAnimator.js';
 
 // ─── Dimensões do layout ───────────────────────────────────────────────────
 const PLAYER_W   = 340;   // largura da capa e da pílula de controles (px)
@@ -18,7 +20,9 @@ class PlaybackMitosisManager {
     this.island = null;
     this.isMorphed = false;
     this.playerContainer = null;
-    this.divisionMembrane = null;
+    this._division = null;
+    this.isQueueOpen = false;
+    this.queueContainer = null;
 
     // ─── Estado Único (Source of Truth) ───
     this.state = {
@@ -46,6 +50,12 @@ class PlaybackMitosisManager {
     // ─── Thumbnail crossfade state ───
     this._thumbCurrentEl = null;  // <img> atualmente visível
     this._thumbPendingEl = null;  // <img> sendo carregado (cancelável)
+
+    // ─── WAAPI Animator (interruptible GPU-composited animations) ───
+    this._animator = new Animator();
+
+    // ─── Theme dispatch dedup ───
+    this._lastThemeKey = null;
 
     // ─── RAF Loop ───
     this.rafId = null;
@@ -95,15 +105,13 @@ class PlaybackMitosisManager {
     AnimationEngine.registerKeyframes('cellular', `
       #playback-player-container {
         position: fixed !important;
-        left: 50%;
-        transform: translateX(-50%);
         z-index: 996;
         overflow: hidden;
         display: flex;
         justify-content: center;
         align-items: flex-start;
         backface-visibility: hidden;
-        will-change: width, height, top, opacity;
+        will-change: transform, clip-path, opacity;
       }
     `);
   }
@@ -133,108 +141,6 @@ class PlaybackMitosisManager {
     return this.island?.shadowRoot?.getElementById('bar-container') || null;
   }
 
-  _setDivisionShellState(container, active) {
-    const target = container || this.playerContainer;
-
-    if (this.island) {
-      if (active) {
-        this.island.setAttribute('division-shell', 'true');
-      } else {
-        this.island.removeAttribute('division-shell');
-      }
-    }
-
-    if (!target) return;
-
-    if (active) {
-      target.style.setProperty('--division-shell-fill', 'transparent');
-      target.style.setProperty('--division-shell-border-color', 'transparent');
-      target.style.setProperty('--division-shell-shadow', 'none');
-      return;
-    }
-
-    target.style.removeProperty('--division-shell-fill');
-    target.style.removeProperty('--division-shell-border-color');
-    target.style.removeProperty('--division-shell-shadow');
-  }
-
-  _beginDivisionMembrane(container, options = {}) {
-    const islandBar = this._getIslandBarContainer();
-    if (!islandBar || !container) return;
-
-    this._clearDivisionMembrane(container);
-
-    const islandStyle = getComputedStyle(islandBar);
-    this._setDivisionShellState(container, true);
-
-    this.divisionMembrane = AnimationEngine.createDivisionMembrane({
-      topElement: islandBar,
-      bottomElement: container,
-      bridgeElement: options.bridgeElement || null,
-      fillColor: islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
-      strokeColor: islandStyle.borderTopColor || 'rgba(255, 255, 255, 0.06)',
-      zIndex: 995
-    });
-
-    if (!this.divisionMembrane) {
-      this._setDivisionShellState(container, false);
-      return;
-    }
-
-    if (options.mode === 'split') {
-      this.divisionMembrane.setSplit({ bottomElement: container });
-      return;
-    }
-
-    this.divisionMembrane.setConnected({
-      bottomElement: container,
-      bridgeElement: options.bridgeElement || null,
-      neckWidth: options.neckWidth,
-      neckWidthProvider: options.neckWidthProvider
-    });
-  }
-
-  _setDivisionMembraneMode(mode, options = {}) {
-    if (!this.divisionMembrane) return;
-
-    if (mode === 'split') {
-      this.divisionMembrane.setSplit({
-        bottomElement: options.container || this.playerContainer
-      });
-      return;
-    }
-
-    this.divisionMembrane.setConnected({
-      bottomElement: options.container || this.playerContainer,
-      bridgeElement: options.bridgeElement || null,
-      neckWidth: options.neckWidth,
-      neckWidthProvider: options.neckWidthProvider
-    });
-  }
-
-  _endDivisionMembrane(container, fadeMs = 120) {
-    const membrane = this.divisionMembrane;
-    this.divisionMembrane = null;
-
-    if (!membrane) {
-      this._setDivisionShellState(container, false);
-      return;
-    }
-
-    membrane.fadeOut(fadeMs, () => {
-      this._setDivisionShellState(container, false);
-    });
-  }
-
-  _clearDivisionMembrane(container = this.playerContainer) {
-    if (this.divisionMembrane) {
-      this.divisionMembrane.remove();
-      this.divisionMembrane = null;
-    }
-
-    this._setDivisionShellState(container, false);
-  }
-
   findIsland() {
     this.island = document.querySelector('rolfsound-island');
     if (!this.island) {
@@ -245,13 +151,38 @@ class PlaybackMitosisManager {
   attachNavigationListener() {
     if (!this.island) return;
 
-    this.island.addEventListener('rolfsound-navigate', (e) => {
+    this._onNavigate = (e) => {
       if (e.detail.view === 'playback') {
         this.morph();
       } else {
         this.unmorph();
       }
-    });
+    };
+    this.island.addEventListener('rolfsound-navigate', this._onNavigate);
+
+    // ── Sync player open/close state with browser back/forward navigation ──
+    this._onPopState = (e) => {
+      const isPlayback = window.location.pathname === '/playback';
+      if (isPlayback && !this.isMorphed) {
+        this.morph();
+      } else if (!isPlayback && this.isMorphed) {
+        this.unmorph();
+      }
+    };
+    window.addEventListener('popstate', this._onPopState);
+
+    // ── Restore player on hard-refresh at /playback ──
+    // customElements.whenDefined resolves almost immediately (rolfsound-island is
+    // defined by the module script that runs before playback-mitosis.js). We add
+    // a one-frame delay so the island shadow DOM finishes its first render and
+    // index.html has set active-tab="playback" before the morph animation starts.
+    if (window.location.pathname === '/playback') {
+      customElements.whenDefined('rolfsound-island').then(() => {
+        AnimationEngine.schedule(this, () => {
+          if (!this.isMorphed) this.morph();
+        }, 80, 'animationTimers');
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -272,134 +203,97 @@ class PlaybackMitosisManager {
     if (this.isMorphed) return;
     this.isMorphed = true;
     this.clearAnimationTimers();
-    this._clearDivisionMembrane();
+    this._animator.cancelAll();
+    if (this._division) { this._division.abort(); this._division = null; }
 
-    const playerHTML = this.buildPlayerHTML();
-    const metrics    = this.getMitosisMetrics();
-    const islandBottom = metrics.originTop + metrics.originHeight;
-    const OVERLAP      = PlaybackMitosisManager.BUDDING_OVERLAP;
-    const BUD_H        = PlaybackMitosisManager.BUD_HEIGHT;
-    const PINCH_GAP    = PlaybackMitosisManager.PINCH_GAP;
-    const BRIDGE_W     = PlaybackMitosisManager.BRIDGE_PINCH_W;
+    // ── Update URL without adding a duplicate entry ──
+    if (window.location.pathname !== '/playback') {
+      window.history.pushState({ rolfsound: 'playback' }, '', '/playback');
+    }
 
-    return AnimationEngine.runMitosisStrategy('playback-division-open', {
-      island: this.island,
-      owner: this
-    }, {
-      staleIds: ['playback-player-container', 'mitosis-bridge'],
-      preImpactOptions: {
+    // ── Clean stale elements ──
+    ['playback-player-container', 'mitosis-bridge'].forEach(id => {
+      const stale = document.getElementById(id);
+      if (stale) stale.remove();
+    });
+
+    const metrics  = this.getMitosisMetrics();
+    const islandBar = this._getIslandBarContainer();
+    if (!islandBar) return;
+
+    // ── Pre-impact on island ──
+    if (this.island?.respondToImpact) {
+      this.island.respondToImpact({
         sourceVector: { x: 0, y: 1 },
         strength: 0.88,
         duration: 480
-      },
-      createContainer: {
-        containerId: 'playback-player-container',
-        containerHTML: playerHTML,
-        initialStyle: `
-      position: fixed;
-      top: ${islandBottom - OVERLAP}px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: ${metrics.originWidth}px;
-      height: 0px;
-      border-radius: 0 0 var(--radius-dynamic-island) var(--radius-dynamic-island);
-      background: var(--division-shell-fill, var(--color-playback-shell));
-      border: 1px solid var(--division-shell-border-color, var(--color-border-subtle));
-      border-top: none;
-      box-shadow: var(--division-shell-shadow, none);
-      z-index: 996;
-      overflow: hidden;
-      pointer-events: none;
-      opacity: 1;
-      will-change: width, height, top, border-radius;
-      transition: height 0.36s var(--ease-emphasized);
-    `
-      },
-      createBridge: {
-        containerId: 'mitosis-bridge',
-        initialStyle: `
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      width: ${metrics.originWidth - 2}px;
-      top: ${islandBottom - 1}px;
-      height: 2px;
-      background: transparent;
-      z-index: 996;
-      border-radius: 0;
-      pointer-events: none;
-      opacity: 0;
-      will-change: width, border-radius, opacity;
-      transition:
-        width 0.32s var(--ease-standard),
-        height 0.3s var(--ease-standard),
-        border-radius 0.28s ease,
-        opacity 0.14s ease;
-    `
-      },
-      isActive: (container) => container === this.playerContainer,
-      onCreated: ({ container, bridge }) => {
-        this.playerContainer = container;
-        this._beginDivisionMembrane(container, {
-          mode: 'connected',
-          bridgeElement: bridge
-        });
-        // Pré-carrega o thumbnail antes de cacheDomElements — evita flash de "Nothing playing"
-        this._prefillPlayerContent(container);
-      },
-      onBud: ({ container }) => {
-        container.style.height = `${BUD_H + OVERLAP}px`;
-      },
-      onPinch: ({ container, bridge }) => {
-        container.style.transition = `
-        top 0.38s var(--ease-standard),
-        height 0.38s var(--ease-standard),
-        width 0.52s var(--ease-standard),
-        border-radius 0.34s cubic-bezier(0.25, 1, 0.5, 1),
-        border-top 0.1s ease,
-        box-shadow 0.3s ease
-      `;
-      container.style.top    = `${islandBottom + PINCH_GAP}px`;
-      container.style.height = `${BUD_H}px`;
-      container.style.borderRadius = 'var(--radius-dynamic-island)';
-      container.style.borderTop   = '1px solid var(--division-shell-border-color, var(--color-border-subtle))';
-      container.style.boxShadow   = 'var(--division-shell-shadow, var(--shadow-elevated))';
+      });
+    }
 
-      bridge.style.height       = `${PINCH_GAP + 2}px`;
-      bridge.style.width        = `${BRIDGE_W}px`;
-      bridge.style.borderRadius = `${BRIDGE_W / 2}px`;
+    // ── Create child element (content ready before animation) ──
+    const child = document.createElement('div');
+    child.id = 'playback-player-container';
+    child.innerHTML = this.buildPlayerHTML();
+    child.style.cssText = `
+      background: var(--color-playback-shell);
+      border: 1px solid var(--color-border-subtle);
+      border-top: none;
+      box-shadow: none;
+      will-change: transform, clip-path, opacity;
+      border-radius: 0 0 var(--radius-dynamic-island) var(--radius-dynamic-island);
+    `;
+    this.playerContainer = child;
+    this._prefillPlayerContent(child);
+
+    // ── Membrane style from island computed style ──
+    const islandStyle = getComputedStyle(islandBar);
+
+    // ── Create DivisionAnimator and run divide() ──
+    this._division = new DivisionAnimator({
+      parent:      islandBar,
+      child:       child,
+      shellTarget: this.island,
+      target: {
+        top:    metrics.targetTop,
+        width:  PLAYER_W,
+        height: TOTAL_H,
       },
-      onBridgeFade: ({ bridge }) => {
-        if (!bridge) return;
-        bridge.style.opacity = '0';
-        bridge.style.width = '0px';
+      budSize:       PlaybackMitosisManager.BUD_HEIGHT,
+      budOverlap:    PlaybackMitosisManager.BUDDING_OVERLAP,
+      budDuration:   360,
+      pinchGap:      PlaybackMitosisManager.PINCH_GAP,
+      pinchWidth:    PlaybackMitosisManager.BRIDGE_PINCH_W,
+      pinchDuration: 380,
+      splitDuration: 580,
+      owner: this,
+      membraneOptions: {
+        fillColor:   islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
+        strokeColor: islandStyle.borderTopColor  || 'rgba(255, 255, 255, 0.06)',
+        zIndex: 995,
       },
-      onGrow: ({ container, bridge }) => {
-        this._setDivisionMembraneMode('split', { container });
-        if (bridge && bridge.parentNode) bridge.remove();
-        container.style.transition = `
-        width 0.58s var(--ease-standard),
-        height 0.58s var(--ease-standard),
-        top 0.58s var(--ease-standard),
-        border-radius 0.46s cubic-bezier(0.25, 1, 0.5, 1)
-      `;
-      container.style.width  = `${PLAYER_W}px`;
-      container.style.height = `${TOTAL_H}px`;
-      container.style.top    = `${metrics.targetTop}px`;
+      onPhase: (phase, ctx) => {
+        if (phase === 'bud') {
+          // Shell vars → transparent while membrane draws the outline
+          ctx.child.style.setProperty('--division-shell-fill', 'transparent');
+          ctx.child.style.setProperty('--division-shell-border-color', 'transparent');
+          ctx.child.style.setProperty('--division-shell-shadow', 'none');
+        }
+        if (phase === 'pinch') {
+          ctx.child.style.borderTop = '1px solid var(--color-border-subtle)';
+          ctx.child.style.boxShadow = 'var(--shadow-elevated)';
+        }
+        if (phase === 'split') {
+          this._revealPlayerStage(ctx.child);
+        }
       },
-      onReveal: (container) => {
-        this._endDivisionMembrane(container);
-        this._revealPlayerStage(container);
-      },
-      onSettled: (container) => {
+      onSettled: ({ child: container }) => {
         this._settlePlayer(container);
       },
-      onCursorReset: () => {
-        if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
-          window.meuCursor.resetHover();
-        }
-      }
     });
+
+    this._division.divide();
+
+    if (window.meuCursor?.resetHover) window.meuCursor.resetHover();
   }
 
   /** Finaliza a expansão: revela conteúdo e remove casca visual */
@@ -429,9 +323,9 @@ class PlaybackMitosisManager {
   /** Finaliza a expansão: libera interação e garante estado final */
   _settlePlayer(container) {
     if (!container || !container.parentNode || container !== this.playerContainer) return;
-    container.style.transition   = 'none';
-    container.style.overflow     = 'visible';
-    container.style.pointerEvents = 'auto';
+
+    // DivisionAnimator already called releaseAll + cleared clipPath/transform.
+    // We clean up playback-specific visuals here.
     container.style.background   = 'transparent';
     container.style.border       = 'none';
     container.style.boxShadow    = 'none';
@@ -460,6 +354,23 @@ class PlaybackMitosisManager {
     this.isMorphed = false;
     this.stopRafLoop();
     this.clearAnimationTimers();
+    this._animator.cancelAll();
+
+    // ── Restore URL — use replaceState so closing the player doesn't add a
+    //    history entry (next Back press goes to the page before playback) ──
+    if (window.location.pathname === '/playback') {
+      window.history.replaceState({ rolfsound: 'library' }, '', '/library');
+    }
+
+    // ── If queue panel is open, destroy it instantly ──
+    if (this.isQueueOpen) {
+      AnimationEngine.clearScheduled(this, '_queueTimers');
+      if (this.queueContainer && this.queueContainer.parentNode) {
+        this.queueContainer.remove();
+      }
+      this.queueContainer = null;
+      this.isQueueOpen    = false;
+    }
 
     const container = this.playerContainer;
     if (!container) {
@@ -467,116 +378,92 @@ class PlaybackMitosisManager {
       return;
     }
 
-    const metrics      = this.getMitosisMetrics();
-    const islandBottom = metrics.originTop + metrics.originHeight;
-    const OVERLAP      = PlaybackMitosisManager.BUDDING_OVERLAP;
+    // ── Hide player content before absorb ──
+    const cover    = container.querySelector('#playback-cover-shell');
+    const controls = container.querySelector('#playback-controls-shell');
+    if (controls) {
+      controls.style.opacity   = '0';
+      controls.style.transform = `translateY(-${CONTROLS_H + GAP}px) scale(0.94)`;
+    }
+    if (cover) {
+      cover.style.opacity   = '0';
+      cover.style.transform = 'translateY(10px) scale(0.985)';
+    }
 
-    return AnimationEngine.runMitosisStrategy('playback-division-close', {
-      island: this.island,
-      owner: this
-    }, {
-      container,
-      isActive: (node) => node === this.playerContainer,
-      onMissing: () => {
-        this._clearDivisionMembrane();
-        this.clearDomReferences();
-      },
-      onStart: (activeContainer) => {
-        this._beginDivisionMembrane(activeContainer, {
-          mode: 'split'
-        });
+    // ── Re-apply shell appearance for the shrink animation ──
+    container.style.background = 'var(--color-playback-shell)';
+    container.style.border     = '1px solid var(--color-border-subtle)';
+    container.style.boxShadow  = 'var(--shadow-elevated)';
 
-        const cover = activeContainer.querySelector('#playback-cover-shell');
-        const controls = activeContainer.querySelector('#playback-controls-shell');
+    // ── If no division instance, abort it and create one for the reverse ──
+    if (this._division) {
+      // Division was settled — absorb() will run shrink → absorb → remove
+    } else {
+      // Edge case: morph wasn't driven by DivisionAnimator (e.g. stale state)
+      const islandBar = this._getIslandBarContainer();
+      if (!islandBar) {
+        this._removePlayer(container);
+        return;
+      }
+      const islandStyle = getComputedStyle(islandBar);
+      const metrics = this.getMitosisMetrics();
+      this._division = new DivisionAnimator({
+        parent:      islandBar,
+        child:       container,
+        shellTarget: this.island,
+        target: {
+          top:    metrics.targetTop,
+          width:  PLAYER_W,
+          height: TOTAL_H,
+        },
+        budSize:       PlaybackMitosisManager.BUD_HEIGHT,
+        budOverlap:    PlaybackMitosisManager.BUDDING_OVERLAP,
+        budDuration:   300,
+        pinchGap:      PlaybackMitosisManager.PINCH_GAP,
+        pinchWidth:    PlaybackMitosisManager.BRIDGE_PINCH_W,
+        splitDuration: 460,
+        owner: this,
+        membraneOptions: {
+          fillColor:   islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
+          strokeColor: islandStyle.borderTopColor  || 'rgba(255, 255, 255, 0.06)',
+          zIndex: 995,
+        },
+        onRemoved: () => this._onDivisionRemoved(),
+      });
+      // Force phase to 'settled' so absorb() runs
+      this._division._phase = 'settled';
+    }
 
-        if (controls) {
-          controls.style.opacity = '0';
-          controls.style.transform = `translateY(-${CONTROLS_H + GAP}px) scale(0.94)`;
-        }
+    this._division.absorb().then(() => {
+      this._onDivisionRemoved();
+    });
 
-        if (cover) {
-          cover.style.opacity = '0';
-          cover.style.transform = 'translateY(10px) scale(0.985)';
-        }
-      },
-      onShrink: (activeContainer) => {
-        activeContainer.style.transition = 'none';
-        activeContainer.style.overflow = 'hidden';
-        activeContainer.style.pointerEvents = 'none';
-        activeContainer.style.background = 'var(--division-shell-fill, var(--color-playback-shell))';
-        activeContainer.style.border = '1px solid var(--division-shell-border-color, var(--color-border-subtle))';
-        activeContainer.style.boxShadow = 'var(--division-shell-shadow, var(--shadow-elevated))';
+    if (window.meuCursor?.resetHover) window.meuCursor.resetHover();
+  }
 
-        activeContainer.getBoundingClientRect();
-
-        AnimationEngine.afterFrames(() => {
-          if (!activeContainer.parentNode || activeContainer !== this.playerContainer) return;
-          activeContainer.style.transition = `
-          width 0.46s var(--ease-standard),
-          height 0.46s var(--ease-standard),
-          top 0.46s var(--ease-standard),
-          border-radius 0.38s cubic-bezier(0.25, 1, 0.5, 1)
-        `;
-          activeContainer.style.width = `${metrics.originWidth}px`;
-          activeContainer.style.height = `${metrics.originHeight}px`;
-          activeContainer.style.top = `${islandBottom + 4}px`;
-          activeContainer.style.borderRadius = 'var(--radius-dynamic-island)';
-        });
-      },
-      onAbsorb: (activeContainer) => {
-        this._setDivisionMembraneMode('connected', {
-          container: activeContainer,
-          neckWidthProvider: ({ topRect, bottomRect }) => Math.min(topRect.width, bottomRect.width)
-        });
-
-        activeContainer.style.transition = `
-        height 0.3s var(--ease-standard),
-        top 0.3s var(--ease-standard),
-        border-radius 0.24s ease,
-        border-top 0.08s ease,
-        opacity 0.16s ease 0.14s
-      `;
-        activeContainer.style.top = `${islandBottom - OVERLAP}px`;
-        activeContainer.style.height = '0px';
-        activeContainer.style.borderRadius = '0 0 var(--radius-dynamic-island) var(--radius-dynamic-island)';
-        activeContainer.style.borderTop = 'none';
-        activeContainer.style.opacity = '0';
-      },
-      onCleanup: (activeContainer) => {
-        this._removePlayer(activeContainer, {
-        sourceVector: { x: 0, y: 1 },
+  /** Cleanup after the division child is removed */
+  _onDivisionRemoved() {
+    if (this.island) {
+      AnimationEngine.respondToImpact(this.island, {
+        sourceVector:   { x: 0, y: 1 },
         fallbackVector: { x: 0, y: -1 },
         strength: 1.0,
         maxTravel: 9
-        });
-      },
-      onCursorReset: () => {
-        if (window.meuCursor && typeof window.meuCursor.resetHover === 'function') {
-          window.meuCursor.resetHover();
-        }
-      }
-    });
+      });
+    }
+    this.clearAnimationTimers();
+    this.playerContainer = null;
+    this._division = null;
+    this.clearDomReferences();
   }
 
-  /** Remove o container do player do DOM */
-  _removePlayer(container, impactOptions = null) {
+  /** Remove o container do player do DOM (fallback for edge cases) */
+  _removePlayer(container) {
     this.clearAnimationTimers();
-    this._clearDivisionMembrane(container);
-    if (impactOptions && this.island) {
-      AnimationEngine.respondToImpact(this.island, impactOptions);
-    }
-    const bridge = document.getElementById('mitosis-bridge');
-    if (bridge) {
-      AnimationEngine.destroyMitosis(bridge, { duration: 0, endAnimation: '' });
-    }
-    AnimationEngine.destroyMitosis(container, {
-      duration: 0,
-      endAnimation: '',
-      onComplete: () => {
-        this.playerContainer = null;
-        this.clearDomReferences();
-      }
-    });
+    if (container?.parentNode) container.remove();
+    this.playerContainer = null;
+    this._division = null;
+    this.clearDomReferences();
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -603,7 +490,7 @@ class PlaybackMitosisManager {
           z-index: 1;
           transition:
             opacity 0.24s ease,
-            transform 0.52s cubic-bezier(0.32, 0.72, 0, 1);
+            transform 0.52s var(--ease-standard);
         }
 
         #playback-cover-shell {
@@ -617,7 +504,7 @@ class PlaybackMitosisManager {
           z-index: 2;
           transition:
             opacity 0.24s ease,
-            transform 0.58s cubic-bezier(0.32, 0.72, 0, 1);
+            transform 0.58s var(--ease-standard);
         }
 
         #playback-controls-pill {
@@ -673,11 +560,23 @@ class PlaybackMitosisManager {
           height: 18px;
         }
 
+        /* ── Extended hover zone: captures mouse to the right of the controls pill ── */
+        #playback-controls-shell::after {
+          content: '';
+          position: absolute;
+          left: 100%;
+          top: -10px;
+          width: ${CH + 20}px;
+          height: calc(100% + 20px);
+          background: transparent;
+          pointer-events: auto;
+        }
+
         #btn-queue {
           position: absolute;
           top: 50%;
           left: calc(100% + 4px);
-          transform: translateY(-50%) translateX(-4px) scale(0.6);
+          transform: translateY(-50%) translateX(-8px) scaleX(0.14) scaleY(0.74);
           transform-origin: center left;
           width: ${CH}px;
           height: ${CH}px;
@@ -689,19 +588,28 @@ class PlaybackMitosisManager {
           -webkit-backdrop-filter: blur(var(--blur-playback));
           color: var(--color-text-control);
           box-shadow: var(--shadow-playback-pill);
-          opacity: 0;
+          clip-path: inset(26% 76% 26% 0 round 999px);
           pointer-events: none;
+          z-index: 1; /* Stacks above the ::after hover-zone pseudo-element */
           transition:
-            opacity 0.22s ease,
-            transform 0.45s cubic-bezier(0.34, 1.2, 0.64, 1),
+            clip-path 0.34s var(--ease-emphasized),
+            transform 0.45s var(--ease-spring),
+            border-radius 0.28s var(--ease-snappy),
             color 0.18s ease;
         }
 
         #playback-controls-shell:hover #btn-queue,
         #playback-controls-shell:focus-within #btn-queue {
-          opacity: 1;
           pointer-events: auto;
           transform: translateY(-50%) translateX(0) scale(1);
+          clip-path: inset(0 0 0 0 round var(--radius-dynamic-island));
+        }
+
+        #btn-queue.queue-open {
+          pointer-events: none !important;
+          transform: translateY(-50%) translateX(0) scaleX(0.2) scaleY(0.8) !important;
+          clip-path: inset(30% 80% 30% 0 round 999px) !important;
+          transition: clip-path 0.18s ease, transform 0.18s ease !important;
         }
 
         #btn-queue svg {
@@ -709,6 +617,45 @@ class PlaybackMitosisManager {
           height: 15px;
           stroke-width: 1.9;
           pointer-events: none;
+        }
+
+        /* ── Queue hint label (visible when button is hidden, fades when button appears) ── */
+        #queue-btn-hint {
+          position: absolute;
+          top: 50%;
+          left: calc(100% + 4px);
+          transform: translateY(-50%);
+          width: ${CH}px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 5px;
+          pointer-events: none;
+          opacity: 1;
+          transition: opacity 0.18s ease;
+        }
+
+        #playback-controls-shell:hover #queue-btn-hint,
+        #playback-controls-shell:focus-within #queue-btn-hint {
+          opacity: 0;
+          transition: opacity 0.1s ease;
+        }
+
+        .queue-hint-line-v {
+          display: block;
+          width: 1px;
+          height: 10px;
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .queue-hint-text {
+          font-size: 8px;
+          letter-spacing: 1.8px;
+          text-transform: uppercase;
+          color: var(--color-text-disabled);
+          white-space: nowrap;
+          font-weight: 500;
         }
 
         #queue-count {
@@ -845,9 +792,11 @@ class PlaybackMitosisManager {
                 <div id="progress-fill" style="
                   position: absolute;
                   inset: 0;
-                  width: 0%;
+                  width: 100%;
+                  transform: scaleX(0);
+                  transform-origin: left center;
                   background: var(--color-progress-fill);
-                  transition: width 0.08s linear;
+                  transition: transform 0.08s linear;
                   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
                 "></div>
               </div>
@@ -928,6 +877,11 @@ class PlaybackMitosisManager {
               <path d="M4 18h16"/>
             </svg>
           </button>
+
+          <div id="queue-btn-hint" aria-hidden="true">
+            <span class="queue-hint-line-v"></span>
+            <span class="queue-hint-text">Queue</span>
+          </div>
         </div>
       </div>
     `;
@@ -1022,10 +976,379 @@ class PlaybackMitosisManager {
   handleQueueClick(event) {
     event?.preventDefault();
     event?.stopPropagation();
+    if (this.isQueueOpen) {
+      this.closeQueuePanel();
+    } else {
+      this.openQueuePanel();
+    }
+  }
+
+  openQueuePanel() {
+    if (this.isQueueOpen || !this.playerContainer) return;
+    this.isQueueOpen = true;
+    AnimationEngine.clearScheduled(this, '_queueTimers');
+
+    const btnEl = this.dom.btnQueue;
+    if (!btnEl) { this.isQueueOpen = false; return; }
+
+    // Discard any leftover panel from a mid-close interruption
+    if (this.queueContainer && this.queueContainer.parentNode) {
+      this._animator.releaseAll(this.queueContainer);
+      this.queueContainer.remove();
+    }
+
+    // Capture rects before any DOM mutation
+    const btnRect    = btnEl.getBoundingClientRect();
+    const playerRect = this.playerContainer.getBoundingClientRect();
+
+    // Mark queue as open
+    btnEl.classList.add('queue-open');
+    const hint = this.playerContainer.querySelector('#queue-btn-hint');
+    if (hint) hint.style.opacity = '0';
+
+    // Target geometry: combined block [player | GAP | queue] centered
+    const combinedW        = PLAYER_W + GAP + PLAYER_W;  // 690px
+    const targetPlayerLeft = (window.innerWidth  - combinedW) / 2;
+    const targetQueueLeft  = targetPlayerLeft + PLAYER_W + GAP;
+    const targetTop        = (window.innerHeight - TOTAL_H) / 2;
+
+    // ── Create panel at its FINAL position/size — no CSS transitions ──
+    const panel = document.createElement('div');
+    panel.id = 'queue-panel-container';
+    panel.style.cssText = `
+      position: fixed;
+      left: ${targetQueueLeft}px;
+      top: ${targetTop}px;
+      width: ${PLAYER_W}px;
+      height: ${TOTAL_H}px;
+      border-radius: var(--radius-dynamic-island-expanded);
+      background: var(--color-playback-pill);
+      backdrop-filter: blur(var(--blur-playback));
+      -webkit-backdrop-filter: blur(var(--blur-playback));
+      border: 1px solid var(--color-border-soft);
+      box-shadow: var(--shadow-playback-pill);
+      z-index: 995;
+      overflow: hidden;
+      pointer-events: none;
+      will-change: transform;
+    `;
+    document.body.appendChild(panel);
+    this.queueContainer = panel;
+
+    // ── FLIP: compute inverse transform (button center → panel center) ──
+    const panelCenterX = targetQueueLeft + PLAYER_W / 2;
+    const panelCenterY = targetTop       + TOTAL_H  / 2;
+    const btnCenterX   = btnRect.left + btnRect.width  / 2;
+    const btnCenterY   = btnRect.top  + btnRect.height / 2;
+    const dx     = btnCenterX - panelCenterX;
+    const dy     = btnCenterY - panelCenterY;
+    const scaleX = btnRect.width  / PLAYER_W;
+    const scaleY = btnRect.height / TOTAL_H;
+
+    // ── WAAPI: button position/size → full panel (100% GPU: only transform) ──
+    this._animator.play(panel, [
+      { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})` },
+      { transform: 'none' }
+    ], {
+      duration: 520,
+      easing: 'cubic-bezier(0.2, 0, 0, 1)'  // --ease-emphasized
+    });
+
+    // ── Switch player centering from % to px, slide via WAAPI translateX ──
+    const currentPlayerLeft = playerRect.left;
+    this.playerContainer.style.transition = 'none';
+    this.playerContainer.style.left      = `${currentPlayerLeft}px`;
+    this.playerContainer.style.transform = 'none';
+
+    this._animator.play(this.playerContainer, [
+      { transform: 'none' },
+      { transform: `translateX(${targetPlayerLeft - currentPlayerLeft}px)` }
+    ], {
+      duration: 480,
+      easing: 'cubic-bezier(0.32, 0.72, 0, 1)'  // --ease-standard
+    });
+
+    // ── After animation: commit inline styles, enable interaction, inject content ──
+    AnimationEngine.schedule(this, () => {
+      if (!panel.parentNode || panel !== this.queueContainer) return;
+
+      // Commit player: release fill:forwards and snap to explicit px position
+      this._animator.releaseAll(this.playerContainer);
+      this.playerContainer.style.left      = `${targetPlayerLeft}px`;
+      this.playerContainer.style.transform = 'none';
+
+      // Release panel WAAPI and unlock
+      this._animator.releaseAll(panel);
+      panel.style.willChange    = '';
+      panel.style.pointerEvents = 'auto';
+      panel.style.overflowY    = 'auto';
+      panel.innerHTML = this.buildQueueHTML();
+
+      const closeBtn = panel.querySelector('#btn-queue-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => this.closeQueuePanel());
+      }
+
+      const list = panel.querySelector('#queue-items-list');
+      if (list) {
+        list.addEventListener('click', (e) => {
+          const row = e.target.closest('.q-item');
+          if (!row) return;
+          const idx = parseInt(row.dataset.idx, 10);
+          if (!isNaN(idx)) this.playQueueItem(idx);
+        });
+      }
+
+      this.renderQueuePanel();
+    }, 560, '_queueTimers');
+  }
+
+  closeQueuePanel() {
+    if (!this.isQueueOpen || !this.queueContainer) return;
+    this.isQueueOpen = false;
+    AnimationEngine.clearScheduled(this, '_queueTimers');
+
+    const panel = this.queueContainer;
+
+    if (this.dom.btnQueue) this.dom.btnQueue.classList.remove('queue-open');
+    const hint = this.playerContainer?.querySelector('#queue-btn-hint');
+    if (hint) hint.style.opacity = '';
+
+    // Target geometry after close
+    const targetPlayerLeft = (window.innerWidth  - PLAYER_W) / 2;
+    const targetTop        = (window.innerHeight - TOTAL_H)  / 2;
+    const finalBtnLeft     = targetPlayerLeft + PLAYER_W + 4;
+    const finalBtnTop      = targetTop + SQUARE_H + GAP;
+
+    // ── Slide player back to center via WAAPI translateX ──
+    if (this.playerContainer) {
+      const currentLeft  = parseFloat(this.playerContainer.style.left) || targetPlayerLeft;
+      const playerDeltaX = targetPlayerLeft - currentLeft;
+      this._animator.play(this.playerContainer, [
+        { transform: 'none' },
+        { transform: `translateX(${playerDeltaX}px)` }
+      ], {
+        duration: 460,
+        easing: 'cubic-bezier(0.32, 0.72, 0, 1)'  // --ease-standard
+      });
+    }
+
+    // ── WAAPI FLIP: full panel → button position/size (100% GPU) ──
+    const panelRect    = panel.getBoundingClientRect();
+    const panelCenterX = panelRect.left + panelRect.width  / 2;
+    const panelCenterY = panelRect.top  + panelRect.height / 2;
+    const btnCenterX   = finalBtnLeft + CONTROLS_H / 2;
+    const btnCenterY   = finalBtnTop  + CONTROLS_H / 2;
+    const dx     = btnCenterX - panelCenterX;
+    const dy     = btnCenterY - panelCenterY;
+    const scaleX = CONTROLS_H / PLAYER_W;
+    const scaleY = CONTROLS_H / TOTAL_H;
+
+    panel.style.pointerEvents = 'none';
+    panel.style.overflow      = 'hidden';
+    panel.style.willChange    = 'transform, opacity';
+
+    this._animator.play(panel, [
+      { transform: 'none',                                                              opacity: '1' },
+      { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`, opacity: '0' }
+    ], {
+      duration: 420,
+      easing: 'cubic-bezier(0.3, 0, 1, 1)'  // --ease-exit
+    });
+
+    AnimationEngine.schedule(this, () => {
+      // Restore player to pixel-based center (release WAAPI first)
+      if (this.playerContainer) {
+        this._animator.releaseAll(this.playerContainer);
+        this.playerContainer.style.left      = `${targetPlayerLeft}px`;
+        this.playerContainer.style.transform = 'none';
+      }
+      if (panel.parentNode) panel.remove();
+      if (panel === this.queueContainer) this.queueContainer = null;
+    }, 480, '_queueTimers');
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // QUEUE PANEL — conteúdo e renderização
+  // ─────────────────────────────────────────────────────────────
+
+  buildQueueHTML() {
+    return `<style>
+      #queue-panel-inner {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      #queue-panel-header {
+        padding: 10px 10px 10px 16px;
+        font-size: 8px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+        border-bottom: 1px solid var(--color-border-subtle);
+        flex-shrink: 0;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      #btn-queue-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-lg);
+        color: var(--color-text-disabled);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease;
+        flex-shrink: 0;
+      }
+      #btn-queue-close:hover {
+        color: var(--color-text-primary);
+        background: rgba(255,255,255,0.06);
+      }
+      #btn-queue-close svg { pointer-events: none; }
+      #queue-items-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 0;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.1) transparent;
+      }
+      #queue-items-list::-webkit-scrollbar { width: 3px; }
+      #queue-items-list::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.1);
+        border-radius: 2px;
+      }
+      .q-item {
+        display: flex;
+        align-items: center;
+        padding: 7px 10px;
+        gap: 9px;
+        cursor: pointer;
+        border-radius: 10px;
+        margin: 1px 5px;
+        transition: background 0.15s ease;
+      }
+      .q-item:hover { background: rgba(255,255,255,0.06); }
+      .q-item.q-active { background: rgba(255,255,255,0.09); }
+      .q-idx {
+        font-size: 9px;
+        color: var(--color-text-disabled);
+        font-family: var(--font-mono);
+        width: 16px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .q-item.q-active .q-idx { color: var(--color-control-active, rgba(255,255,255,0.7)); }
+      .q-thumb {
+        width: 34px;
+        height: 34px;
+        border-radius: 6px;
+        overflow: hidden;
+        flex-shrink: 0;
+        background: var(--color-playback-cover);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .q-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .q-meta { flex: 1; min-width: 0; }
+      .q-title {
+        font-size: var(--fs-sm, 11px);
+        font-weight: 600;
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .q-artist {
+        font-size: var(--fs-xs, 10px);
+        color: var(--color-text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-top: 1px;
+      }
+      .q-empty {
+        text-align: center;
+        color: var(--color-text-disabled);
+        font-size: var(--fs-sm);
+        padding: 48px 16px;
+      }
+      .q-item.q-active .q-title { color: var(--color-base-white-strong); }
+    </style>
+    <div id="queue-panel-inner">
+      <div id="queue-panel-header">
+        <span>Queue</span>
+        <button id="btn-queue-close" aria-label="Close queue" title="Close queue">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="queue-items-list"></div>
+    </div>`;
+  }
+
+  renderQueuePanel() {
+    if (!this.queueContainer) return;
+    const list = this.queueContainer.querySelector('#queue-items-list');
+    if (!list) return; // panel not yet populated (still animating open)
+
+    const queue = this.state.queue;
+    if (!queue || queue.length === 0) {
+      list.innerHTML = '<div class="q-empty">Queue is empty</div>';
+      return;
+    }
+
+    list.innerHTML = queue.map((track, idx) => {
+      const isActive = idx === this.state.currentQueueIdx;
+      const thumb    = this.thumbSrc(track.thumbnail);
+      const thumbHtml = thumb
+        ? `<img src="${this.escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
+        : '';
+      return `
+        <div class="q-item ${isActive ? 'q-active' : ''}" data-idx="${idx}">
+          <span class="q-idx">${idx + 1}</span>
+          <div class="q-thumb">${thumbHtml}</div>
+          <div class="q-meta">
+            <div class="q-title">${this.escapeHtml(track.title || track.id || '')}</div>
+            <div class="q-artist">${this.escapeHtml(track.artist || '')}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async playQueueItem(idx) {
+    const track = this.state.queue[idx];
+    if (!track) return;
+
+    this.state.guardUntilMs = Date.now() + 3000;
+    this._applyOptimisticTrackChange(track, idx);
+
+    try {
+      await fetch('/api/play', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          track_id: track.id  ?? track.track_id ?? '',
+          filepath: track.file_path ?? track.filepath ?? ''
+        })
+      });
+      AnimationEngine.schedule(this, () => this.pollStatus(), 250, '_pollRetry');
+    } catch (e) {
+      console.error('Play queue item failed:', e);
+    }
   }
 
   async toggleShuffle() {
-    this.state.shuffle = !this.state.shuffle;
     this.syncToggleButtons();
     try {
       await fetch('/api/shuffle', {
@@ -1165,16 +1488,17 @@ class PlaybackMitosisManager {
 
     this.render();
 
-    // Notifica o sistema de tema reativo quando a faixa muda ou a fila termina.
-    // NÃO dispara para troca de play/pause — essas são tratadas diretamente
-    // em togglePlayPause() para evitar race conditions com o estado do servidor.
-    // Só dispara quando NÃO estamos sob guard — durante guard, o update otimista
-    // já disparou o evento. Polls stale causariam dispatches redundantes.
-    if (!isGuarded) {
-      const wentToIdle = newState === 'idle' && prevState !== 'idle';
-      if (trackChanged || wentToIdle) {
-        this._dispatchThemeEvent();
-      }
+    // Sync now-playing waveform indicator on the island pill
+    if (this.island?.setNowPlayingState) {
+      this.island.setNowPlayingState(this.state.playState === 'playing');
+    }
+
+    // Dispara o evento de tema sempre que o tuple (playState, trackId) mudar.
+    // A comparação por chave elimina dispatches redundantes e torna o backdrop
+    // orientado ao estado real do servidor — não a cliques de botão.
+    const themeKey = `${this.state.playState}|${this.state.currentId}`;
+    if (themeKey !== this._lastThemeKey) {
+      this._dispatchThemeEvent();
     }
   }
 
@@ -1184,10 +1508,13 @@ class PlaybackMitosisManager {
 
   /**
    * Emite `rolfsound-now-playing-changed` com o estado atual.
-   * Chamado de: applyServerStatus (mudança de faixa / idle natural)
-   * e togglePlayPause (intent imediato do utilizador).
+   * Atualiza `_lastThemeKey` antes de disparar — deduplicação em applyServerStatus.
+   * Chamado de: applyServerStatus (qualquer mudança de tuple playState+trackId)
+   * e _applyOptimisticTrackChange (skip imediato).
    */
   _dispatchThemeEvent() {
+    this._lastThemeKey = `${this.state.playState}|${this.state.currentId}`;
+
     const nextQueueIdx = this.state.currentQueueIdx + 1;
     const nextTrack    = (nextQueueIdx >= 0 && nextQueueIdx < this.state.queue.length)
       ? this.state.queue[nextQueueIdx]
@@ -1247,7 +1574,7 @@ class PlaybackMitosisManager {
 
     if (pct !== this.rafPos && this.dom.progressFill) {
       this.rafPos = pct;
-      this.dom.progressFill.style.width = pct + '%';
+      this.dom.progressFill.style.transform = `scaleX(${pct / 100})`;
     }
 
     if (timeStr !== this.rafTime && this.dom.currentTime) {
@@ -1275,12 +1602,15 @@ class PlaybackMitosisManager {
       if (this.dom.artist)       this.dom.artist.textContent       = '—';
       if (this.dom.totalTime)    this.dom.totalTime.textContent    = '0:00';
       if (this.dom.currentTime)  this.dom.currentTime.textContent  = '0:00';
-      if (this.dom.progressFill) this.dom.progressFill.style.width = '0%';
+      if (this.dom.progressFill) this.dom.progressFill.style.transform = 'scaleX(0)';
       this.resetThumbnail();
     }
 
     this.syncToggleButtons();
     this.syncQueueButton();
+
+    // Keep queue panel content in sync when it's open
+    if (this.isQueueOpen) this.renderQueuePanel();
   }
 
   thumbSrc(thumbnail) {
@@ -1387,7 +1717,8 @@ class PlaybackMitosisManager {
         let cleaned = false;
         const safeCleanup = () => { if (!cleaned) { cleaned = true; cleanupPrev(); } };
         incoming.addEventListener('transitionend', safeCleanup, { once: true });
-        setTimeout(safeCleanup, 500);
+        // Safety fallback — cancelled in destroy() if the manager tears down first
+        AnimationEngine.schedule(this, safeCleanup, 500, '_thumbCleanup');
       };
 
       incoming.onerror = () => {
@@ -1503,7 +1834,6 @@ class PlaybackMitosisManager {
       this.state.sliderAnchorMs = 0;
       this.state.playState      = 'paused';
       this.setPlayIcon(false);
-      this._dispatchThemeEvent();  // intent imediato — fundo vai a neutro já
       try { await fetch('/api/pause', { method: 'POST' }); }
       catch (e) { console.error('Pause failed:', e); }
     } else if (this.state.playState === 'paused') {
@@ -1512,7 +1842,6 @@ class PlaybackMitosisManager {
       // Ancora APÓS a API confirmar — evita que o timer corra antes do áudio retomar.
       this.state.playState = 'playing';
       this.setPlayIcon(true);
-      this._dispatchThemeEvent();  // intent imediato — fundo reativa cores já
       try {
         await fetch('/api/pause', { method: 'POST' });
         this.state.sliderAnchorMs = Date.now();
@@ -1520,7 +1849,6 @@ class PlaybackMitosisManager {
         // Reverte se a chamada falhou
         this.state.playState = 'paused';
         this.setPlayIcon(false);
-        this._dispatchThemeEvent();  // reverte o tema também
         console.error('Resume failed:', e);
       }
     } else {
@@ -1541,7 +1869,7 @@ class PlaybackMitosisManager {
       }
     }
 
-    setTimeout(() => this.pollStatus(), 600);
+    AnimationEngine.schedule(this, () => this.pollStatus(), 600, '_pollRetry');
   }
 
   async skipForward() {
@@ -1555,7 +1883,7 @@ class PlaybackMitosisManager {
 
     try {
       await fetch('/api/skip', { method: 'POST' });
-      setTimeout(() => this.pollStatus(), 250);
+      AnimationEngine.schedule(this, () => this.pollStatus(), 250, '_pollRetry');
     } catch (e) { console.error('Skip failed:', e); }
   }
 
@@ -1578,7 +1906,7 @@ class PlaybackMitosisManager {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ position: 0 })
         });
-        setTimeout(() => this.pollStatus(), 250);
+        AnimationEngine.schedule(this, () => this.pollStatus(), 250, '_pollRetry');
       } catch (e) { console.error('Seek-to-start failed:', e); }
     } else {
       // Vai para a faixa anterior
@@ -1587,7 +1915,7 @@ class PlaybackMitosisManager {
 
       try {
         await fetch('/api/queue/previous', { method: 'POST' });
-        setTimeout(() => this.pollStatus(), 250);
+        AnimationEngine.schedule(this, () => this.pollStatus(), 250, '_pollRetry');
       } catch (e) { console.error('Skip back failed:', e); }
     }
   }
@@ -1636,7 +1964,7 @@ class PlaybackMitosisManager {
       this.state.sliderPos      = position;
       this.state.sliderAnchorMs = this.state.playState === 'playing' ? Date.now() : 0;
 
-      setTimeout(() => this.pollStatus(), 400);
+      AnimationEngine.schedule(this, () => this.pollStatus(), 400, '_pollRetry');
     } catch (e) { console.error('Seek failed:', e); }
   }
 
@@ -1660,6 +1988,24 @@ class PlaybackMitosisManager {
   destroy() {
     this.stopPolling();
     this.stopRafLoop();
+    if (this._division) { this._division.destroy(); this._division = null; }
+    if (this._animator) this._animator.cancelAll();
+    if (this._onNavigate && this.island) {
+      this.island.removeEventListener('rolfsound-navigate', this._onNavigate);
+      this._onNavigate = null;
+    }
+    if (this._onPopState) {
+      window.removeEventListener('popstate', this._onPopState);
+      this._onPopState = null;
+    }
+    AnimationEngine.clearScheduled(this, '_pollRetry');
+    AnimationEngine.clearScheduled(this, '_thumbCleanup');
+    AnimationEngine.clearScheduled(this, '_queueTimers');
+    if (this.queueContainer && this.queueContainer.parentNode) {
+      this.queueContainer.remove();
+    }
+    this.queueContainer = null;
+    this.isQueueOpen = false;
   }
 }
 

@@ -180,12 +180,10 @@ export class AnimationEngine {
       insert = 'append',
       className = '',
       containerHTML = '',
-      startAnimation = 'cellularExpansion',
       onComplete = null,
-      duration = 850,
+      duration = 0,
       containerId = 'mitosis-container',
       initialStyle = null,
-      timingFunction = 'linear',
       cssVars = {},
       attributes = {},
       owner = null,
@@ -203,12 +201,8 @@ export class AnimationEngine {
       container.setAttribute(name, value);
     });
 
-    const animDecl = startAnimation
-      ? `animation: ${startAnimation} ${duration}ms ${timingFunction} both;`
-      : '';
-
     if (initialStyle) {
-      container.style.cssText = animDecl ? `${initialStyle}; ${animDecl}` : initialStyle;
+      container.style.cssText = initialStyle;
     } else if (useDefaultIslandStyle) {
       const metrics = measureIslandBarMitosis(island, {
         originTop: 15,
@@ -228,7 +222,6 @@ export class AnimationEngine {
         z-index: 996;
         border-radius: var(--radius-dynamic-island);
         pointer-events: auto;
-        ${animDecl}
       `;
     }
 
@@ -266,19 +259,13 @@ export class AnimationEngine {
     if (!container) return;
 
     const {
-      endAnimation = 'cellularContraction',
       onComplete = null,
-      duration = 850,
-      timingFunction = 'linear',
+      duration = 0,
       owner = null,
       timerProperty = 'animationTimers',
       waitForTransition = false,
       propertyName = null
     } = options;
-
-    if (endAnimation && duration > 0) {
-      container.style.animation = `${endAnimation} ${duration}ms ${timingFunction} both`;
-    }
 
     const finalize = () => {
       if (container.parentNode) {
@@ -505,7 +492,8 @@ export class AnimationEngine {
       onCreate = null
     } = options;
 
-    return this.runMitosisStrategy('pill-open', { island }, {
+    return this.runMitosisStrategy('division-lite-open', { island }, {
+      owner: island,
       containerId: `mitosis-${id}`,
       containerHTML: `
             <div class="mitosis-btn hover-target">
@@ -516,6 +504,9 @@ export class AnimationEngine {
         '--mitosis-distance': `${distance}px`
       },
       direction,
+      growDelayMs: 10,
+      revealDelayMs: 90,
+      settleTimeoutMs: 260,
       onCreate: (pill) => {
         pill.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -548,16 +539,27 @@ export class AnimationEngine {
       ? idOrOptions
       : maybeOptions;
 
-    return this.runMitosisStrategy('pill-close', { island }, {
-      id,
-      removalDelay: 600,
-      collapseClassName: 'mitosis-pill',
-      getImpactOptions: ({ impactRect }) => ({
-        sourceRect: impactRect,
-        strength: 0.82
-      }),
-      ...options
+    const selector = options.selector || (id ? `#mitosis-${id}` : '.mitosis-pill');
+    const pills = Array.isArray(options.pills)
+      ? options.pills.filter(Boolean)
+      : Array.from(island.shadowRoot.querySelectorAll(selector));
+
+    pills.forEach((pill) => {
+      this.runMitosisStrategy('division-lite-close', { island }, {
+        owner: island,
+        pill,
+        absorbDelayMs: 70,
+        removalDelay: 600,
+        collapseClassName: 'mitosis-pill',
+        getImpactOptions: ({ impactRect }) => ({
+          sourceRect: impactRect,
+          strength: 0.82
+        }),
+        ...options
+      });
     });
+
+    return pills;
   }
 
   /**
@@ -594,6 +596,7 @@ function createDivisionMembraneController(options = {}) {
   const {
     topElement = null,
     bottomElement = null,
+    axis = 'vertical',
     fillColor = 'rgba(15, 15, 15, 0.92)',
     strokeColor = 'rgba(255, 255, 255, 0.06)',
     shadowColor = '#000000',
@@ -673,6 +676,7 @@ function createDivisionMembraneController(options = {}) {
   let activeBridgeElement = null;
   let activeNeckWidth = null;
   let activeNeckWidthProvider = null;
+  let activeAxis = axis;
 
   const showConnected = () => {
     connectedPath.style.display = '';
@@ -692,7 +696,11 @@ function createDivisionMembraneController(options = {}) {
     const topRect = activeTopElement?.getBoundingClientRect();
     const bottomRect = activeBottomElement?.getBoundingClientRect();
 
-    if (!topRect || !bottomRect || bottomRect.width <= 0) {
+    // Guard: need valid rects with positive size on the relevant axis
+    const sizeCheck = activeAxis === 'horizontal'
+      ? (bottomRect && bottomRect.height > 0)
+      : (bottomRect && bottomRect.width > 0);
+    if (!topRect || !bottomRect || !sizeCheck) {
       rafId = requestAnimationFrame(render);
       return;
     }
@@ -702,13 +710,22 @@ function createDivisionMembraneController(options = {}) {
         ? activeBridgeElement.getBoundingClientRect()
         : null;
 
+      // Default neck dimension: bridge size on the cross-axis, or min of both elements
+      const defaultNeck = activeAxis === 'horizontal'
+        ? (bridgeRect ? bridgeRect.height : Math.min(topRect.height, bottomRect.height))
+        : (bridgeRect ? bridgeRect.width  : Math.min(topRect.width,  bottomRect.width));
+
       const neckWidth = Number.isFinite(activeNeckWidth)
         ? activeNeckWidth
         : (typeof activeNeckWidthProvider === 'function'
             ? activeNeckWidthProvider({ topRect, bottomRect, bridgeRect })
-            : (bridgeRect ? bridgeRect.width : Math.min(topRect.width, bottomRect.width)));
+            : defaultNeck);
 
-      connectedPath.setAttribute('d', buildConnectedMembranePath({
+      const pathBuilder = activeAxis === 'horizontal'
+        ? buildConnectedMembranePathHorizontal
+        : buildConnectedMembranePath;
+
+      connectedPath.setAttribute('d', pathBuilder({
         topRect,
         bottomRect,
         topRadius: resolveElementRadius(activeTopElement, 16),
@@ -760,10 +777,14 @@ function createDivisionMembraneController(options = {}) {
     fadeOut(durationMs = 120, onComplete = null) {
       svg.style.transition = `opacity ${durationMs}ms ease`;
       svg.style.opacity = '0';
-      window.setTimeout(() => {
-        controller.remove();
-        if (typeof onComplete === 'function') onComplete();
-      }, durationMs);
+      AnimationEngine.afterTransitionOrTimeout(null, svg, {
+        propertyName: 'opacity',
+        timeoutMs: durationMs,
+        callback: () => {
+          controller.remove();
+          if (typeof onComplete === 'function') onComplete();
+        }
+      });
     },
     remove() {
       if (!isActive) return;
@@ -855,6 +876,77 @@ function buildConnectedMembranePath({ topRect, bottomRect, topRadius = 16, botto
     `A ${topR} ${topR} 0 0 1 ${topLeft} ${topBottomY - topR}`,
     `V ${topY + topR}`,
     `A ${topR} ${topR} 0 0 1 ${topLeft + topR} ${topY}`,
+    'Z'
+  ].join(' ');
+}
+
+/**
+ * Horizontal membrane path — connects a left element to a right element.
+ * "topRect/bottomRect" here = leftRect/rightRect (reuses the membrane
+ * controller's naming).  neckWidth is measured along the Y axis (height
+ * of the neck between the two elements' adjacent vertical edges).
+ */
+function buildConnectedMembranePathHorizontal({ topRect: leftRect, bottomRect: rightRect, topRadius: leftRadius = 16, bottomRadius: rightRadius = 16, neckWidth = 24 }) {
+  if (!leftRect || !rightRect || rightRect.width <= 0.5) {
+    return buildRoundedRectPath(leftRect, leftRadius);
+  }
+
+  const lx = leftRect.left;
+  const ly = leftRect.top;
+  const lw = Math.max(0.5, leftRect.width);
+  const lh = Math.max(0.5, leftRect.height);
+  const rx = Math.max(rightRect.left, lx + lw);
+  const ry = rightRect.top;
+  const rw = Math.max(0.5, rightRect.width);
+  const rh = Math.max(0.5, rightRect.height);
+
+  const lR = clampRadius(leftRadius, lw, lh);
+  const rR = clampRadius(rightRadius, rw, rh);
+
+  // Neck center on Y axis — midpoint between both elements
+  const centerY = ly + lh / 2;
+  const requestedHalfNeck = Math.max(0.5, neckWidth / 2);
+  const leftHalfNeck  = Math.min(requestedHalfNeck, Math.max(0.5, (lh / 2) - lR));
+  const rightHalfNeck = Math.min(requestedHalfNeck, Math.max(0.5, (rh / 2) - rR));
+
+  const leftRight = lx + lw;   // right edge of left element
+  const rightLeft = rx;          // left edge of right element
+
+  // Trace: left top-left corner → clockwise around left → neck → right → back
+  return [
+    // ── Left element: top-left → top-right ──
+    `M ${lx + lR} ${ly}`,
+    `H ${leftRight - lR}`,
+    `A ${lR} ${lR} 0 0 1 ${leftRight} ${ly + lR}`,
+    // Down to neck top on left's right edge
+    `V ${centerY - leftHalfNeck}`,
+    // ── Neck: cross to right element ──
+    `L ${rightLeft} ${centerY - rightHalfNeck}`,
+    // ── Right element: top portion down ──
+    `V ${ry + rR}`,
+    `A ${rR} ${rR} 0 0 0 ${rightLeft + rR} ${ry}`,
+    // Right element: top edge
+    `H ${rx + rw - rR}`,
+    `A ${rR} ${rR} 0 0 1 ${rx + rw} ${ry + rR}`,
+    // Right element: right edge
+    `V ${ry + rh - rR}`,
+    `A ${rR} ${rR} 0 0 1 ${rx + rw - rR} ${ry + rh}`,
+    // Right element: bottom edge
+    `H ${rightLeft + rR}`,
+    `A ${rR} ${rR} 0 0 0 ${rightLeft} ${ry + rh - rR}`,
+    // Down to neck bottom on right's left edge
+    `V ${centerY + rightHalfNeck}`,
+    // ── Neck: cross back to left element ──
+    `L ${leftRight} ${centerY + leftHalfNeck}`,
+    // ── Left element: bottom portion ──
+    `V ${ly + lh - lR}`,
+    `A ${lR} ${lR} 0 0 1 ${leftRight - lR} ${ly + lh}`,
+    // Left element: bottom edge
+    `H ${lx + lR}`,
+    `A ${lR} ${lR} 0 0 1 ${lx} ${ly + lh - lR}`,
+    // Left element: left edge
+    `V ${ly + lR}`,
+    `A ${lR} ${lR} 0 0 1 ${lx + lR} ${ly}`,
     'Z'
   ].join(' ');
 }
@@ -979,11 +1071,168 @@ AnimationEngine.registerMitosisStrategy('pill-close', ({ engine, context, option
   return pills;
 });
 
+AnimationEngine.registerMitosisStrategy('division-lite-open', ({ engine, context, options }) => {
+  const island = context.island;
+  const owner = context.owner || island;
+  const timerProperty = options.timerProperty || '_animationTimers';
+  const parent = resolveMitosisParent(island, options.parent);
+
+  if (!island || !owner || !parent) return null;
+
+  engine.clearScheduled(owner, timerProperty);
+
+  (options.staleIds || []).forEach((id) => {
+    const staleNode = island.shadowRoot?.getElementById(id) || null;
+    if (staleNode) {
+      engine.destroyMitosis(staleNode, { duration: 0, endAnimation: '' });
+    }
+  });
+
+  if (options.preImpactOptions && island.respondToImpact) {
+    island.respondToImpact(options.preImpactOptions);
+  }
+
+  const splitClass = options.splitClass === undefined
+    ? `split-${options.direction || 'down'}`
+    : options.splitClass;
+
+  const pill = engine.createMitosis(island, {
+    parent,
+    insert: options.insert || 'prepend',
+    containerId: options.containerId || 'mitosis-division-lite',
+    className: options.className || 'mitosis-pill',
+    containerHTML: options.containerHTML || '',
+    cssVars: options.cssVars || {},
+    startAnimation: '',
+    useDefaultIslandStyle: false,
+    owner,
+    timerProperty
+  });
+
+  const isActive = () => {
+    if (!pill || !pill.parentNode) return false;
+    if (typeof options.isActive === 'function') return options.isActive(pill);
+    return true;
+  };
+
+  if (typeof options.onCreate === 'function') {
+    options.onCreate(pill);
+  }
+
+  engine.runSequence(owner, [
+    {
+      frames: Number.isFinite(options.budFrames) ? options.budFrames : 1,
+      run: () => {
+        if (!isActive()) return;
+        if (typeof options.onBud === 'function') options.onBud(pill);
+      }
+    },
+    {
+      delay: Number.isFinite(options.pinchDelayMs) ? options.pinchDelayMs : 24,
+      run: () => {
+        if (!isActive()) return;
+        if (typeof options.onPinch === 'function') options.onPinch(pill);
+      }
+    },
+    {
+      delay: Number.isFinite(options.growDelayMs) ? options.growDelayMs : 18,
+      run: () => {
+        if (!isActive()) return;
+        if (splitClass) pill.classList.add(splitClass);
+        if (typeof options.onGrow === 'function') options.onGrow(pill);
+      }
+    },
+    {
+      delay: Number.isFinite(options.revealDelayMs) ? options.revealDelayMs : 120,
+      run: () => {
+        if (!isActive()) return;
+        if (typeof options.onReveal === 'function') options.onReveal(pill);
+      }
+    }
+  ], {
+    context: { island, owner, pill },
+    timerProperty
+  });
+
+  engine.afterTransitionOrTimeout(owner, pill, {
+    propertyName: options.settlePropertyName || null,
+    timeoutMs: Number.isFinite(options.settleTimeoutMs) ? options.settleTimeoutMs : 820,
+    timerProperty,
+    callback: () => {
+      if (!isActive()) return;
+      if (typeof options.onSettled === 'function') options.onSettled(pill);
+    }
+  });
+
+  if (typeof options.onCursorReset === 'function') {
+    options.onCursorReset();
+  }
+
+  return pill;
+});
+
+AnimationEngine.registerMitosisStrategy('division-lite-close', ({ engine, context, options }) => {
+  const island = context.island;
+  const owner = context.owner || island;
+  const timerProperty = options.timerProperty || '_animationTimers';
+  const pill = options.pill || island?.shadowRoot?.getElementById(options.containerId || 'mitosis-division-lite');
+
+  if (!island || !owner || !pill) return null;
+
+  const isActive = () => {
+    if (!pill || !pill.parentNode) return false;
+    if (typeof options.isActive === 'function') return options.isActive(pill);
+    return true;
+  };
+
+  if (typeof options.onStart === 'function') {
+    options.onStart(pill);
+  }
+
+  engine.runSequence(owner, [
+    {
+      delay: Number.isFinite(options.shrinkDelayMs) ? options.shrinkDelayMs : 20,
+      run: () => {
+        if (!isActive()) return;
+        if (typeof options.onShrink === 'function') options.onShrink(pill);
+      }
+    },
+    {
+      delay: Number.isFinite(options.absorbDelayMs) ? options.absorbDelayMs : 80,
+      run: () => {
+        if (!isActive()) return;
+        if (typeof options.onAbsorb === 'function') options.onAbsorb(pill);
+
+        engine.runMitosisStrategy('pill-close', { island }, {
+          pills: [pill],
+          collapseClassName: options.collapseClassName,
+          removalDelay: Number.isFinite(options.removalDelay) ? options.removalDelay : 340,
+          timerProperty,
+          getImpactOptions: options.getImpactOptions,
+          impactOptions: options.impactOptions,
+          removeHoverTargets: options.removeHoverTargets,
+          onComplete: options.onComplete
+        });
+      }
+    }
+  ], {
+    context: { island, owner, pill },
+    timerProperty
+  });
+
+  if (typeof options.onCursorReset === 'function') {
+    options.onCursorReset();
+  }
+
+  return pill;
+});
+
 AnimationEngine.registerMitosisStrategy('search-open', ({ engine, context, options }) => {
   const island = context.island;
   if (!island) return null;
 
-  const pill = engine.runMitosisStrategy('pill-open', { island }, {
+  const pill = engine.runMitosisStrategy('division-lite-open', { island }, {
+    owner: island,
     parent: options.parent,
     containerId: 'mitosis-search',
     className: 'mitosis-pill',
@@ -994,6 +1243,7 @@ AnimationEngine.registerMitosisStrategy('search-open', ({ engine, context, optio
     splitClass: 'split-down',
     direction: 'down',
     onCreate: options.onCreate,
+    onGrow: options.onEnter,
     timerProperty: options.timerProperty || '_animationTimers'
   });
 
@@ -1035,221 +1285,21 @@ AnimationEngine.registerMitosisStrategy('search-close', ({ engine, context, opti
   const pill = options.pill || island?.shadowRoot?.getElementById('mitosis-search');
   if (!island || !pill) return null;
 
-  if (typeof options.onStart === 'function') {
-    options.onStart(pill);
-  }
-
-  engine.runSequence(island, [
-    {
-      run: () => {
-        pill.classList.remove('search-expanded');
-      }
+  return engine.runMitosisStrategy('division-lite-close', { island }, {
+    owner: island,
+    pill,
+    onStart: options.onStart,
+    onShrink: () => {
+      pill.classList.remove('search-expanded');
     },
-    {
-      delay: Number.isFinite(options.collapseDelay) ? options.collapseDelay : 520,
-      run: () => {
-        engine.runMitosisStrategy('pill-close', { island }, {
-          pills: [pill],
-          collapseClassName: 'mitosis-pill',
-          removalDelay: Number.isFinite(options.removalDelay) ? options.removalDelay : 600,
-          timerProperty: options.timerProperty || '_animationTimers',
-          getImpactOptions: options.getImpactOptions,
-          impactOptions: options.impactOptions,
-          removeHoverTargets: options.removeHoverTargets
-        });
-      }
-    }
-  ], {
-    context: { island, pill },
-    timerProperty: options.timerProperty || '_animationTimers'
+    absorbDelayMs: Number.isFinite(options.collapseDelay) ? options.collapseDelay : 520,
+    collapseClassName: 'mitosis-pill',
+    removalDelay: Number.isFinite(options.removalDelay) ? options.removalDelay : 600,
+    timerProperty: options.timerProperty || '_animationTimers',
+    getImpactOptions: options.getImpactOptions,
+    impactOptions: options.impactOptions,
+    removeHoverTargets: options.removeHoverTargets
   });
-
-  return pill;
-});
-
-AnimationEngine.registerMitosisStrategy('playback-division-open', ({ engine, context, options }) => {
-  const island = context.island;
-  const owner = context.owner;
-  const timerProperty = options.timerProperty || 'animationTimers';
-
-  if (!island || !owner || !options.createContainer?.initialStyle) {
-    return null;
-  }
-
-  engine.clearScheduled(owner, timerProperty);
-
-  (options.staleIds || []).forEach((id) => {
-    const staleNode = document.getElementById(id);
-    if (staleNode) {
-      engine.destroyMitosis(staleNode, { duration: 0, endAnimation: '' });
-    }
-  });
-
-  if (options.preImpactOptions && island.respondToImpact) {
-    island.respondToImpact(options.preImpactOptions);
-  }
-
-  const container = engine.createMitosis(island, {
-    containerId: options.createContainer.containerId || 'playback-player-container',
-    containerHTML: options.createContainer.containerHTML || '',
-    initialStyle: options.createContainer.initialStyle,
-    startAnimation: '',
-    useDefaultIslandStyle: false
-  });
-
-  const bridge = options.createBridge?.initialStyle
-    ? engine.createMitosis(island, {
-        containerId: options.createBridge.containerId || 'mitosis-bridge',
-        initialStyle: options.createBridge.initialStyle,
-        startAnimation: '',
-        useDefaultIslandStyle: false
-      })
-    : null;
-
-  const isActive = () => {
-    if (!container || !container.parentNode) return false;
-    if (typeof options.isActive === 'function') {
-      return options.isActive(container);
-    }
-    return true;
-  };
-
-  if (typeof options.onCreated === 'function') {
-    options.onCreated({ container, bridge });
-  }
-
-  container.getBoundingClientRect();
-
-  engine.afterFrames(() => {
-    if (!isActive()) return;
-    if (typeof options.onBud === 'function') {
-      options.onBud({ container, bridge });
-    }
-  });
-
-  engine.runSequence(owner, [
-    {
-      delay: Number.isFinite(options.pinchDelayMs) ? options.pinchDelayMs : 340,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onPinch === 'function') {
-          options.onPinch({ container, bridge });
-        }
-      }
-    },
-    {
-      delay: Number.isFinite(options.bridgeFadeDelayMs) ? options.bridgeFadeDelayMs : 200,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onBridgeFade === 'function') {
-          options.onBridgeFade({ container, bridge });
-        }
-      }
-    },
-    {
-      delay: Number.isFinite(options.growDelayMs) ? options.growDelayMs : 80,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onGrow === 'function') {
-          options.onGrow({ container, bridge });
-        }
-      }
-    },
-    {
-      delay: Number.isFinite(options.revealDelayMs) ? options.revealDelayMs : 140,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onReveal === 'function') {
-          options.onReveal(container);
-        }
-      }
-    }
-  ], {
-    context: { island, owner, container, bridge },
-    timerProperty
-  });
-
-  engine.afterTransitionOrTimeout(owner, container, {
-    propertyName: options.settlePropertyName || 'height',
-    timeoutMs: Number.isFinite(options.settleTimeoutMs) ? options.settleTimeoutMs : 1320,
-    timerProperty,
-    callback: () => {
-      if (!isActive()) return;
-      if (typeof options.onSettled === 'function') {
-        options.onSettled(container);
-      }
-    }
-  });
-
-  if (typeof options.onCursorReset === 'function') {
-    options.onCursorReset();
-  }
-
-  return { container, bridge };
-});
-
-AnimationEngine.registerMitosisStrategy('playback-division-close', ({ engine, context, options }) => {
-  const island = context.island;
-  const owner = context.owner;
-  const container = options.container;
-  const timerProperty = options.timerProperty || 'animationTimers';
-
-  if (!owner || !container) {
-    if (typeof options.onMissing === 'function') {
-      options.onMissing();
-    }
-    return null;
-  }
-
-  const isActive = () => {
-    if (!container || !container.parentNode) return false;
-    if (typeof options.isActive === 'function') {
-      return options.isActive(container);
-    }
-    return true;
-  };
-
-  if (typeof options.onStart === 'function') {
-    options.onStart(container);
-  }
-
-  engine.runSequence(owner, [
-    {
-      delay: Number.isFinite(options.shrinkDelayMs) ? options.shrinkDelayMs : 180,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onShrink === 'function') {
-          options.onShrink(container);
-        }
-      }
-    },
-    {
-      delay: Number.isFinite(options.absorbDelayMs) ? options.absorbDelayMs : 480,
-      run: () => {
-        if (!isActive()) return;
-        if (typeof options.onAbsorb === 'function') {
-          options.onAbsorb(container);
-        }
-      }
-    },
-    {
-      delay: Number.isFinite(options.cleanupDelayMs) ? options.cleanupDelayMs : 320,
-      run: () => {
-        if (typeof options.onCleanup === 'function') {
-          options.onCleanup(container);
-        }
-      }
-    }
-  ], {
-    context: { island, owner, container },
-    timerProperty
-  });
-
-  if (typeof options.onCursorReset === 'function') {
-    options.onCursorReset();
-  }
-
-  return container;
 });
 
 export default AnimationEngine;

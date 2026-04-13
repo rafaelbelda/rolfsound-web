@@ -52,9 +52,11 @@ export default class SearchController {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key.length !== 1) return;
 
-        // Ignora se já há um input/textarea focado (não queremos interferir)
-        const focused = document.activeElement;
-        if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA')) return;
+        // Ignora se já há algum campo editável focado (incluindo Shadow DOM)
+        if (this._isAnyEditableFocused()) return;
+
+        // Não abre search enquanto o prompt mitótico de playlist estiver ativo
+        if (this._island.shadowRoot?.getElementById('mitosis-playlist-input')) return;
 
         // Ignora se a ilha está num estado que não suporta search (ex: morph de notificação)
         if (this._island.isLocked) return;
@@ -75,9 +77,35 @@ export default class SearchController {
                 input.dispatchEvent(new Event('input', { bubbles: true }));
             } else if (attempts < 20) {
                 setTimeout(() => waitForInput(attempts + 1), 50);
+            } else {
+                console.warn('[SearchController] timed out waiting for search input to appear in shadow DOM');
             }
         };
         waitForInput();
+    }
+
+    _isAnyEditableFocused() {
+        const focused = this._getDeepActiveElement(document);
+        if (!focused) return false;
+
+        const tagName = (focused.tagName || '').toUpperCase();
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+        if (focused.isContentEditable) return true;
+
+        return false;
+    }
+
+    _getDeepActiveElement(root) {
+        let currentRoot = root;
+        let active = currentRoot?.activeElement || null;
+
+        // Caminha por hosts com shadowRoot para encontrar o foco real interno.
+        while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+            currentRoot = active.shadowRoot;
+            active = currentRoot.activeElement;
+        }
+
+        return active;
     }
 
     // ─── Despacho de Busca ───────────────────────────────────────────────────

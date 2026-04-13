@@ -11,15 +11,17 @@ class RolfsoundIsland extends HTMLElement {
 
         this.activeTab   = this.getAttribute('active-tab') || 'library';
         this.libraryMode = this.getAttribute('library-mode') === 'digital' ? 'digital' : 'vinyl';
-        this.morphTimeout = null;
         this.isLocked    = false;
         this._listenersAttached = false;
+        this._onShadowClick = null;
         this._animationTimers = new Set();
+        this._notificationTimers = new Set();
         this._impactAnimations = new Set();
+        this._promptResolver = null;
     }
 
     static get observedAttributes() {
-        return ['active-tab', 'library-mode'];
+        return ['active-tab', 'library-mode', 'playing'];
     }
 
     connectedCallback() {
@@ -35,12 +37,17 @@ class RolfsoundIsland extends HTMLElement {
     }
 
     disconnectedCallback() {
-        if (this.morphTimeout) {
-            clearTimeout(this.morphTimeout);
-            this.morphTimeout = null;
+        AnimationEngine.clearScheduled(this, '_morphTimer');
+        AnimationEngine.clearScheduled(this, '_animationTimers');
+        AnimationEngine.clearScheduled(this, '_notificationTimers');
+
+        if (this._onShadowClick) {
+            this.shadowRoot.removeEventListener('click', this._onShadowClick);
+            this._onShadowClick = null;
         }
 
-        AnimationEngine.clearScheduled(this, '_animationTimers');
+        this.hideNotification({ immediate: true });
+        this.cancelPlaylistNamePrompt(null, true);
         this.cancelImpactResponse();
     }
 
@@ -51,6 +58,11 @@ class RolfsoundIsland extends HTMLElement {
             return;
         }
 
+        if (name === 'playing') {
+            // CSS reacts directly to :host([playing]) — no shadow DOM re-render needed.
+            return;
+        }
+
         if (name === 'library-mode' && oldValue !== newValue) {
             this.libraryMode = newValue === 'digital' ? 'digital' : 'vinyl';
             this.syncLibraryModeToggle();
@@ -58,7 +70,7 @@ class RolfsoundIsland extends HTMLElement {
     }
 
     _attachDelegatedListeners() {
-        this.shadowRoot.addEventListener('click', (e) => {
+        this._onShadowClick = (e) => {
             // ── Botão de busca ──
             const searchBtn = e.target.closest('#btn-search');
             if (searchBtn) {
@@ -96,10 +108,9 @@ class RolfsoundIsland extends HTMLElement {
                 }));
                 return;
             }
-        });
+        };
+        this.shadowRoot.addEventListener('click', this._onShadowClick);
     }
-
-    addEventListeners() {}
 
     updateActiveTab() {
         const links = this.shadowRoot.querySelectorAll('.nav-link');
@@ -191,6 +202,20 @@ class RolfsoundIsland extends HTMLElement {
     }
 
     // ─── Motor de Mitose Modular (DOM Injection) ─────────────────────────────
+
+    /**
+     * Reflect playback state onto the island so CSS can react.
+     * Drives the now-playing waveform indicator via :host([playing]).
+     * Safe to call with the same state multiple times — no-op when unchanged.
+     * @param {boolean} isPlaying
+     */
+    setNowPlayingState(isPlaying) {
+        if (isPlaying) {
+            this.setAttribute('playing', '');
+        } else {
+            this.removeAttribute('playing');
+        }
+    }
 
     mitosis(options) {
         this.setAttribute('inspecting', 'true');
@@ -297,7 +322,8 @@ class RolfsoundIsland extends HTMLElement {
         const hoverZone = this.shadowRoot.getElementById('hover-zone');
         if (!hoverZone) return;
 
-        return AnimationEngine.runMitosisStrategy('pill-open', { island: this }, {
+        return AnimationEngine.runMitosisStrategy('division-lite-open', { island: this }, {
+            owner: this,
             parent: hoverZone,
             containerId: 'library-toggle-mitosis',
             className: 'mitosis-pill',
@@ -313,6 +339,9 @@ class RolfsoundIsland extends HTMLElement {
                 '--pill-w': '176px',
                 '--pill-h': '38px'
             },
+            growDelayMs: 12,
+            revealDelayMs: 100,
+            settleTimeoutMs: 300,
             onCreate: (pill) => {
                 pill.querySelectorAll('.pill-btn').forEach(btn => {
                     btn.addEventListener('click', (event) => {
@@ -330,7 +359,7 @@ class RolfsoundIsland extends HTMLElement {
                     });
                 });
             },
-            onEnter: (pill) => {
+            onGrow: (pill) => {
                 const hostRect = this.getBoundingClientRect();
                 const pillRect = pill.getBoundingClientRect();
                 const targetRight = 80;
@@ -348,11 +377,13 @@ class RolfsoundIsland extends HTMLElement {
         const pill = this.shadowRoot.getElementById('library-toggle-mitosis');
         if (!pill) return;
 
-        return AnimationEngine.runMitosisStrategy('pill-close', { island: this }, {
-            pills: [pill],
+        return AnimationEngine.runMitosisStrategy('division-lite-close', { island: this }, {
+            owner: this,
+            pill,
             collapseClassName: null,
             timerProperty: '_animationTimers',
-            beforeClose: (node) => {
+            absorbDelayMs: 90,
+            onStart: (node) => {
                 node.style.opacity = '0';
                 node.style.transform = 'scale(0.6)';
                 node.style.pointerEvents = 'none';
@@ -370,7 +401,7 @@ class RolfsoundIsland extends HTMLElement {
         const targetView         = this.shadowRoot.getElementById(viewId);
         const allViews           = this.shadowRoot.querySelectorAll('.island-view');
 
-        if (this.morphTimeout) clearTimeout(this.morphTimeout);
+        AnimationEngine.clearScheduled(this, '_morphTimer');
         this.isLocked = (duration === 0);
 
         navContent.classList.add('hidden');
@@ -383,7 +414,7 @@ class RolfsoundIsland extends HTMLElement {
         container.style.setProperty('--island-height', typeof height === 'number' ? `${height}px` : height);
         container.style.setProperty('--island-radius', typeof radius === 'number' ? `${radius}px` : radius);
 
-        setTimeout(() => {
+        AnimationEngine.schedule(this, () => {
             navContent.style.display = 'none';
             allViews.forEach(v => { if (v.id !== viewId) v.style.display = 'none'; });
 
@@ -392,14 +423,14 @@ class RolfsoundIsland extends HTMLElement {
                 void targetView.offsetWidth;
                 targetView.classList.add('visible');
             }
-        }, 200);
+        }, 200, '_animationTimers');
 
         if (duration > 0) {
-            this.morphTimeout = setTimeout(() => this.reset({
+            AnimationEngine.schedule(this, () => this.reset({
                 bounce: true,
                 sourceVector: { x: 0, y: -1 },
                 strength: 0.9
-            }), duration);
+            }), duration, '_morphTimer');
         }
     }
 
@@ -417,15 +448,12 @@ class RolfsoundIsland extends HTMLElement {
             fallbackVector = { x: 0, y: -1 }
         } = options;
 
-        if (this.morphTimeout) {
-            clearTimeout(this.morphTimeout);
-            this.morphTimeout = null;
-        }
+        AnimationEngine.clearScheduled(this, '_morphTimer');
 
         this.isLocked = false;
         allViews.forEach(v => v.classList.remove('visible'));
 
-        setTimeout(() => {
+        AnimationEngine.schedule(this, () => {
             let impactSettled = false;
             let impactSafetyId = null;
 
@@ -445,10 +473,10 @@ class RolfsoundIsland extends HTMLElement {
 
             if (bounce) {
                 container.addEventListener('transitionend', onTransitionEnd);
-                impactSafetyId = setTimeout(() => {
+                impactSafetyId = AnimationEngine.schedule(this, () => {
                     container.removeEventListener('transitionend', onTransitionEnd);
                     triggerImpact();
-                }, 580);
+                }, 580, '_animationTimers');
             }
 
             allViews.forEach(v => v.style.display = 'none');
@@ -463,57 +491,181 @@ class RolfsoundIsland extends HTMLElement {
             navContent.classList.remove('hidden');
             filtersDrawer.classList.remove('hidden');
             externalIndicator.classList.remove('hidden');
-        }, 200);
+        }, 200, '_animationTimers');
     }
 
     hideNotification(options = {}) {
-        this.reset({
-            bounce: true,
-            sourceVector: { x: 0, y: -1 },
-            strength: 0.9,
-            ...options
+        const immediate = !!options.immediate;
+        const toast = this.shadowRoot.getElementById('mitosis-toast');
+        AnimationEngine.clearScheduled(this, '_notificationTimers');
+        if (!toast) return;
+
+        if (immediate) {
+            toast.remove();
+            return;
+        }
+
+        AnimationEngine.runMitosisStrategy('division-lite-close', { island: this }, {
+            owner: this,
+            pill: toast,
+            removalDelay: 280,
+            absorbDelayMs: 70,
+            collapseClassName: null,
+            timerProperty: '_notificationTimers',
+            removeHoverTargets: false
         });
     }
 
-    showNotification({ text = 'Notificação', spinner = false, duration = 3000 }) {
-        const notifContent = this.shadowRoot.getElementById('view-notification');
-        const notifIcon    = this.shadowRoot.getElementById('notif-icon');
-        const notifText    = this.shadowRoot.getElementById('notif-text');
+    showNotification({ text = 'Notification', spinner = false, duration = 3000 }) {
+        const hoverZone = this.shadowRoot.getElementById('hover-zone');
+        if (!hoverZone) return;
 
-        notifText.textContent = text;
-        if (spinner) {
-            notifIcon.innerHTML     = `<div class="spinner"></div>`;
-            notifIcon.style.display = 'block';
+        AnimationEngine.clearScheduled(this, '_notificationTimers');
+
+        const setToastContent = (toastNode) => {
+            const icon = toastNode.querySelector('[data-toast-icon]');
+            const msg = toastNode.querySelector('[data-toast-text]');
+            if (msg) msg.textContent = text;
+            if (icon) {
+                icon.innerHTML = spinner ? '<div class="mitosis-toast-spinner"></div>' : '<span class="mitosis-toast-dot">•</span>';
+            }
+        };
+
+        const existing = this.shadowRoot.getElementById('mitosis-toast');
+        if (existing) {
+            setToastContent(existing);
         } else {
-            notifIcon.innerHTML     = '';
-            notifIcon.style.display = 'none';
+            const width = Math.min(460, Math.max(220, (text || '').length * 7 + 80));
+            AnimationEngine.runMitosisStrategy('division-lite-open', { island: this }, {
+                owner: this,
+                parent: hoverZone,
+                containerId: 'mitosis-toast',
+                className: 'mitosis-pill toast-pill',
+                splitClass: 'split-down',
+                cssVars: {
+                    '--pill-w': `${width}px`,
+                    '--pill-h': '36px',
+                    '--mitosis-distance': '52px'
+                },
+                containerHTML: `
+                  <div class="mitosis-toast-content" role="status" aria-live="polite">
+                    <span class="mitosis-toast-icon" data-toast-icon></span>
+                    <span class="mitosis-toast-text" data-toast-text></span>
+                  </div>
+                `,
+                onCreate: (toastNode) => setToastContent(toastNode),
+                growDelayMs: 12,
+                revealDelayMs: 110,
+                settleTimeoutMs: 380,
+                timerProperty: '_notificationTimers'
+            });
         }
 
-        notifContent.style.display     = 'flex';
-        notifContent.style.visibility  = 'hidden';
-        let targetWidth = notifContent.scrollWidth + 60;
-        if (targetWidth < 220) targetWidth = 220;
-        notifContent.style.display    = 'none';
-        notifContent.style.visibility = 'visible';
-
-        this.morph({
-            width: targetWidth, height: 44, viewId: 'view-notification',
-            islandClass: 'notifying', duration
-        });
+        if (duration > 0) {
+            AnimationEngine.schedule(this, () => this.hideNotification(), duration, '_notificationTimers');
+        }
     }
 
     updateNotificationText(text) {
-        const notifText    = this.shadowRoot.getElementById('notif-text');
-        if (!notifText || notifText.textContent === text) return;
+        const toast = this.shadowRoot.getElementById('mitosis-toast');
+        if (!toast) return;
+        const msg = toast.querySelector('[data-toast-text]');
+        if (!msg) return;
+        if (msg.textContent === text) return;
+        msg.textContent = text;
+    }
 
-        notifText.textContent = text;
+    cancelPlaylistNamePrompt(value = null, immediate = false) {
+        const inputPill = this.shadowRoot.getElementById('mitosis-playlist-input');
+        const resolver = this._promptResolver;
+        this._promptResolver = null;
 
-        const notifContent = this.shadowRoot.getElementById('view-notification');
-        const container    = this.shadowRoot.getElementById('bar-container');
+        if (!inputPill) {
+            if (resolver) resolver(value);
+            return;
+        }
 
-        let targetWidth = notifContent.scrollWidth + 60;
-        if (targetWidth < 220) targetWidth = 220;
-        container.style.setProperty('--island-width', `${targetWidth}px`);
+        if (immediate) {
+            inputPill.remove();
+            if (resolver) resolver(value);
+            return;
+        }
+
+        AnimationEngine.runMitosisStrategy('division-lite-close', { island: this }, {
+            owner: this,
+            pill: inputPill,
+            collapseClassName: null,
+            removalDelay: 280,
+            absorbDelayMs: 70,
+            timerProperty: '_animationTimers',
+            removeHoverTargets: false,
+            onComplete: () => {
+                if (resolver) resolver(value);
+            }
+        });
+    }
+
+    promptPlaylistName(options = {}) {
+        const title = options.title || 'New playlist';
+        const placeholder = options.placeholder || 'Playlist name';
+        const confirmLabel = options.confirmLabel || 'Create';
+        const hoverZone = this.shadowRoot.getElementById('hover-zone');
+
+        if (!hoverZone) return Promise.resolve('');
+
+        this.cancelPlaylistNamePrompt('', true);
+
+        return new Promise((resolve) => {
+            this._promptResolver = resolve;
+
+            AnimationEngine.runMitosisStrategy('division-lite-open', { island: this }, {
+                owner: this,
+                parent: hoverZone,
+                containerId: 'mitosis-playlist-input',
+                className: 'mitosis-pill input-pill',
+                splitClass: 'split-down',
+                cssVars: {
+                    '--pill-w': 'min(460px, calc(100vw - 80px))',
+                    '--pill-h': '52px',
+                    '--mitosis-distance': '56px'
+                },
+                containerHTML: `
+                  <div class="mitosis-input-shell">
+                    <span class="mitosis-input-title">${title}</span>
+                    <input type="text" class="mitosis-input-field" maxlength="80" placeholder="${placeholder}" />
+                    <button type="button" class="mitosis-input-btn hover-target" data-confirm>${confirmLabel}</button>
+                    <button type="button" class="mitosis-input-btn hover-target" data-cancel>Cancel</button>
+                  </div>
+                `,
+                onCreate: (node) => {
+                    const input = node.querySelector('.mitosis-input-field');
+                    const onConfirm = () => {
+                        const value = (input?.value || '').trim();
+                        this.cancelPlaylistNamePrompt(value || '');
+                    };
+                    const onCancel = () => this.cancelPlaylistNamePrompt('');
+
+                    node.querySelector('[data-confirm]')?.addEventListener('click', onConfirm);
+                    node.querySelector('[data-cancel]')?.addEventListener('click', onCancel);
+                    input?.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            onConfirm();
+                        }
+                        if (event.key === 'Escape') {
+                            event.preventDefault();
+                            onCancel();
+                        }
+                    });
+
+                    AnimationEngine.schedule(this, () => input?.focus(), 240, '_animationTimers');
+                },
+                growDelayMs: 14,
+                revealDelayMs: 130,
+                settleTimeoutMs: 420,
+                timerProperty: '_animationTimers'
+            });
+        });
     }
 
     render() {
@@ -571,7 +723,7 @@ class RolfsoundIsland extends HTMLElement {
                 
                 opacity: 0; pointer-events: none;
                 transform: translateX(-50%) scale(0.6);
-                transition: all 0.5s cubic-bezier(0.34, 1.2, 0.64, 1);
+                transition: all 0.5s var(--ease-spring);
                 z-index: 900; 
                 box-shadow: var(--shadow-soft);
                 overflow: hidden;
@@ -638,9 +790,9 @@ class RolfsoundIsland extends HTMLElement {
                 display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
                 padding: 0 10px; box-shadow: var(--shadow-soft);
 
-                transition: width  0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
-                            height 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
-                            border-radius 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
+                transition: width  0.5s var(--ease-spring),
+                            height 0.5s var(--ease-spring),
+                            border-radius 0.5s var(--ease-spring),
                             background-color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
 
                 position: relative; z-index: 1000;
@@ -656,9 +808,9 @@ class RolfsoundIsland extends HTMLElement {
                 /* border-color and box-shadow are NOT listed here → they snap instantly.
                    background-color keeps its 0.5s ease so the bar fades smoothly,
                    providing visual continuity while the membrane initialises. */
-                transition: width  0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
-                            height 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
-                            border-radius 0.5s cubic-bezier(0.34, 1.2, 0.64, 1),
+                transition: width  0.5s var(--ease-spring),
+                            height 0.5s var(--ease-spring),
+                            border-radius 0.5s var(--ease-spring),
                             background-color 0.5s ease;
             }
 
@@ -672,7 +824,7 @@ class RolfsoundIsland extends HTMLElement {
                 display: flex; align-items: center; justify-content: space-between;
                 width: 100%; height: 38px; min-height: 38px;
                 opacity: 1; transform: scale(1);
-                transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+                transition: opacity 0.3s ease, transform 0.4s var(--ease-standard);
                 position: relative; z-index: 1200;
             }
             #bar-content.hidden { opacity: 0; transform: scale(0.95); }
@@ -698,7 +850,7 @@ class RolfsoundIsland extends HTMLElement {
                 position: absolute; bottom: 18px;
                 display: flex; gap: 6px; justify-content: center; align-items: center;
                 opacity: 0; pointer-events: none; transform: translateY(10px);
-                transition: all 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
+                transition: all 0.4s var(--ease-spring);
                 width: 100%;
             }
             #filters-drawer.hidden { display: none; }
@@ -721,7 +873,7 @@ class RolfsoundIsland extends HTMLElement {
                 display: none; position: absolute; inset: 0;
                 align-items: center; justify-content: center; gap: 12px;
                 opacity: 0; transform: scale(0.9);
-                transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
+                transition: opacity 0.3s ease, transform 0.4s var(--ease-spring);
                 z-index: 1300;
             }
             .island-view.visible { opacity: 1; transform: scale(1); }
@@ -731,8 +883,30 @@ class RolfsoundIsland extends HTMLElement {
             @keyframes spin { to { transform: rotate(360deg); } }
 
             .logo-section { display: flex; align-items: center; gap: 8px; margin-left: 8px; position: relative; z-index: 1200; }
-            .logo-led     { width: 4px; height: 4px; background: var(--color-led); border-radius: 50%; }
             .logo-name    { font-weight: 700; font-size: var(--fs-sm, 10px); letter-spacing: 1.5px; text-transform: uppercase; color: var(--white); }
+
+            /* ─── Now Playing Indicator (replaces static LED dot) ─── */
+            .now-playing-indicator {
+                display: flex;
+                align-items: flex-end;
+                gap: 2px;
+                height: 10px;
+                width: 13px;
+                flex-shrink: 0;
+            }
+            .now-playing-indicator span {
+                display: block;
+                width: 2.5px;
+                border-radius: 1.5px;
+                background: var(--color-led);
+                height: 4px;
+                transition: height 0.3s var(--ease-standard);
+            }
+            /* Playing: animate each bar at different rates — EQ waveform */
+            :host([playing]) .now-playing-indicator span:nth-child(1) { animation: npi-bar 0.80s ease-in-out infinite; }
+            :host([playing]) .now-playing-indicator span:nth-child(2) { animation: npi-bar 0.55s ease-in-out infinite 0.12s; }
+            :host([playing]) .now-playing-indicator span:nth-child(3) { animation: npi-bar 0.95s ease-in-out infinite 0.07s; }
+            @keyframes npi-bar { 0%, 100% { height: 3px; } 50% { height: 10px; } }
 
             .nav-section {
                 display: flex; gap: 2px;
@@ -756,9 +930,9 @@ class RolfsoundIsland extends HTMLElement {
 
             .nav-label {
                 max-width: 0; overflow: hidden; opacity: 0; white-space: nowrap; margin-left: 0;
-                transition: max-width 0.4s cubic-bezier(0.34, 1.2, 0.64, 1),
+                transition: max-width 0.4s var(--ease-spring),
                             opacity 0.3s ease,
-                            margin-left 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
+                            margin-left 0.4s var(--ease-spring);
             }
             .nav-link:hover .nav-label,
             .nav-link.active  .nav-label { max-width: 90px; opacity: 1; margin-left: 7px; }
@@ -771,7 +945,7 @@ class RolfsoundIsland extends HTMLElement {
             @keyframes eq { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
 
             .icon-link { display: flex; align-items: center; justify-content: center; padding: 6px; margin-right: 4px; }
-            .icon-link svg { transition: transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1); }
+            .icon-link svg { transition: transform 0.4s var(--ease-spring); }
             .icon-link:hover svg, .icon-link.active svg { transform: rotate(90deg); }
 
             /* ─── Lado direito da barra ─── */
@@ -805,7 +979,7 @@ class RolfsoundIsland extends HTMLElement {
                 color: var(--white); font-size: var(--fs-md, 11px); font-family: var(--font, sans-serif);
                 letter-spacing: 0.04em;
                 opacity: 0; transform: translateX(-8px); pointer-events: none;
-                transition: opacity 0.25s ease 0.3s, transform 0.3s cubic-bezier(0.34, 1.2, 0.64, 1) 0.3s;
+                transition: opacity 0.25s ease 0.3s, transform 0.3s var(--ease-spring) 0.3s;
             }
             .search-input::placeholder { color: var(--gray); }
             .mitosis-pill.search-expanded .search-input { opacity: 1; transform: translateX(0); pointer-events: auto; }
@@ -816,18 +990,149 @@ class RolfsoundIsland extends HTMLElement {
                 display: flex; align-items: center; justify-content: center;
                 padding: 0;
                 opacity: 0; transform: scale(0.5); pointer-events: none;
-                transition: opacity 0.2s ease 0.35s, transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1) 0.35s,
+                transition: opacity 0.2s ease 0.35s, transform 0.25s var(--ease-spring) 0.35s,
                             color 0.15s ease, background 0.15s ease;
             }
             .search-close:hover { color: var(--white); background: var(--color-surface-card-hover); }
             .mitosis-pill.search-expanded .search-close { opacity: 1; transform: scale(1); pointer-events: auto; }
+
+            .mitosis-pill.toast-pill {
+                border-radius: var(--radius-dynamic-island);
+                min-width: 220px;
+                max-width: min(460px, calc(100vw - 80px));
+                box-shadow: var(--shadow-notification);
+                z-index: 930;
+            }
+
+            .mitosis-toast-content {
+                width: 100%;
+                height: 100%;
+                padding: 0 12px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                opacity: 0;
+                transition: opacity 0.2s ease 0.18s;
+            }
+
+            .mitosis-pill.split-down .mitosis-toast-content { opacity: 1; }
+
+            .mitosis-toast-icon {
+                width: 14px;
+                height: 14px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--white);
+                flex-shrink: 0;
+            }
+
+            .mitosis-toast-dot {
+                font-size: 14px;
+                line-height: 1;
+                opacity: 0.88;
+            }
+
+            .mitosis-toast-spinner {
+                width: 12px;
+                height: 12px;
+                border: 2px solid var(--color-surface-interactive);
+                border-top-color: var(--white);
+                border-radius: 50%;
+                animation: spin 0.7s linear infinite;
+            }
+
+            .mitosis-toast-text {
+                min-width: 0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                font-size: var(--fs-sm, 10px);
+                color: var(--white);
+                letter-spacing: 0.04em;
+            }
+
+            .mitosis-pill.input-pill {
+                border-radius: var(--radius-dynamic-island-expanded);
+                z-index: 935;
+                max-width: min(460px, calc(100vw - 80px));
+            }
+
+            .mitosis-input-shell {
+                width: 100%;
+                height: 100%;
+                display: grid;
+                grid-template-columns: auto 1fr auto auto;
+                align-items: center;
+                gap: 7px;
+                padding: 0 10px;
+                opacity: 0;
+                transition: opacity 0.2s ease 0.2s;
+            }
+
+            .mitosis-pill.split-down .mitosis-input-shell {
+                opacity: 1;
+            }
+
+            .mitosis-input-title {
+                font-size: var(--fs-xs, 9px);
+                color: var(--color-text-muted);
+                text-transform: uppercase;
+                letter-spacing: 0.09em;
+                white-space: nowrap;
+            }
+
+            .mitosis-input-field {
+                min-width: 0;
+                width: 100%;
+                height: 30px;
+                border-radius: var(--radius-lg);
+                border: 1px solid var(--color-border-default);
+                background: rgba(255, 255, 255, 0.04);
+                color: var(--white);
+                padding: 0 8px;
+                font-size: var(--fs-sm, 10px);
+                outline: none;
+            }
+
+            .mitosis-input-field::placeholder {
+                color: var(--color-text-muted);
+            }
+
+            .mitosis-input-field:focus {
+                border-color: var(--color-border-stronger);
+                background: rgba(255, 255, 255, 0.06);
+            }
+
+            .mitosis-input-btn {
+                height: 30px;
+                border-radius: var(--radius-lg);
+                border: 1px solid var(--color-border-default);
+                background: var(--color-surface-interactive);
+                color: var(--color-text-secondary);
+                padding: 0 9px;
+                font-size: var(--fs-xs, 9px);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.16s ease;
+            }
+
+            .mitosis-input-btn:hover {
+                color: var(--white);
+                border-color: var(--color-border-stronger);
+                background: var(--color-surface-interactive-hover);
+            }
         </style>
 
         <div id="hover-zone">
             <div id="bar-container">
                 <div id="bar-content">
                     <div class="logo-section">
-                        <div class="logo-led"></div>
+                        <div class="now-playing-indicator" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </div>
                         <span class="logo-name">Rolfsound</span>
                     </div>
 
