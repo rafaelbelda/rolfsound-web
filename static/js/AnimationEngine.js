@@ -563,6 +563,44 @@ export class AnimationEngine {
   }
 
   /**
+   * Executa mitose full (DivisionAnimator) para cenarios que exigem
+   * fisica de divisao/absorcao com membrana SVG.
+   * @param {HTMLElement} island - Elemento RolfsoundIsland
+   * @param {Object} options - Opcoes da divisao full
+   * @returns {Promise<Object|null>|Object|null}
+   */
+  static mitosisFull(island, options = {}) {
+    if (!island) {
+      console.warn('AnimationEngine.mitosisFull: island is required');
+      return null;
+    }
+
+    return this.runMitosisStrategy('division-full-open', {
+      island,
+      owner: options.owner || island
+    }, options);
+  }
+
+  /**
+   * Desfaz mitose full (DivisionAnimator) para cenarios que exigem
+   * ciclo reverso completo com absorcao.
+   * @param {HTMLElement} island - Elemento RolfsoundIsland
+   * @param {Object} options - Opcoes de fechamento da divisao full
+   * @returns {Promise<Object|null>|Object|null}
+   */
+  static undoMitosisFull(island, options = {}) {
+    if (!island) {
+      console.warn('AnimationEngine.undoMitosisFull: island is required');
+      return null;
+    }
+
+    return this.runMitosisStrategy('division-full-close', {
+      island,
+      owner: options.owner || island
+    }, options);
+  }
+
+  /**
    * Atualiza o texto da notificação temporária
    * Delegação para RolfsoundIsland.updateNotificationText() com validação
    * @param {HTMLElement} island - Elemento RolfsoundIsland
@@ -744,7 +782,8 @@ function createDivisionMembraneController(options = {}) {
 
   const start = () => {
     if (rafId) return;
-    rafId = requestAnimationFrame(render);
+    // Render once immediately to avoid a one-frame visual gap when shell turns translucent.
+    render();
   };
 
   const stop = () => {
@@ -843,16 +882,23 @@ function buildConnectedMembranePath({ topRect, bottomRect, topRadius = 16, botto
   const topR = clampRadius(topRadius, topW, topH);
   const bottomR = clampRadius(bottomRadius, bottomW, bottomH);
 
-  const centerX = topRect.left + (topRect.width / 2);
+  const topCenterX = topRect.left + (topRect.width / 2);
+  const bottomCenterX = bottomRect.left + (bottomRect.width / 2);
   const requestedHalfNeck = Math.max(0.5, neckWidth / 2);
-  const topHalfNeck = Math.min(requestedHalfNeck, Math.max(0.5, (topW / 2) - topR));
-  const bottomHalfNeck = Math.min(requestedHalfNeck, Math.max(0.5, (bottomW / 2) - bottomR));
+  const topMaxHalfNeck = Math.max(0.5, (topW / 2) - topR);
+  const bottomMaxHalfNeck = Math.max(0.5, (bottomW / 2) - bottomR);
+  const topHalfNeck = Math.min(requestedHalfNeck, topMaxHalfNeck);
+  const bottomHalfNeck = Math.min(requestedHalfNeck, bottomMaxHalfNeck);
 
   const topLeft = topX;
   const topRight = topX + topW;
   const bottomLeft = bottomX;
   const bottomRight = bottomX + bottomW;
   const topBottomY = topY + topH;
+  const neckPhase = resolveMembraneNeckPhase(topHalfNeck, bottomHalfNeck, topMaxHalfNeck, bottomMaxHalfNeck);
+  const topInner = resolveMembraneNeckInner(topHalfNeck, neckPhase);
+  const bottomInner = resolveMembraneNeckInner(bottomHalfNeck, neckPhase);
+  const tension = resolveMembraneCurveTension(bottomY - topBottomY, neckPhase);
 
   return [
     `M ${topLeft + topR} ${topY}`,
@@ -860,8 +906,8 @@ function buildConnectedMembranePath({ topRect, bottomRect, topRadius = 16, botto
     `A ${topR} ${topR} 0 0 1 ${topRight} ${topY + topR}`,
     `V ${topBottomY - topR}`,
     `A ${topR} ${topR} 0 0 1 ${topRight - topR} ${topBottomY}`,
-    `H ${centerX + topHalfNeck}`,
-    `L ${centerX + bottomHalfNeck} ${bottomY}`,
+    `H ${topCenterX + topHalfNeck}`,
+    `C ${topCenterX + topInner} ${topBottomY + tension} ${bottomCenterX + bottomInner} ${bottomY - tension} ${bottomCenterX + bottomHalfNeck} ${bottomY}`,
     `H ${bottomRight - bottomR}`,
     `A ${bottomR} ${bottomR} 0 0 1 ${bottomRight} ${bottomY + bottomR}`,
     `V ${bottomY + bottomH - bottomR}`,
@@ -870,8 +916,8 @@ function buildConnectedMembranePath({ topRect, bottomRect, topRadius = 16, botto
     `A ${bottomR} ${bottomR} 0 0 1 ${bottomLeft} ${bottomY + bottomH - bottomR}`,
     `V ${bottomY + bottomR}`,
     `A ${bottomR} ${bottomR} 0 0 1 ${bottomLeft + bottomR} ${bottomY}`,
-    `H ${centerX - bottomHalfNeck}`,
-    `L ${centerX - topHalfNeck} ${topBottomY}`,
+    `H ${bottomCenterX - bottomHalfNeck}`,
+    `C ${bottomCenterX - bottomInner} ${bottomY - tension} ${topCenterX - topInner} ${topBottomY + tension} ${topCenterX - topHalfNeck} ${topBottomY}`,
     `H ${topLeft + topR}`,
     `A ${topR} ${topR} 0 0 1 ${topLeft} ${topBottomY - topR}`,
     `V ${topY + topR}`,
@@ -903,14 +949,20 @@ function buildConnectedMembranePathHorizontal({ topRect: leftRect, bottomRect: r
   const lR = clampRadius(leftRadius, lw, lh);
   const rR = clampRadius(rightRadius, rw, rh);
 
-  // Neck center on Y axis — midpoint between both elements
-  const centerY = ly + lh / 2;
+  const leftCenterY = ly + lh / 2;
+  const rightCenterY = ry + rh / 2;
   const requestedHalfNeck = Math.max(0.5, neckWidth / 2);
-  const leftHalfNeck  = Math.min(requestedHalfNeck, Math.max(0.5, (lh / 2) - lR));
-  const rightHalfNeck = Math.min(requestedHalfNeck, Math.max(0.5, (rh / 2) - rR));
+  const leftMaxHalfNeck = Math.max(0.5, (lh / 2) - lR);
+  const rightMaxHalfNeck = Math.max(0.5, (rh / 2) - rR);
+  const leftHalfNeck = Math.min(requestedHalfNeck, leftMaxHalfNeck);
+  const rightHalfNeck = Math.min(requestedHalfNeck, rightMaxHalfNeck);
 
   const leftRight = lx + lw;   // right edge of left element
   const rightLeft = rx;          // left edge of right element
+  const neckPhase = resolveMembraneNeckPhase(leftHalfNeck, rightHalfNeck, leftMaxHalfNeck, rightMaxHalfNeck);
+  const leftInner = resolveMembraneNeckInner(leftHalfNeck, neckPhase);
+  const rightInner = resolveMembraneNeckInner(rightHalfNeck, neckPhase);
+  const tension = resolveMembraneCurveTension(rightLeft - leftRight, neckPhase);
 
   // Trace: left top-left corner → clockwise around left → neck → right → back
   return [
@@ -919,9 +971,9 @@ function buildConnectedMembranePathHorizontal({ topRect: leftRect, bottomRect: r
     `H ${leftRight - lR}`,
     `A ${lR} ${lR} 0 0 1 ${leftRight} ${ly + lR}`,
     // Down to neck top on left's right edge
-    `V ${centerY - leftHalfNeck}`,
+    `V ${leftCenterY - leftHalfNeck}`,
     // ── Neck: cross to right element ──
-    `L ${rightLeft} ${centerY - rightHalfNeck}`,
+    `C ${leftRight + tension} ${leftCenterY - leftInner} ${rightLeft - tension} ${rightCenterY - rightInner} ${rightLeft} ${rightCenterY - rightHalfNeck}`,
     // ── Right element: top portion down ──
     `V ${ry + rR}`,
     `A ${rR} ${rR} 0 0 0 ${rightLeft + rR} ${ry}`,
@@ -935,9 +987,9 @@ function buildConnectedMembranePathHorizontal({ topRect: leftRect, bottomRect: r
     `H ${rightLeft + rR}`,
     `A ${rR} ${rR} 0 0 0 ${rightLeft} ${ry + rh - rR}`,
     // Down to neck bottom on right's left edge
-    `V ${centerY + rightHalfNeck}`,
+    `V ${rightCenterY + rightHalfNeck}`,
     // ── Neck: cross back to left element ──
-    `L ${leftRight} ${centerY + leftHalfNeck}`,
+    `C ${rightLeft - tension} ${rightCenterY + rightInner} ${leftRight + tension} ${leftCenterY + leftInner} ${leftRight} ${leftCenterY + leftHalfNeck}`,
     // ── Left element: bottom portion ──
     `V ${ly + lh - lR}`,
     `A ${lR} ${lR} 0 0 1 ${leftRight - lR} ${ly + lh}`,
@@ -954,6 +1006,24 @@ function buildConnectedMembranePathHorizontal({ topRect: leftRect, bottomRect: r
 function clampRadius(radius, width, height) {
   const nextRadius = Number.isFinite(radius) ? radius : 16;
   return Math.max(0, Math.min(nextRadius, width / 2, height / 2));
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function resolveMembraneNeckPhase(firstHalfNeck, secondHalfNeck, firstMaxHalfNeck, secondMaxHalfNeck) {
+  const maxHalfNeck = Math.max(0.5, Math.min(firstMaxHalfNeck, secondMaxHalfNeck));
+  const averageHalfNeck = (firstHalfNeck + secondHalfNeck) / 2;
+  return clamp01(1 - (averageHalfNeck / maxHalfNeck));
+}
+
+function resolveMembraneNeckInner(halfNeck, neckPhase) {
+  return Math.max(0.35, halfNeck * (1 - (neckPhase * 0.93)));
+}
+
+function resolveMembraneCurveTension(gap, neckPhase) {
+  return Math.max(6, Math.max(0.5, gap) * (0.26 + (neckPhase * 0.18)));
 }
 
 function resolveElementRadius(element, fallback = 16) {
@@ -974,6 +1044,56 @@ function resolveElementRadius(element, fallback = 16) {
 function resolveMitosisParent(island, parent = null) {
   if (parent) return parent;
   return island?.shadowRoot?.getElementById('hover-zone') || null;
+}
+
+const FULL_DIVISION_STORE_PROP = '_fullDivisionInstances';
+let divisionAnimatorModulePromise = null;
+
+function ensureFullDivisionStore(owner, property = FULL_DIVISION_STORE_PROP) {
+  if (!owner) return null;
+  if (!(owner[property] instanceof Map)) {
+    owner[property] = new Map();
+  }
+  return owner[property];
+}
+
+function getFullDivisionInstance(owner, id, property = FULL_DIVISION_STORE_PROP) {
+  if (!owner || !id) return null;
+  const store = owner[property];
+  if (!(store instanceof Map)) return null;
+  return store.get(id) || null;
+}
+
+function setFullDivisionInstance(owner, id, division, property = FULL_DIVISION_STORE_PROP) {
+  if (!owner || !id || !division) return;
+  const store = ensureFullDivisionStore(owner, property);
+  if (!store) return;
+  store.set(id, division);
+}
+
+function deleteFullDivisionInstance(owner, id, property = FULL_DIVISION_STORE_PROP) {
+  if (!owner || !id) return;
+  const store = owner[property];
+  if (!(store instanceof Map)) return;
+  store.delete(id);
+}
+
+function resolveFullDivisionParent(island, parent = null) {
+  if (parent) return parent;
+  return island?.shadowRoot?.getElementById('bar-container') || null;
+}
+
+async function resolveDivisionAnimatorClass(options = {}) {
+  if (typeof options.DivisionAnimatorClass === 'function') {
+    return options.DivisionAnimatorClass;
+  }
+
+  if (!divisionAnimatorModulePromise) {
+    divisionAnimatorModulePromise = import('/static/js/DivisionAnimator.js');
+  }
+
+  const mod = await divisionAnimatorModulePromise;
+  return mod?.DivisionAnimator || mod?.default || null;
 }
 
 AnimationEngine.registerMitosisStrategy('pill-open', ({ engine, context, options }) => {
@@ -1226,6 +1346,157 @@ AnimationEngine.registerMitosisStrategy('division-lite-close', ({ engine, contex
 
   return pill;
 });
+
+AnimationEngine.registerMitosisStrategy('division-full-open', ({ context, options }) => (async () => {
+  const island = context.island || options.island || null;
+  const owner = context.owner || options.owner || island;
+  const parent = resolveFullDivisionParent(island, options.parent);
+  const id = options.id || options.containerId || null;
+  const storeProperty = options.storeProperty || FULL_DIVISION_STORE_PROP;
+
+  if (!owner || !parent) return null;
+
+  const DivisionAnimatorClass = await resolveDivisionAnimatorClass(options);
+  if (typeof DivisionAnimatorClass !== 'function') {
+    console.warn('AnimationEngine.division-full-open: DivisionAnimator is unavailable');
+    return null;
+  }
+
+  let child = options.child || null;
+  if (!child && typeof options.createChild === 'function') {
+    child = options.createChild();
+  }
+
+  if (!child) {
+    console.warn('AnimationEngine.division-full-open: child element is required');
+    return null;
+  }
+
+  const previous = id ? getFullDivisionInstance(owner, id, storeProperty) : null;
+  if (previous && previous !== options.division) {
+    previous.abort?.();
+    if (options.removePreviousChild !== false && previous._child?.parentNode) {
+      previous._child.remove();
+    }
+    deleteFullDivisionInstance(owner, id, storeProperty);
+  }
+
+  let division = null;
+  const onRemoved = (payload) => {
+    if (id) {
+      const current = getFullDivisionInstance(owner, id, storeProperty);
+      if (current === division) {
+        deleteFullDivisionInstance(owner, id, storeProperty);
+      }
+    }
+
+    if (typeof options.onRemoved === 'function') {
+      options.onRemoved(payload);
+    }
+  };
+
+  division = new DivisionAnimatorClass({
+    parent,
+    child,
+    target: options.target || null,
+    direction: options.direction || 'down',
+    shellTarget: options.shellTarget || island || parent,
+    shellAttribute: options.shellAttribute,
+    budSize: options.budSize,
+    budOverlap: options.budOverlap,
+    budDuration: options.budDuration,
+    pinchGap: options.pinchGap,
+    pinchWidth: options.pinchWidth,
+    pinchDuration: options.pinchDuration,
+    splitDuration: options.splitDuration,
+    membrane: options.membrane,
+    squashChild: options.squashChild,
+    childZIndex: options.childZIndex,
+    onPhase: options.onPhase,
+    onSettled: options.onSettled,
+    onRemoved,
+    owner,
+    membraneOptions: options.membraneOptions || {}
+  });
+
+  if (id) {
+    setFullDivisionInstance(owner, id, division, storeProperty);
+  }
+
+  if (options.startPhase) {
+    division._phase = options.startPhase;
+  }
+
+  if (options.preImpactOptions && island?.respondToImpact) {
+    island.respondToImpact(options.preImpactOptions);
+  }
+
+  if (options.autoRun !== false) {
+    await division.divide();
+  }
+
+  return division;
+})());
+
+AnimationEngine.registerMitosisStrategy('division-full-close', ({ engine, context, options }) => (async () => {
+  const island = context.island || options.island || null;
+  const owner = context.owner || options.owner || island;
+  const id = options.id || options.containerId || null;
+  const storeProperty = options.storeProperty || FULL_DIVISION_STORE_PROP;
+
+  if (!owner) return null;
+
+  let division = options.division || null;
+  if (!division && id) {
+    division = getFullDivisionInstance(owner, id, storeProperty);
+  }
+
+  if (!division && options.createIfMissing) {
+    division = await engine.runMitosisStrategy('division-full-open', {
+      island,
+      owner
+    }, {
+      ...options.createIfMissing,
+      id,
+      storeProperty,
+      autoRun: false,
+      startPhase: options.createIfMissing.startPhase || 'settled'
+    });
+  }
+
+  if (!division) return null;
+
+  if (typeof options.onStart === 'function') {
+    options.onStart(division);
+  }
+
+  if (options.forceSettled === true && division.phase !== 'settled') {
+    division._phase = 'settled';
+  }
+
+  if (division.phase !== 'settled') {
+    if (options.forceAbortRemove === true) {
+      const child = options.child || division._child || null;
+      division.abort?.();
+      if (child?.parentNode) child.remove();
+      if (id) deleteFullDivisionInstance(owner, id, storeProperty);
+
+      if (typeof options.onForceRemoved === 'function') {
+        options.onForceRemoved({ division, child });
+      }
+    }
+
+    return division;
+  }
+
+  await division.absorb();
+
+  if (typeof options.onComplete === 'function') {
+    options.onComplete(division);
+  }
+
+  return division;
+})());
 
 AnimationEngine.registerMitosisStrategy('search-open', ({ engine, context, options }) => {
   const island = context.island;

@@ -24,6 +24,7 @@ You are an expert Performance Engineer and Creative Developer specializing in va
 The island is a **UI shell only**. It owns no business logic. External controllers drive behavior through it.
 - Shadow DOM custom element with delegated events (`shadowRoot.addEventListener` + `e.target.closest()`).
 - Exposes: `mitosis(options)`, `undoMitosis(id)`, `showNotification()`, `hideNotification()`, `updateNotificationText()`, `morph()`, `reset()`, `respondToImpact()`.
+- `mitosis()` / `undoMitosis(id)` are **lite wrappers** for transient pills only. Full organic parent-child division must be orchestrated via `AnimationEngine.mitosisFull()` / `AnimationEngine.undoMitosisFull()` from external controllers.
 - `mitosis()` spawns a temporary floating button pill from the island body. `undoMitosis(id)` retracts and destroys it. **Never hardcode transient buttons in static HTML** — they must be created and destroyed programmatically.
 - All layout transitions are CSS-driven (`width`, `height`, `top`). Micro-interaction transforms use `translate3d`. **Do not mix layout + transform transitions on the same element** — it breaks dimension calculations during morphs.
 - All animation scheduling delegates to `AnimationEngine` — never use raw `setTimeout`/`setInterval` for animations.
@@ -35,7 +36,11 @@ The single source of truth for all animation orchestration.
 - `AnimationEngine.schedule(owner, cb, delay, property)` — tracks timers by owner + property key to allow targeted cancellation.
 - `AnimationEngine.clearScheduled(owner, property?)` — call in every `destroy()` / `disconnectedCallback()`.
 - `AnimationEngine.afterTransitionOrTimeout(owner, el, options)` — safe transition listener that self-cleans on whichever fires first (real `transitionend` event or timeout fallback — whichever fires first wins).
-- `AnimationEngine.runMitosisStrategy(name, context, options)` — named animation sequences (e.g., `'pill-open'`, `'pill-close'`).
+- `AnimationEngine.runMitosisStrategy(name, context, options)` — named animation sequences (`'pill-open'`, `'pill-close'`, `'division-lite-open'`, `'division-lite-close'`, `'division-full-open'`, `'division-full-close'`, `'search-open'`, `'search-close'`).
+- `AnimationEngine.mitosisFull(island, options)` — high-level API for full DivisionAnimator-driven opens.
+- `AnimationEngine.undoMitosisFull(island, options)` — high-level API for full DivisionAnimator-driven closes/absorbs.
+- Full-division instances are tracked by `owner + id` in an internal Map (`_fullDivisionInstances`) to avoid duplicate in-flight divisions and to support deterministic close flows.
+- `DivisionAnimator` for full strategies is loaded lazily (dynamic import) by AnimationEngine. App-level consumers should not instantiate it directly.
 - `AnimationEngine.createDivisionMembrane(options)` — SVG path visually bridging two DOM elements during morph. Returns a controller with `setConnected()`, `setSplit()`, `fadeOut()`, `remove()`.
 - `AnimationEngine.destroyMitosis(container, options)` — removes a mitosis surface. Options: `{ onComplete, duration, waitForTransition, propertyName, owner }`. No CSS `animation` property is set — the element is simply removed (with optional transition wait).
 - **Never schedule timers or animate elements directly outside AnimationEngine.**
@@ -57,27 +62,32 @@ The main playback controller with the mitosis animation.
   ```
 - Centralized state object: `{ playState, currentId, currentQueueIdx, duration, sliderPos, queue[], shuffle, repeat, currentTrack: { title, artist, thumbnail } }`.
 - Owns a `this._animator = new Animator()` instance for all WAAPI operations on the player container.
+- Uses `AnimationEngine.mitosisFull()` / `AnimationEngine.undoMitosisFull()` with `id: 'playback-player'` for open/close orchestration. **Do not instantiate `DivisionAnimator` directly inside playback consumers (deprecated).**
+- Keeps the returned full-division handle in `this._division` for lifecycle handoff and edge-case teardown.
 - Playback slider is driven by a RAF loop: `startRafLoop()` / `stopRafLoop()`. No `setInterval` for UI ticks.
 - **Progress fill** uses `transform: scaleX(fraction)` + `transform-origin: left center` — never `width%`. This is zero-layout per RAF frame (pure compositor).
-- **`morph()` grow phase** uses the FLIP technique: capture `getBoundingClientRect()` → instant layout change → compute `deltaY + clipBottom%` → WAAPI `transform + clipPath` animation. Zero layout recalculations during playback.
+- **Full divide phases** (`bud -> pinch -> snap -> split -> settle`) are owned by `DivisionAnimator` via `AnimationEngine.mitosisFull()`. Split FLIP (`transform + clipPath`) is handled inside DivisionAnimator.
 - **Queue panel** open/close both use WAAPI FLIP (transform-only). Layout is set once at final geometry; the animation plays a scale+translate inversion.
 - **`will-change` on the player container**: `transform, clip-path, opacity` — never `width` or `height` (those are layout properties, not compositor).
 - **`morph()` and `unmorph()` entry points** both call `this._animator.cancelAll()` before running any phase.
-- **`_settlePlayer()`** calls `this._animator.releaseAll(container)` before setting explicit `clipPath`/`transform` inline styles — clears fill:forwards overrides.
+- **`_settlePlayer()`** treats geometry as already settled by DivisionAnimator and should only finalize playback-specific UI visibility/state.
 - **`_onNavigate` handler** stored as `this._onNavigate` and removed in `destroy()`. Same pattern as `_onPopState`.
-- **Membrane constraint:** `onShrink`, `onAbsorb`, `onPinch`, `onBud` callbacks intentionally use CSS transitions on layout properties (`top`, `height`, `width`). The SVG division membrane reads `getBoundingClientRect()` every RAF to draw its outline — it requires real computed dimensions, making FLIP impossible for these phases.
+- **Membrane constraint:** in full mitosis, `bud`/`pinch`/`shrink`/`absorb` remain layout-bound CSS transitions (`top`, `height`, `width`) because the SVG membrane reads `getBoundingClientRect()` every RAF. FLIP is reserved for split after membrane detaches.
 - **Thumbnail cascade:** `getThumbnailCandidates(track)` returns `[maxresdefault, hqdefault, normalized-local]`. `updateThumbnail()` iterates via `onerror` chaining — never assume the highest-res URL exists.
 - **`_lastThemeKey`** — deduplication field (`'playState|trackId'` string). `_dispatchThemeEvent()` writes it before firing; `applyServerStatus()` reads it to skip redundant dispatches. Never reset it manually.
 
 ### `DivisionAnimator` (Cell-Division Primitive — `DivisionAnimator.js`)
-Modular, self-contained animation controller for organic parent→child splits. Each instance encapsulates the full lifecycle: **divide** (bud → pinch → split → settle) and **absorb** (shrink → absorb → remove). Consumers create an instance with geometry options, then `await div.divide()` / `await div.absorb()`.
-- **Constructor options:** `{ parent, child, target: { top, left?, width, height }, direction?, shellTarget?, shellAttribute?, budSize, budOverlap, budDuration, pinchGap, pinchWidth, pinchDuration, splitDuration, membrane?, childZIndex, onPhase, onSettled, onRemoved, owner, membraneOptions }`.
+Modular, self-contained animation controller for organic parent→child splits. Each instance encapsulates the full lifecycle: **divide** (bud -> pinch -> snap -> split -> settle) and **absorb** (shrink -> absorb -> remove).
+- **Preferred usage:** orchestrate through `AnimationEngine` full strategies (`division-full-open` / `division-full-close`) or `AnimationEngine.mitosisFull()` / `AnimationEngine.undoMitosisFull()`. Direct consumer-level `new DivisionAnimator(...)` is legacy/deprecated.
+- **Constructor options:** `{ parent, child, target: { top, left?, width, height }, direction?, shellTarget?, shellAttribute?, budSize, budOverlap, budDuration, pinchGap, pinchWidth, pinchDuration, splitDuration, membrane?, squashChild?, childZIndex, onPhase, onSettled, onRemoved, owner, membraneOptions }`.
 - **`direction`** — `'down'` (default) | `'up'` | `'left'` | `'right'`. Controls which edge the child buds from. An internal `AXIS_MAP` translates each direction into abstract axis properties (`mainPos`, `crossPos`, `mainSize`, `crossSize`, `parentEdge`, `sign`, `clipSide`, `membraneAxis`). **All phase logic is axis-agnostic** — no direction-specific branches in animation code.
   - `down`/`up` use `mainSize: 'height'`, `crossSize: 'width'`, membrane axis `'vertical'`.
   - `left`/`right` use `mainSize: 'width'`, `crossSize: 'height'`, membrane axis `'horizontal'`.
   - Negative directions (`up`/`left`) transition **both** `mainPos` and `mainSize` simultaneously during bud/absorb so the child grows/shrinks toward the parent edge (CSS `width`/`height` grow in the positive direction only).
+- **Spring motion model:** spring-simulated WAAPI keyframes are used for snap/split/settle characteristics; duration overrides (`budDuration`, `pinchDuration`, `splitDuration`) are optional and fall back to spring-derived timing.
 - **Phase callbacks:** `onPhase(name, { parent, child, bridge, membrane })` fires on every phase entry — useful for revealing child content at the right moment (e.g. `split` → show player stage).
 - **CSS transitions for bud/pinch/absorb** — membrane SVG reads `getBoundingClientRect()` every RAF, requires real layout dimensions.
+- **`snap` phase:** tremor + recoil detachment beat between pinch and split.
 - **WAAPI FLIP for split** — membrane is gone, pure GPU compositor (`transform + clipPath`). Cross-size animates via CSS transition (content needs reflow). Clip reveal uses `_buildClipPath()` which targets the correct `inset()` side for each direction.
 - **Bridge element** — DOM div creating the hourglass neck between parent and child during pinch. For vertical divisions it's a horizontal strip at the parent's edge; for horizontal divisions it's a vertical strip. Membrane `buildConnectedMembranePath` (vertical) or `buildConnectedMembranePathHorizontal` (horizontal) draws through it. Created/removed internally.
 - **Membrane element ordering** — `_membraneElements(child)` swaps `topElement/bottomElement` for reversed directions (`up`/`left`), so the membrane path builder always receives elements in spatial order (top-to-bottom or left-to-right).

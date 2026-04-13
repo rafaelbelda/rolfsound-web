@@ -680,7 +680,6 @@ class RolfsoundIsland extends HTMLElement {
                 --gray: var(--color-text-muted);
                 --border-metal: var(--color-border-subtle);
                 --border-metal-bright: var(--color-border-strong);
-
                 position: fixed; top: 15px; left: 50%; transform: translateX(-50%);
                 z-index: 1000; pointer-events: none;
 
@@ -799,19 +798,13 @@ class RolfsoundIsland extends HTMLElement {
             }
 
             :host([division-shell]) #bar-container {
-                background: transparent;
-                border-color: transparent;
-                box-shadow: none;
-                /* Suppress backdrop-filter so it doesn't blur the SVG membrane below */
+                /* Island stays fully opaque during division. The membrane SVG
+                   (z-995) sits below the island (z-1000) so only the neck
+                   between parent and child is visible from the membrane.
+                   We only suppress backdrop-filter to avoid blurring the
+                   membrane underneath the island's stacking context. */
                 backdrop-filter: none;
                 -webkit-backdrop-filter: none;
-                /* border-color and box-shadow are NOT listed here → they snap instantly.
-                   background-color keeps its 0.5s ease so the bar fades smoothly,
-                   providing visual continuity while the membrane initialises. */
-                transition: width  0.5s var(--ease-spring),
-                            height 0.5s var(--ease-spring),
-                            border-radius 0.5s var(--ease-spring),
-                            background-color 0.5s ease;
             }
 
             #bar-container.notifying {

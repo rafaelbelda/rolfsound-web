@@ -5,7 +5,6 @@
 import AnimationEngine from '/static/js/AnimationEngine.js';
 import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
 import Animator from '/static/js/Animator.js';
-import { DivisionAnimator } from '/static/js/DivisionAnimator.js';
 
 // ─── Dimensões do layout ───────────────────────────────────────────────────
 const PLAYER_W   = 340;   // largura da capa e da pílula de controles (px)
@@ -236,11 +235,10 @@ class PlaybackMitosisManager {
     child.innerHTML = this.buildPlayerHTML();
     child.style.cssText = `
       background: var(--color-playback-shell);
-      border: 1px solid var(--color-border-subtle);
-      border-top: none;
+      border: none;
       box-shadow: none;
       will-change: transform, clip-path, opacity;
-      border-radius: 0 0 var(--radius-dynamic-island) var(--radius-dynamic-island);
+      border-radius: var(--radius-dynamic-island);
     `;
     this.playerContainer = child;
     this._prefillPlayerContent(child);
@@ -248,40 +246,33 @@ class PlaybackMitosisManager {
     // ── Membrane style from island computed style ──
     const islandStyle = getComputedStyle(islandBar);
 
-    // ── Create DivisionAnimator and run divide() ──
-    this._division = new DivisionAnimator({
-      parent:      islandBar,
-      child:       child,
+    Promise.resolve(AnimationEngine.mitosisFull(this.island, {
+      owner: this,
+      id: 'playback-player',
+      parent: islandBar,
+      child,
       shellTarget: this.island,
       target: {
-        top:    metrics.targetTop,
-        width:  PLAYER_W,
+        top: metrics.targetTop,
+        width: PLAYER_W,
         height: TOTAL_H,
       },
-      budSize:       PlaybackMitosisManager.BUD_HEIGHT,
-      budOverlap:    PlaybackMitosisManager.BUDDING_OVERLAP,
-      budDuration:   360,
-      pinchGap:      PlaybackMitosisManager.PINCH_GAP,
-      pinchWidth:    PlaybackMitosisManager.BRIDGE_PINCH_W,
-      pinchDuration: 380,
-      splitDuration: 580,
-      owner: this,
+      budSize: PlaybackMitosisManager.BUD_HEIGHT,
+      budOverlap: PlaybackMitosisManager.BUDDING_OVERLAP,
+      budDuration: 280,
+      pinchGap: PlaybackMitosisManager.PINCH_GAP,
+      pinchWidth: PlaybackMitosisManager.BRIDGE_PINCH_W,
+      pinchDuration: 260,
+      splitDuration: 430,
       membraneOptions: {
-        fillColor:   islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
-        strokeColor: islandStyle.borderTopColor  || 'rgba(255, 255, 255, 0.06)',
+        fillColor: islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
+        strokeColor: islandStyle.borderTopColor || 'rgba(255, 255, 255, 0.06)',
+        shadowOpacity: 0.28,
+        shadowBlur: 6,
+        shadowOffsetY: 4,
         zIndex: 995,
       },
       onPhase: (phase, ctx) => {
-        if (phase === 'bud') {
-          // Shell vars → transparent while membrane draws the outline
-          ctx.child.style.setProperty('--division-shell-fill', 'transparent');
-          ctx.child.style.setProperty('--division-shell-border-color', 'transparent');
-          ctx.child.style.setProperty('--division-shell-shadow', 'none');
-        }
-        if (phase === 'pinch') {
-          ctx.child.style.borderTop = '1px solid var(--color-border-subtle)';
-          ctx.child.style.boxShadow = 'var(--shadow-elevated)';
-        }
         if (phase === 'split') {
           this._revealPlayerStage(ctx.child);
         }
@@ -289,9 +280,19 @@ class PlaybackMitosisManager {
       onSettled: ({ child: container }) => {
         this._settlePlayer(container);
       },
-    });
-
-    this._division.divide();
+      onRemoved: () => this._onDivisionRemoved(),
+    }))
+      .then((division) => {
+        if (!division) return;
+        if (!this.isMorphed || this.playerContainer !== child) {
+          division.abort?.();
+          return;
+        }
+        this._division = division;
+      })
+      .catch((error) => {
+        console.error('Playback full mitosis open failed:', error);
+      });
 
     if (window.meuCursor?.resetHover) window.meuCursor.resetHover();
   }
@@ -301,9 +302,8 @@ class PlaybackMitosisManager {
     if (!container || !container.parentNode || container !== this.playerContainer) return;
 
     container.style.overflow   = 'visible';
-    container.style.background = 'transparent';
-    container.style.border     = 'none';
-    container.style.boxShadow  = 'none';
+    // Keep the shell surface during split so the island never appears to vanish.
+    // The shell is removed in _settlePlayer once content is fully visible.
 
     const cover    = container.querySelector('#playback-cover-shell');
     const controls = container.querySelector('#playback-controls-shell');
@@ -317,7 +317,7 @@ class PlaybackMitosisManager {
       if (!controls || !container.parentNode || container !== this.playerContainer) return;
       controls.style.opacity   = '1';
       controls.style.transform = 'translateY(0) scale(1)';
-    }, 170);
+    }, 110);
   }
 
   /** Finaliza a expansão: libera interação e garante estado final */
@@ -391,52 +391,82 @@ class PlaybackMitosisManager {
     }
 
     // ── Re-apply shell appearance for the shrink animation ──
+    // Child stays borderless — membrane provides the outline during absorb.
     container.style.background = 'var(--color-playback-shell)';
-    container.style.border     = '1px solid var(--color-border-subtle)';
-    container.style.boxShadow  = 'var(--shadow-elevated)';
+    container.style.border     = 'none';
+    container.style.borderRadius = 'var(--radius-dynamic-island)';
+    container.style.boxShadow  = 'none';
 
-    // ── If no division instance, abort it and create one for the reverse ──
+    const closeDivision = (division) => {
+      Promise.resolve(AnimationEngine.undoMitosisFull(this.island, {
+        owner: this,
+        id: 'playback-player',
+        division,
+        forceSettled: true,
+        forceAbortRemove: true,
+        child: container,
+        onForceRemoved: () => this._removePlayer(container),
+      })).catch((error) => {
+        console.error('Playback full mitosis close failed:', error);
+        this._removePlayer(container);
+      });
+    };
+
     if (this._division) {
-      // Division was settled — absorb() will run shrink → absorb → remove
+      closeDivision(this._division);
     } else {
-      // Edge case: morph wasn't driven by DivisionAnimator (e.g. stale state)
       const islandBar = this._getIslandBarContainer();
       if (!islandBar) {
         this._removePlayer(container);
         return;
       }
+
       const islandStyle = getComputedStyle(islandBar);
       const metrics = this.getMitosisMetrics();
-      this._division = new DivisionAnimator({
-        parent:      islandBar,
-        child:       container,
+
+      Promise.resolve(AnimationEngine.mitosisFull(this.island, {
+        owner: this,
+        id: 'playback-player',
+        parent: islandBar,
+        child: container,
         shellTarget: this.island,
         target: {
-          top:    metrics.targetTop,
-          width:  PLAYER_W,
+          top: metrics.targetTop,
+          width: PLAYER_W,
           height: TOTAL_H,
         },
-        budSize:       PlaybackMitosisManager.BUD_HEIGHT,
-        budOverlap:    PlaybackMitosisManager.BUDDING_OVERLAP,
-        budDuration:   300,
-        pinchGap:      PlaybackMitosisManager.PINCH_GAP,
-        pinchWidth:    PlaybackMitosisManager.BRIDGE_PINCH_W,
-        splitDuration: 460,
-        owner: this,
+        budSize: PlaybackMitosisManager.BUD_HEIGHT,
+        budOverlap: PlaybackMitosisManager.BUDDING_OVERLAP,
+        budDuration: 240,
+        pinchGap: PlaybackMitosisManager.PINCH_GAP,
+        pinchWidth: PlaybackMitosisManager.BRIDGE_PINCH_W,
+        splitDuration: 380,
         membraneOptions: {
-          fillColor:   islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
-          strokeColor: islandStyle.borderTopColor  || 'rgba(255, 255, 255, 0.06)',
+          fillColor: islandStyle.backgroundColor || 'rgba(15, 15, 15, 0.92)',
+          strokeColor: islandStyle.borderTopColor || 'rgba(255, 255, 255, 0.06)',
+          shadowOpacity: 0.28,
+          shadowBlur: 6,
+          shadowOffsetY: 4,
           zIndex: 995,
         },
         onRemoved: () => this._onDivisionRemoved(),
-      });
-      // Force phase to 'settled' so absorb() runs
-      this._division._phase = 'settled';
-    }
+        autoRun: false,
+        startPhase: 'settled',
+      }))
+        .then((division) => {
+          if (!division) {
+            this._removePlayer(container);
+            return;
+          }
 
-    this._division.absorb().then(() => {
-      this._onDivisionRemoved();
-    });
+          this._division = division;
+          closeDivision(division);
+        })
+        .catch((error) => {
+          console.error('Playback full mitosis fallback create failed:', error);
+          this._removePlayer(container);
+        });
+    }
 
     if (window.meuCursor?.resetHover) window.meuCursor.resetHover();
   }
