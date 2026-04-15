@@ -144,4 +144,6 @@ async def queue_remove(position: int) -> dict | None: return await _post("/queue
 async def queue_move(from_pos, to_pos)-> dict | None: return await _post("/queue/move", {"from": from_pos, "to": to_pos})
 async def queue_clear()               -> dict | None: return await _post("/queue/clear")
 async def queue_previous()            -> dict | None: return await _post("/queue/previous")
+async def queue_repeat(mode: str)     -> dict | None: return await _post("/queue/repeat", {"mode": mode})
+async def queue_shuffle(enabled: bool)-> dict | None: return await _post("/queue/shuffle", {"enabled": enabled})
 async def is_available()              -> bool:        return await get_status() is not None

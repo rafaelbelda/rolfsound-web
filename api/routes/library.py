@@ -2,12 +2,22 @@
 
 import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from api.services.indexer import index_file
 
 from db import database
 
 router = APIRouter()
+
+_reindex_state = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "identified": 0,
+    "failed": 0,
+    "skipped": 0,
+}
 
 
 @router.post("/library/scan")
@@ -65,6 +75,102 @@ async def get_track(track_id: str):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
         return track
+    finally:
+        conn.close()
+
+
+@router.post("/library/{track_id}/identify")
+async def identify_track_route(track_id: str):
+    """Identifica uma faixa específica via AcoustID + Discogs."""
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        file_path = track.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+    finally:
+        conn.close()
+
+    meta = await index_file(track_id, file_path)
+    return {"ok": True, "track_id": track_id, **meta}
+
+
+@router.post("/library/identify-all")
+async def identify_all_tracks():
+    """Processa todas as faixas com status 'unidentified'."""
+    conn = database.get_connection()
+    try:
+        pending = database.list_unidentified_tracks(conn)
+    finally:
+        conn.close()
+
+    results = {"identified": 0, "failed": 0, "skipped": 0}
+    for track in pending:
+        file_path = track.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            results["skipped"] += 1
+            continue
+        meta = await index_file(track["id"], file_path)
+        if meta["status"] == "identified":
+            results["identified"] += 1
+        else:
+            results["failed"] += 1
+
+    return {"ok": True, "total": len(pending), **results}
+
+
+async def _run_reindex(tracks: list):
+    global _reindex_state
+    for track in tracks:
+        file_path = track.get("file_path")
+        if not file_path or not os.path.exists(file_path):
+            _reindex_state["skipped"] += 1
+            _reindex_state["done"] += 1
+            continue
+        meta = await index_file(track["id"], file_path)
+        if meta["status"] == "identified":
+            _reindex_state["identified"] += 1
+        else:
+            _reindex_state["failed"] += 1
+        _reindex_state["done"] += 1
+    _reindex_state["running"] = False
+
+
+@router.post("/library/reindex-all")
+async def reindex_all_tracks(background_tasks: BackgroundTasks):
+    """Força reprocessamento de todas as faixas em background."""
+    global _reindex_state
+    if _reindex_state["running"]:
+        return JSONResponse({"error": "already_running"}, status_code=409)
+
+    conn = database.get_connection()
+    try:
+        tracks = database.list_tracks(conn)
+    finally:
+        conn.close()
+
+    _reindex_state.update({
+        "running": True, "total": len(tracks),
+        "done": 0, "identified": 0, "failed": 0, "skipped": 0,
+    })
+    background_tasks.add_task(_run_reindex, tracks)
+    return {"ok": True, "total": len(tracks)}
+
+
+@router.get("/library/reindex-status")
+async def reindex_status():
+    return _reindex_state
+
+
+@router.get("/library/duplicates")
+async def get_duplicates():
+    """Return groups of tracks sharing the same Chromaprint fingerprint."""
+    conn = database.get_connection()
+    try:
+        groups = database.find_duplicate_fingerprints(conn)
+        return {"groups": groups, "total_groups": len(groups)}
     finally:
         conn.close()
 

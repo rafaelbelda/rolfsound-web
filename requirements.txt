@@ -6,3 +6,4 @@ pydantic>=2.6.0
 cachetools>=5.3.0
 pillow>=12.1.1
 Jinja2>=3.1.6
+shazamio>=0.4.0

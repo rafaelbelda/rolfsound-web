@@ -19,6 +19,7 @@ __pycache__
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *.swn
@@ -27,6 +28,11 @@ __pycache__
 # OS
 .DS_Store
 Thumbs.db
+
+# Platform binaries — install locally per platform (see README)
+*.exe
+ffmpeg
+fpcalc
 
 # Logs
 logs/

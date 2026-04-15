@@ -36,7 +36,7 @@ def setup_logging() -> None:
     fh.setFormatter(fmt)
 
     ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
+    ch.setLevel(logging.DEBUG)
     ch.setFormatter(logging.Formatter("%(levelname)-8s | %(name)s | %(message)s"))
 
     root.addHandler(fh)

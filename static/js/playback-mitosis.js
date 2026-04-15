@@ -37,7 +37,7 @@ class PlaybackMitosisManager {
       queue: [],
 
       shuffle: false,
-      repeat: false,   // 'off' | 'one' | 'all'  (bool simples por ora)
+      repeat_mode: 'off',   // 'off' | 'one' | 'all'
 
       currentTrack: {
         title: '',
@@ -969,6 +969,9 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
 
   syncToggleButtons() {
+    const repeatMode = this.state.repeat_mode || 'off';
+    const repeatOn   = repeatMode !== 'off';
+
     if (this.dom.btnShuffle) {
       this.dom.btnShuffle.style.color = this.state.shuffle
         ? 'var(--color-control-active)' : 'var(--color-control-inactive)';
@@ -977,11 +980,21 @@ class PlaybackMitosisManager {
       this.dom.shuffleDot.style.opacity = this.state.shuffle ? '1' : '0';
     }
     if (this.dom.btnRepeat) {
-      this.dom.btnRepeat.style.color = this.state.repeat
+      this.dom.btnRepeat.style.color = repeatOn
         ? 'var(--color-control-active)' : 'var(--color-control-inactive)';
+      // Show "1" badge inside the button when repeat-one is active
+      this.dom.btnRepeat.setAttribute('title',
+        repeatMode === 'one' ? 'Repeat: one' :
+        repeatMode === 'all' ? 'Repeat: all' : 'Repeat: off');
     }
     if (this.dom.repeatDot) {
-      this.dom.repeatDot.style.opacity = this.state.repeat ? '1' : '0';
+      this.dom.repeatDot.style.opacity = repeatOn ? '1' : '0';
+      // Show "1" text in the dot when repeat-one, otherwise default dot
+      this.dom.repeatDot.textContent = repeatMode === 'one' ? '1' : '';
+      this.dom.repeatDot.style.fontSize = repeatMode === 'one' ? '6px' : '';
+      this.dom.repeatDot.style.fontWeight = repeatMode === 'one' ? '700' : '';
+      this.dom.repeatDot.style.width  = repeatMode === 'one' ? '10px' : '';
+      this.dom.repeatDot.style.height = repeatMode === 'one' ? '10px' : '';
     }
   }
 
@@ -1129,7 +1142,7 @@ class PlaybackMitosisManager {
         });
       }
 
-      this.renderQueuePanel();
+      this._loadRecentHistory().then(() => this.renderQueuePanel());
     }, 560, '_queueTimers');
   }
 
@@ -1313,6 +1326,60 @@ class PlaybackMitosisManager {
         padding: 48px 16px;
       }
       .q-item.q-active .q-title { color: var(--color-base-white-strong); }
+      .q-remove {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+        color: var(--color-text-disabled);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: color 0.12s ease, background 0.12s ease;
+      }
+      .q-item:hover .q-remove { display: flex; }
+      .q-remove:hover { color: var(--color-text-primary); background: rgba(255,255,255,0.1); }
+      .q-remove svg { pointer-events: none; }
+      #queue-actions {
+        display: flex;
+        gap: 4px;
+        padding: 6px 10px;
+        border-top: 1px solid var(--color-border-subtle);
+        flex-shrink: 0;
+      }
+      .q-action-btn {
+        flex: 1;
+        padding: 5px 4px;
+        font-size: 8px;
+        letter-spacing: 0.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+        background: transparent;
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: color 0.12s, background 0.12s, border-color 0.12s;
+        white-space: nowrap;
+      }
+      .q-action-btn:hover { color: var(--color-text-primary); background: rgba(255,255,255,0.06); border-color: var(--color-border-focus); }
+      .q-action-btn.q-action-danger:hover { color: #ff6b6b; border-color: rgba(255,107,107,0.4); }
+      #queue-history-section {
+        padding: 6px 0 2px;
+        border-bottom: 1px solid var(--color-border-subtle);
+      }
+      .q-section-label {
+        padding: 2px 16px 4px;
+        font-size: 7px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--color-text-disabled);
+        font-weight: 600;
+      }
     </style>
     <div id="queue-panel-inner">
       <div id="queue-panel-header">
@@ -1324,6 +1391,10 @@ class PlaybackMitosisManager {
         </button>
       </div>
       <div id="queue-items-list"></div>
+      <div id="queue-actions">
+        <button class="q-action-btn" id="btn-queue-save" title="Save queue as playlist">Save as playlist</button>
+        <button class="q-action-btn q-action-danger" id="btn-queue-clear" title="Clear queue">Clear</button>
+      </div>
     </div>`;
   }
 
@@ -1332,28 +1403,104 @@ class PlaybackMitosisManager {
     const list = this.queueContainer.querySelector('#queue-items-list');
     if (!list) return; // panel not yet populated (still animating open)
 
-    const queue = this.state.queue;
-    if (!queue || queue.length === 0) {
-      list.innerHTML = '<div class="q-empty">Queue is empty</div>';
-      return;
+    const queue   = this.state.queue;
+    const history = this.state.recentHistory || [];
+
+    const removeIcon = `<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+
+    // History section (up to 5 most recent, newest first)
+    let historyHtml = '';
+    if (history.length > 0) {
+      const items = history.slice(0, 5).map(h => {
+        const thumb = this.thumbSrc(h.thumbnail);
+        const thumbHtml = thumb
+          ? `<img src="${this.escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
+          : '';
+        return `
+          <div class="q-item q-history-item" data-track-id="${this.escapeHtml(h.track_id || '')}"
+               data-filepath="${this.escapeHtml(h.file_path || h.filepath || '')}"
+               title="Add to queue">
+            <span class="q-idx" style="opacity:0.4">↩</span>
+            <div class="q-thumb">${thumbHtml}</div>
+            <div class="q-meta">
+              <div class="q-title" style="opacity:0.7">${this.escapeHtml(h.title || '')}</div>
+              <div class="q-artist">${this.escapeHtml(h.artist || '')}</div>
+            </div>
+          </div>`;
+      }).join('');
+      historyHtml = `
+        <div id="queue-history-section">
+          <div class="q-section-label">Recently played</div>
+          ${items}
+        </div>`;
     }
 
-    list.innerHTML = queue.map((track, idx) => {
-      const isActive = idx === this.state.currentQueueIdx;
-      const thumb    = this.thumbSrc(track.thumbnail);
-      const thumbHtml = thumb
-        ? `<img src="${this.escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
-        : '';
-      return `
-        <div class="q-item ${isActive ? 'q-active' : ''}" data-idx="${idx}">
-          <span class="q-idx">${idx + 1}</span>
-          <div class="q-thumb">${thumbHtml}</div>
-          <div class="q-meta">
-            <div class="q-title">${this.escapeHtml(track.title || track.id || '')}</div>
-            <div class="q-artist">${this.escapeHtml(track.artist || '')}</div>
-          </div>
-        </div>`;
-    }).join('');
+    // Queue section
+    let queueHtml = '';
+    if (!queue || queue.length === 0) {
+      queueHtml = '<div class="q-empty">Queue is empty</div>';
+    } else {
+      if (history.length > 0) {
+        queueHtml = `<div class="q-section-label" style="padding-top:8px">Up next</div>`;
+      }
+      queueHtml += queue.map((track, idx) => {
+        const isActive = idx === this.state.currentQueueIdx;
+        const thumb    = this.thumbSrc(track.thumbnail);
+        const thumbHtml = thumb
+          ? `<img src="${this.escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
+          : '';
+        return `
+          <div class="q-item ${isActive ? 'q-active' : ''}" data-idx="${idx}">
+            <span class="q-idx">${idx + 1}</span>
+            <div class="q-thumb">${thumbHtml}</div>
+            <div class="q-meta">
+              <div class="q-title">${this.escapeHtml(track.title || track.id || '')}</div>
+              <div class="q-artist">${this.escapeHtml(track.artist || '')}</div>
+            </div>
+            <button class="q-remove" data-remove-idx="${idx}" aria-label="Remove from queue">${removeIcon}</button>
+          </div>`;
+      }).join('');
+    }
+
+    list.innerHTML = historyHtml + queueHtml;
+
+    // Wire remove buttons
+    list.querySelectorAll('.q-remove').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.removeIdx, 10);
+        await this.removeFromQueue(idx);
+      });
+    });
+
+    // Wire history items — clicking adds to queue
+    list.querySelectorAll('.q-history-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const trackId  = item.dataset.trackId;
+        const filepath = item.dataset.filepath;
+        if (!trackId) return;
+        try {
+          await fetch('/api/queue/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_id: trackId, filepath })
+          });
+          AnimationEngine.schedule(this, () => this.pollStatus(), 200, '_pollRetry');
+        } catch(e) { console.error('Add from history failed:', e); }
+      });
+    });
+
+    // Wire action buttons
+    const btnSave  = this.queueContainer.querySelector('#btn-queue-save');
+    const btnClear = this.queueContainer.querySelector('#btn-queue-clear');
+    if (btnSave && !btnSave._wired) {
+      btnSave._wired = true;
+      btnSave.addEventListener('click', () => this.saveQueueAsPlaylist());
+    }
+    if (btnClear && !btnClear._wired) {
+      btnClear._wired = true;
+      btnClear.addEventListener('click', () => this.clearQueue());
+    }
   }
 
   async playQueueItem(idx) {
@@ -1379,9 +1526,10 @@ class PlaybackMitosisManager {
   }
 
   async toggleShuffle() {
+    this.state.shuffle = !this.state.shuffle;
     this.syncToggleButtons();
     try {
-      await fetch('/api/shuffle', {
+      await fetch('/api/queue/shuffle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: this.state.shuffle })
@@ -1392,16 +1540,75 @@ class PlaybackMitosisManager {
   }
 
   async toggleRepeat() {
-    this.state.repeat = !this.state.repeat;
+    // Cycle: off → all → one → off
+    const cycle = { 'off': 'all', 'all': 'one', 'one': 'off' };
+    this.state.repeat_mode = cycle[this.state.repeat_mode || 'off'] || 'off';
     this.syncToggleButtons();
     try {
-      await fetch('/api/repeat', {
+      await fetch('/api/queue/repeat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: this.state.repeat })
+        body: JSON.stringify({ mode: this.state.repeat_mode })
       });
     } catch (e) {
       console.error('Repeat toggle failed:', e);
+    }
+  }
+
+  async removeFromQueue(idx) {
+    try {
+      await fetch('/api/queue/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: idx })
+      });
+      AnimationEngine.schedule(this, () => this.pollStatus(), 200, '_pollRetry');
+    } catch(e) { console.error('Remove from queue failed:', e); }
+  }
+
+  async clearQueue() {
+    try {
+      await fetch('/api/queue/clear', { method: 'POST' });
+      AnimationEngine.schedule(this, () => this.pollStatus(), 200, '_pollRetry');
+    } catch(e) { console.error('Clear queue failed:', e); }
+  }
+
+  async saveQueueAsPlaylist() {
+    const name = await this._promptText('Save queue as playlist', 'Enter playlist name');
+    if (!name) return;
+    try {
+      const r = await fetch('/api/queue/save-as-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (r.ok) {
+        this._notify(`Saved as "${name}"`);
+        window.dispatchEvent(new CustomEvent('rolfsound-playlist-created'));
+      }
+    } catch(e) { console.error('Save as playlist failed:', e); }
+  }
+
+  async _loadRecentHistory() {
+    try {
+      const r = await fetch('/api/history?limit=5');
+      if (!r.ok) return;
+      const data = await r.json();
+      this.state.recentHistory = (data.history || data || []).slice(0, 5);
+    } catch(e) { /* silent */ }
+  }
+
+  _promptText(title, placeholder) {
+    // Use island prompt if available, otherwise native
+    if (typeof window.island?.promptPlaylistName === 'function') {
+      return window.island.promptPlaylistName(title, placeholder);
+    }
+    return Promise.resolve(window.prompt(title) || '');
+  }
+
+  _notify(text) {
+    if (typeof window.island?.showNotification === 'function') {
+      window.island.showNotification({ text, duration: 2200 });
     }
   }
 
@@ -1513,8 +1720,10 @@ class PlaybackMitosisManager {
     }
 
     // Sync shuffle/repeat do servidor se disponível
-    if (typeof status.shuffle !== 'undefined') this.state.shuffle = !!status.shuffle;
-    if (typeof status.repeat  !== 'undefined') this.state.repeat  = !!status.repeat;
+    if (typeof status.shuffle     !== 'undefined') this.state.shuffle     = !!status.shuffle;
+    if (typeof status.repeat_mode !== 'undefined') this.state.repeat_mode = status.repeat_mode || 'off';
+    // Legacy compat: se servidor ainda manda repeat como bool
+    else if (typeof status.repeat !== 'undefined') this.state.repeat_mode = status.repeat ? 'all' : 'off';
 
     this.render();
 

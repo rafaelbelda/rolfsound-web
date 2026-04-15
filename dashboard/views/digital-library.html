@@ -355,18 +355,78 @@
     object-fit: cover;
   }
 
+  .playlist-folder-track-info {
+    padding: 7px 8px 6px;
+    flex: 1;
+    min-width: 0;
+    position: relative;
+  }
+
   .playlist-folder-track-title {
     font-size: var(--fs-xs, 9px);
     color: var(--color-text-secondary);
-    padding: 8px;
     line-height: 1.2;
     display: -webkit-box;
     line-clamp: 2;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    min-height: 32px;
+    min-height: 22px;
   }
+
+  .playlist-folder-track-artist {
+    font-size: 8px;
+    color: var(--color-text-disabled);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .folder-track-stats {
+    font-size: 7px;
+    color: var(--color-text-disabled);
+    margin-top: 3px;
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .folder-track-remove {
+    display: none;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: rgba(0,0,0,0.6);
+    border: none;
+    border-radius: 50%;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.12s, background 0.12s;
+  }
+
+  .playlist-folder-track:hover .folder-track-remove { display: flex; }
+  .folder-track-remove:hover { color: #ff6b6b; background: rgba(0,0,0,0.85); }
+  .folder-track-remove svg { pointer-events: none; }
+
+  .folder-sort-select {
+    appearance: none;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    font-size: 8px;
+    padding: 3px 8px;
+    cursor: pointer;
+    outline: none;
+  }
+  .folder-sort-select:hover { border-color: var(--color-border-focus); }
 
   #playlist-picker {
     position: fixed;
@@ -519,23 +579,30 @@
   function getThumbnailCandidates(track) {
     const normalized = thumbSrc(track?.thumbnail || '');
     const trackId = getTrackId(track);
-    const candidates = [];
     const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
+    const isDiscogs = normalized && normalized.includes('discogs.com');
 
-    if (isYouTubeId) {
-      candidates.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
-      candidates.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
+    const discogsCandidates = [];
+    const youtubeCandidates = [];
+
+    // Discogs tem prioridade — sobrescreve inconsistências do YouTube
+    if (normalized && !normalized.includes('i.ytimg.com/vi/')) {
+      discogsCandidates.push(normalized);
     }
 
-    if (normalized) {
-      if (normalized.includes('i.ytimg.com/vi/')) {
-        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
-        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
-      }
-      candidates.push(normalized);
+    // YouTube como fallback
+    if (isYouTubeId && !isDiscogs) {
+      youtubeCandidates.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
+      youtubeCandidates.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
     }
 
-    return [...new Set(candidates.filter(Boolean))];
+    if (normalized && normalized.includes('i.ytimg.com/vi/')) {
+      youtubeCandidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
+      youtubeCandidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
+      youtubeCandidates.push(normalized);
+    }
+
+    return [...new Set([...discogsCandidates, ...youtubeCandidates].filter(Boolean))];
   }
 
   function cascadeImage(img, candidates) {
@@ -949,18 +1016,39 @@
     }
   }
 
-  function buildFolderTrackCard(track) {
+  function buildFolderTrackCard(track, playlistId) {
     const trackId = getTrackId(track);
-    const title = escapeHtml(track.title || 'Unknown');
+    const title   = escapeHtml(track.title  || 'Unknown');
+    const artist  = escapeHtml(track.artist || '');
     const candidates = getThumbnailCandidates(track);
-    const thumbnail = candidates[0] || null;
+    const thumbnail  = candidates[0] || null;
+
+    const playCount  = track.play_count  || 0;
+    const skipRate   = track.skip_rate   != null ? Math.round(track.skip_rate * 100) : null;
+    const lastPlayed = track.last_played
+      ? new Date(track.last_played * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : null;
+
+    const statsHtml = (playCount > 0 || lastPlayed)
+      ? `<div class="folder-track-stats">${playCount > 0 ? `${playCount} plays` : ''}${lastPlayed ? ` · ${lastPlayed}` : ''}${skipRate !== null && playCount > 1 ? ` · ${skipRate}% skip` : ''}</div>`
+      : '';
 
     return `
-      <div class="playlist-folder-track" data-track-id="${escapeHtml(trackId)}">
+      <div class="playlist-folder-track" data-track-id="${escapeHtml(trackId)}" data-playlist-id="${playlistId || ''}">
         <div class="playlist-folder-track-thumb">
           ${thumbnail ? `<img src="${escapeHtml(thumbnail)}" loading="lazy" alt="${title}" />` : '♫'}
         </div>
-        <div class="playlist-folder-track-title">${title}</div>
+        <div class="playlist-folder-track-info">
+          <div class="playlist-folder-track-title">${title}</div>
+          ${artist ? `<div class="playlist-folder-track-artist">${artist}</div>` : ''}
+          ${statsHtml}
+        </div>
+        <button class="folder-track-remove" data-track-id="${escapeHtml(trackId)}" data-playlist-id="${playlistId || ''}"
+                title="Remove from playlist" aria-label="Remove from playlist">
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
       </div>
     `;
   }
@@ -979,6 +1067,32 @@
     }, 210);
 
     folderState = null;
+  }
+
+  function bindFolderRemoveButtons(panel, playlistId) {
+    panel.querySelectorAll('.folder-track-remove').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const trackId = btn.dataset.trackId;
+        if (!trackId) return;
+        try {
+          const r = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackId)}`, {
+            method: 'DELETE'
+          });
+          if (!r.ok) throw new Error('Remove failed');
+          btn.closest('.playlist-folder-track')?.remove();
+          // Refresh playlist card track count
+          const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
+          if (card) {
+            const countEl = card.querySelector('.track-count, .playlist-track-count');
+            if (countEl) {
+              const cur = parseInt(countEl.textContent) || 0;
+              if (cur > 0) countEl.textContent = String(cur - 1);
+            }
+          }
+        } catch(err) { console.error('Remove track from playlist error:', err); }
+      });
+    });
   }
 
   function openPlaylistFolder(playlistCard, playlist, tracks) {
@@ -1012,18 +1126,34 @@
     panel.style.opacity = '0';
     panel.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px)) scale(${startScaleX}, ${startScaleY})`;
 
+    const playlistId = playlist.id;
+
+    const renderFolderTracks = (trackList) =>
+      trackList.map(t => buildFolderTrackCard(t, playlistId)).join('')
+      || '<div style="padding:32px;text-align:center;color:var(--color-text-disabled);font-size:var(--fs-sm)">Playlist is empty</div>';
+
     panel.innerHTML = `
       <div class="playlist-folder-inner">
         <div class="playlist-folder-header">
-          <h3>${escapeHtml(playlist.name || 'Playlist')}</h3>
-          <button class="folder-close-btn hover-target" type="button" aria-label="Close playlist">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <path d="M18 6 6 18M6 6l12 12"/>
-            </svg>
-          </button>
+          <h3 class="folder-title">${escapeHtml(playlist.name || 'Playlist')}</h3>
+          <div style="display:flex;align-items:center;gap:6px">
+            <select class="folder-sort-select" title="Sort tracks" aria-label="Sort tracks">
+              <option value="position">Default order</option>
+              <option value="title">Title A-Z</option>
+              <option value="artist">Artist A-Z</option>
+              <option value="duration-desc">Duration ↓</option>
+              <option value="streams-desc">Most played</option>
+              <option value="added_at-desc">Recently added</option>
+            </select>
+            <button class="folder-close-btn hover-target" type="button" aria-label="Close playlist">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="playlist-folder-tracks">
-          ${tracks.map(buildFolderTrackCard).join('') || '<div class="playlist-folder-track-title">Playlist is empty</div>'}
+          ${renderFolderTracks(tracks)}
         </div>
       </div>
     `;
@@ -1045,7 +1175,25 @@
     panel.querySelector('.folder-close-btn')?.addEventListener('click', closeFolder);
     backdrop.addEventListener('click', closeFolder);
 
+    // Sort dropdown
+    panel.querySelector('.folder-sort-select')?.addEventListener('change', async (e) => {
+      const val = e.target.value;
+      let sortField = val, sortOrder = 'asc';
+      if (val.endsWith('-desc')) { sortField = val.slice(0, -5); sortOrder = 'desc'; }
+      try {
+        const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/tracks?sort=${sortField}&order=${sortOrder}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const sortedTracks = Array.isArray(data.tracks) ? data.tracks : [];
+        panel.querySelector('.playlist-folder-tracks').innerHTML = renderFolderTracks(sortedTracks);
+        // Re-bind remove buttons after re-render
+        bindFolderRemoveButtons(panel, playlistId);
+      } catch(err) { console.error('Sort error:', err); }
+    });
+
+    // Play track on click
     panel.querySelector('.playlist-folder-tracks')?.addEventListener('click', async (event) => {
+      if (event.target.closest('.folder-track-remove')) return;  // ignore remove btn clicks
       const trackCard = event.target.closest('.playlist-folder-track');
       if (!trackCard) return;
       const track = findTrackById(trackCard.dataset.trackId || '');
@@ -1055,6 +1203,8 @@
       }
       await playTrack(track);
     });
+
+    bindFolderRemoveButtons(panel, playlistId);
 
     folderState = { backdrop, panel };
   }
@@ -1207,6 +1357,25 @@
 
   window.addEventListener('rolfsound-playlist-created', async () => {
     await loadData();
+  });
+
+  window.addEventListener('rolfsound-playlist-renamed', async (e) => {
+    const { playlistId, name } = e.detail || {};
+    if (!playlistId || !name) return;
+    // Update in-memory list
+    const p = allPlaylists.find(p => Number(p.id) === Number(playlistId));
+    if (p) p.name = name;
+    // Update card title if rendered
+    const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
+    if (card) {
+      const titleEl = card.querySelector('.track-title, .playlist-name');
+      if (titleEl) titleEl.textContent = name;
+    }
+    // Update open folder modal title if it's this playlist
+    if (folderState) {
+      const titleEl = folderState.panel.querySelector('.folder-title');
+      if (titleEl) titleEl.textContent = name;
+    }
   });
 
   window.addEventListener('rolfsound-playlist-play', async (e) => {

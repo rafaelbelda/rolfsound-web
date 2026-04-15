@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Literal
 from utils import core_client
 
 router = APIRouter()
@@ -22,6 +23,18 @@ class RemoveRequest(BaseModel):
 class MoveRequest(BaseModel):
     from_pos: int
     to_pos: int
+
+
+class RepeatRequest(BaseModel):
+    mode: Literal["off", "one", "all"]
+
+
+class ShuffleRequest(BaseModel):
+    enabled: bool
+
+
+class SaveAsPlaylistRequest(BaseModel):
+    name: str
 
 
 @router.get("/queue")
@@ -94,3 +107,42 @@ async def previous_in_queue():
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
+
+
+@router.post("/queue/repeat")
+async def set_repeat(req: RepeatRequest):
+    result = await core_client.queue_repeat(req.mode)
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/queue/shuffle")
+async def set_shuffle(req: ShuffleRequest):
+    result = await core_client.queue_shuffle(req.enabled)
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/queue/save-as-playlist")
+async def save_queue_as_playlist(req: SaveAsPlaylistRequest):
+    from db import database
+    queue_data = await core_client.get_queue()
+    if queue_data is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+
+    tracks = queue_data.get("tracks", [])
+    if not tracks:
+        raise HTTPException(status_code=400, detail="Queue is empty")
+
+    conn = database.get_connection()
+    try:
+        playlist_id = database.create_playlist(conn, req.name)
+        for track in tracks:
+            track_id = track.get("track_id", "")
+            if track_id:
+                database.add_track_to_playlist(conn, playlist_id, track_id)
+        return {"id": playlist_id, "name": req.name.strip(), "track_count": len(tracks)}
+    finally:
+        conn.close()
