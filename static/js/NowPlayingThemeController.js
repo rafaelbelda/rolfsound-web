@@ -142,20 +142,19 @@ export default class NowPlayingThemeController {
     const urls = [];
     const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
 
-    if (isYouTubeId) {
-      urls.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
-      urls.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
-    }
-
-    // Normaliza thumbnail local → /thumbs/<filename>
+    // Prioridade: thumbnail indexado (Discogs/etc) primeiro, YouTube como fallback
     if (thumbnail) {
       const normalized = thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')
         ? thumbnail
         : `/thumbs/${thumbnail.split(/[\\/]/).pop()}`;
 
-      if (normalized && !urls.includes(normalized)) {
-        urls.push(normalized);
-      }
+      if (normalized) urls.push(normalized);
+    }
+
+    // Fallback YouTube: só entra se não houver thumbnail indexado
+    if (isYouTubeId && !thumbnail) {
+      urls.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
+      urls.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
     }
 
     return urls;

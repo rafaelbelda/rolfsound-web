@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 ACOUSTID_KEY = "inv3qSYC56"
 
-# fpcalc.exe e ffmpeg.exe na raiz do projeto (dois níveis acima de api/services/)
-_FPCALC  = str(Path(__file__).parent.parent.parent / "fpcalc.exe")
-_FFMPEG  = str(Path(__file__).parent.parent.parent / "ffmpeg.exe")
+# fpcalc binary — resolves from project root on all platforms.
+# On Windows: fpcalc.exe; on Linux/Mac: fpcalc (no extension).
+_ROOT   = Path(__file__).parent.parent.parent
+_FPCALC = str(_ROOT / ("fpcalc.exe" if __import__("sys").platform == "win32" else "fpcalc"))
 
 _USER_AGENT = "Rolfsound/1.0"
 
@@ -51,11 +52,75 @@ def _discogs_auth_header() -> str | None:
 
 
 async def fingerprint(path: str) -> dict | None:
+    """Returns {duration, fingerprint} or None.
+
+    Primary path: pyacoustid + PyAV — no binary needed.
+      Requires libchromaprint to be available:
+        - Raspberry Pi: apt install libchromaprint1
+        - Windows dev: install chromaprint.dll manually (or use fpcalc fallback)
+
+    Fallback path: fpcalc subprocess (fpcalc / fpcalc.exe on PATH or project root).
+    """
+    # --- Primary: pyacoustid + PyAV ---
+    try:
+        import acoustid
+        import av
+        import numpy as np
+
+        TARGET_SR  = 44100   # Chromaprint works best at 44100 Hz
+        N_CHANNELS = 2       # stereo matches fpcalc default
+        MAX_SECONDS = 120    # Chromaprint fingerprints only the first 120s
+
+        frames: list[np.ndarray] = []
+        collected = 0
+        duration = 0.0
+
+        with av.open(path) as container:
+            if container.duration:
+                duration = container.duration / 1_000_000  # µs → s
+
+            resampler = av.audio.resampler.AudioResampler(
+                format="s16", layout="stereo", rate=TARGET_SR
+            )
+            max_samples = TARGET_SR * N_CHANNELS * MAX_SECONDS
+
+            for packet in container.demux(audio=0):
+                for frame in packet.decode():
+                    resampled = resampler.resample(frame)
+                    for rf in (resampled if isinstance(resampled, list) else [resampled]):
+                        arr = rf.to_ndarray().flatten()
+                        remaining = max_samples - collected
+                        frames.append(arr[:remaining])
+                        collected += min(len(arr), remaining)
+                    if collected >= max_samples:
+                        break
+                if collected >= max_samples:
+                    break
+
+        if not frames:
+            raise RuntimeError("no audio frames decoded")
+
+        if duration <= 0:
+            duration = collected / (TARGET_SR * N_CHANNELS)
+
+        pcm = np.concatenate(frames).astype(np.int16).tobytes()
+        fp_str = acoustid.fingerprint(TARGET_SR, N_CHANNELS, [pcm])
+
+        logger.debug(f"fingerprint (pyacoustid): duration={duration:.1f}s")
+        return {"duration": duration, "fingerprint": fp_str}
+
+    except ImportError:
+        logger.debug("libchromaprint not available, falling back to fpcalc")
+    except Exception as e:
+        logger.debug(f"pyacoustid fingerprint failed ({e}), falling back to fpcalc")
+
+    # --- Fallback: fpcalc subprocess ---
     result = subprocess.run(
         [_FPCALC, "-json", path],
         capture_output=True, text=True
     )
     if result.returncode != 0:
+        logger.warning(f"fpcalc failed (returncode={result.returncode}): {result.stderr.strip()}")
         return None
     try:
         return json.loads(result.stdout)
@@ -94,22 +159,55 @@ async def lookup_acoustid(fp: dict) -> dict | None:
 
 async def lookup_shazam(file_path: str) -> dict | None:
     """Identifica a faixa via Shazam. Retorna {artist, title} ou None."""
-    import tempfile, asyncio, os
+    import tempfile, os
+    import numpy as np
 
-    # Converte para WAV mono 16kHz (apenas os primeiros 20s bastam pro Shazam)
+    # Converte para WAV mono 16kHz via PyAV (sem ffmpeg.exe externo).
+    # Apenas os primeiros 20s bastam para o Shazam reconhecer a faixa.
     tmp_wav = None
     try:
+        import av
         fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        proc = await asyncio.create_subprocess_exec(
-            _FFMPEG, "-y", "-i", file_path,
-            "-t", "20", "-ar", "16000", "-ac", "1", "-f", "wav", tmp_wav,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        if proc.returncode != 0 or not os.path.exists(tmp_wav):
-            logger.warning("shazam: ffmpeg falhou ao converter para WAV")
+
+        TARGET_SR = 16000
+        MAX_SAMPLES = TARGET_SR * 20  # 20 segundos
+
+        frames: list[np.ndarray] = []
+        collected = 0
+        with av.open(file_path) as container:
+            resampler = av.audio.resampler.AudioResampler(
+                format="s16", layout="mono", rate=TARGET_SR
+            )
+            for packet in container.demux(audio=0):
+                for frame in packet.decode():
+                    resampled = resampler.resample(frame)
+                    for rf in (resampled if isinstance(resampled, list) else [resampled]):
+                        arr = rf.to_ndarray().flatten()
+                        remaining = MAX_SAMPLES - collected
+                        frames.append(arr[:remaining])
+                        collected += min(len(arr), remaining)
+                    if collected >= MAX_SAMPLES:
+                        break
+                if collected >= MAX_SAMPLES:
+                    break
+
+        if not frames:
+            logger.warning("shazam: PyAV não conseguiu decodificar o arquivo")
+            return None
+
+        pcm = np.concatenate(frames).astype(np.int16).tobytes()
+
+        # Escreve WAV manualmente (header PCM 16-bit mono)
+        import wave
+        with wave.open(tmp_wav, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(TARGET_SR)
+            wf.writeframes(pcm)
+
+        if not os.path.exists(tmp_wav) or os.path.getsize(tmp_wav) == 0:
+            logger.warning("shazam: WAV vazio após conversão")
             return None
 
         from shazamio import Shazam
@@ -134,7 +232,7 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
     from utils import config as cfg
 
     headers = {"User-Agent": _USER_AGENT}
-    params: dict = {"q": f"{artist} {title}".strip(), "type": "release"}
+    base_params: dict = {"q": f"{artist} {title}".strip()}
 
     # Prefer full OAuth when the user has a connected Discogs account.
     # Fall back to consumer key/secret (app-level auth, no user needed).
@@ -146,24 +244,56 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
         ck = cfg.get("discogs_consumer_key", "")
         cs = cfg.get("discogs_consumer_secret", "")
         if ck and cs:
-            params["key"]    = ck
-            params["secret"] = cs
+            base_params["key"]    = ck
+            base_params["secret"] = cs
         # else: unauthenticated — Discogs still allows up to 25 req/min
 
     async with httpx.AsyncClient(timeout=10) as client:
+
+        # 1. Busca masters diretamente — a cover_image já é a artwork canônica, sem fotos de vinil
         r = await client.get(
             "https://api.discogs.com/database/search",
-            params=params,
+            params={**base_params, "type": "master"},
+            headers=headers,
+        )
+        masters = r.json().get("results", [])
+        if masters:
+            master = masters[0]
+            mid = master.get("id")
+            if mid:
+                try:
+                    mr = await client.get(
+                        f"https://api.discogs.com/masters/{mid}",
+                        headers=headers,
+                    )
+                    if mr.status_code == 200:
+                        full = mr.json()
+                        images = full.get("images", [])
+                        # primary é a capa principal, secondary são fotos do vinil físico
+                        primary = next((i for i in images if i.get("type") == "primary"), None)
+                        if primary:
+                            master["cover_image"] = primary["uri"]
+                            logger.debug(f"discogs: capa master {mid} (primary) ok")
+                except Exception as e:
+                    logger.debug(f"discogs: falha ao buscar master {mid}: {e}")
+            return master
+
+        # 2. Fallback: busca em releases individuais, evitando capas de vinil físico
+        r = await client.get(
+            "https://api.discogs.com/database/search",
+            params={**base_params, "type": "release"},
             headers=headers,
         )
         results = r.json().get("results", [])
         if not results:
             return None
 
-        vinyl = [x for x in results if "Vinyl" in x.get("format", [])]
-        release = (vinyl or results)[0]
+        # Prefere releases com master_id (capa canônica) e não-vinyl (sem foto de disco físico)
+        with_master = [x for x in results if x.get("master_id")]
+        non_vinyl   = [x for x in results if "Vinyl" not in x.get("format", [])]
+        release = (with_master or non_vinyl or results)[0]
 
-        # Tenta pegar a capa da Master Release (alta qualidade, sem foto de vinil físico)
+        # Tenta substituir pela imagem primary da master release
         master_id = release.get("master_id")
         if master_id:
             try:
@@ -172,13 +302,12 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
                     headers=headers,
                 )
                 if mr.status_code == 200:
-                    master = mr.json()
-                    images = master.get("images", [])
-                    # primary é a capa principal, secondary são fotos do vinil físico
+                    master_data = mr.json()
+                    images = master_data.get("images", [])
                     primary = next((i for i in images if i.get("type") == "primary"), None)
                     if primary:
                         release["cover_image"] = primary["uri"]
-                        logger.debug(f"discogs: capa master {master_id} ok")
+                        logger.debug(f"discogs: capa master {master_id} (via release fallback) ok")
             except Exception as e:
                 logger.debug(f"discogs: falha ao buscar master {master_id}: {e}")
 
@@ -188,11 +317,11 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
 async def identify_track(file_path: str, fallback_title: str = "") -> dict:
     """
     Retorna dict com metadados identificados, ou {"status": "unidentified"}.
-    Fluxo: fpcalc → AcoustID → Discogs (via MusicBrainz ou fallback_title).
+    Fluxo: Chromaprint → AcoustID → Shazam → fallback_title → Discogs.
     """
     fp = await fingerprint(file_path)
     if not fp:
-        return {"status": "unidentified", "reason": "fpcalc_failed"}
+        return {"status": "unidentified", "reason": "fingerprint_failed"}
     logger.debug(f"fingerprint ok: duration={fp.get('duration')}")
 
     artist = None

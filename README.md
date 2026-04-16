@@ -16,15 +16,20 @@ No Python imports from core. No shared state.
 
 ### System dependencies
 
-Two binaries are required and must be placed in the project root (or on `PATH`).
-They are **not included in the repository** — install per platform:
+Audio fingerprinting uses **pyacoustid** (pure Python) + **libchromaprint** (system library).
+No `fpcalc` binary is required if `libchromaprint` is installed:
 
-| Binary | Purpose | Install |
+| Platform | Install | Notes |
 |---|---|---|
-| `ffmpeg` | Audio conversion (mp3 encoding) | [ffmpeg.org](https://ffmpeg.org/download.html) · `apt install ffmpeg` on Raspberry Pi |
-| `fpcalc` | Chromaprint audio fingerprinting | [acoustid.org/chromaprint](https://acoustid.org/chromaprint) · `apt install libchromaprint-tools` on Raspberry Pi |
+| Raspberry Pi / Debian | `apt install libchromaprint1` | No binary needed — works out of the box |
+| Windows (dev) | Download `fpcalc.exe` and drop it in the project root | `libchromaprint.dll` is not pip-installable; fpcalc is the practical option |
+| macOS | `brew install chromaprint` | Sets up the shared library |
 
-On Windows (dev only), download the `.exe` builds and drop them in the project root.
+**How the fingerprinter works** — two-path fallback in `api/services/indexer.py`:
+1. **pyacoustid + PyAV** (primary): decodes audio in-process via PyAV, passes PCM to `libchromaprint` through pyacoustid. Requires `libchromaprint` to be available.
+2. **fpcalc subprocess** (fallback): used when `libchromaprint` is not found. Requires `fpcalc` / `fpcalc.exe` on `PATH` or in the project root.
+
+Audio decoding (ffmpeg) is handled by **PyAV** (`pip install av`), which ships with ffmpeg compiled in — no external binary needed.
 
 ### Python dependencies
 

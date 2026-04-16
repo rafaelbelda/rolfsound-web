@@ -3,6 +3,7 @@
 import AnimationEngine from '/static/js/AnimationEngine.js';
 import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
 import { playElasticImpact } from '/static/js/IslandImpactEngine.js';
+import MiniBirthAnimator from '/static/js/MiniBirthAnimator.js';
 
 class RolfsoundIsland extends HTMLElement {
     constructor() {
@@ -18,6 +19,8 @@ class RolfsoundIsland extends HTMLElement {
         this._notificationTimers = new Set();
         this._impactAnimations = new Set();
         this._promptResolver = null;
+        this._miniBirthAnimator = new MiniBirthAnimator();
+        this._miniPendingReconcile = false;
     }
 
     static get observedAttributes() {
@@ -34,6 +37,7 @@ class RolfsoundIsland extends HTMLElement {
 
         this.reset();
         this.updateActiveTab();
+        this._attachMiniplayerSync();
     }
 
     disconnectedCallback() {
@@ -49,12 +53,20 @@ class RolfsoundIsland extends HTMLElement {
         this.hideNotification({ immediate: true });
         this.cancelPlaylistNamePrompt(null, true);
         this.cancelImpactResponse();
+
+        if (this._onStoreChange) {
+            window.playbackStore?.removeEventListener('state-change',  this._onStoreChange);
+            window.playbackStore?.removeEventListener('queue-change',  this._onStoreChange);
+            window.playbackStore?.removeEventListener('track-change',  this._onStoreChange);
+            this._onStoreChange = null;
+        }
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
         if (name === 'active-tab' && oldValue !== newValue) {
             this.activeTab = newValue;
             this.updateActiveTab();
+            this.reconcileMini();
             return;
         }
 
@@ -202,6 +214,69 @@ class RolfsoundIsland extends HTMLElement {
     }
 
     // ─── Motor de Mitose Modular (DOM Injection) ─────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────
+    // MINIPLAYER SYNC
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Registra listeners no PlaybackStateStore para controlar a visibilidade
+     * do miniplayer. Chamado uma vez em connectedCallback.
+     */
+    _attachMiniplayerSync() {
+        const store = window.playbackStore;
+        if (!store) return;
+
+        this._onStoreChange = () => this.reconcileMini();
+        store.addEventListener('state-change', this._onStoreChange);
+        store.addEventListener('queue-change', this._onStoreChange);
+        store.addEventListener('track-change', this._onStoreChange);
+
+        // Boot: se já há playback ativo ao montar a ilha, mostra sem animação
+        // (o mini seria um refresh — não faz sentido a animação de birth aqui)
+        if (store.hasActivePlayback() && this.activeTab !== 'playback') {
+            const mini = document.querySelector('rolfsound-miniplayer');
+            mini?.showInstant();
+        }
+    }
+
+    /**
+     * Decide se o miniplayer deve estar visível com base no estado atual.
+     * Regras:
+     *   - Aparece quando há playback ativo (currentId presente ou fila não-vazia)
+     *     E o tab ativo não é 'playback' (o full player assume nesse caso)
+     *   - Some quando não há playback ou quando o tab é 'playback'
+     *
+     * Fase 1: transições instantâneas.
+     * Fases 2-3: este método acionará MiniBirthAnimator / MiniMorphAnimator.
+     */
+    reconcileMini() {
+        const mini = document.querySelector('rolfsound-miniplayer');
+        if (!mini) return;
+
+        const store = window.playbackStore;
+        const hasPlayback = store?.hasActivePlayback() ?? false;
+        const onPlayback  = this.activeTab === 'playback';
+
+        const shouldShow = hasPlayback && !onPlayback;
+
+        if (shouldShow && !mini.isVisible) {
+            // Verifica se o full player está aberto — se sim, não interfere
+            if (window.playbackMitosisManager?.isMorphed) return;
+
+            if (this._miniBirthAnimator._active) return;
+            this._miniBirthAnimator.birth({ island: this, miniEl: mini });
+
+        } else if (!shouldShow && mini.isVisible) {
+            // Não absorve se o full player está em processo de abrir (MiniMorphAnimator ativo)
+            if (window.playbackMitosisManager?.isMorphed) {
+                mini.hideInstant();
+                return;
+            }
+            if (this._miniBirthAnimator._active) return;
+            this._miniBirthAnimator.absorb({ island: this, miniEl: mini });
+        }
+    }
 
     /**
      * Reflect playback state onto the island so CSS can react.

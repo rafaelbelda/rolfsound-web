@@ -109,11 +109,17 @@
   --radius-dynamic-island: var(--radius-pill);
   --radius-dynamic-island-expanded: var(--radius-pill-expanded);
 
+  /* Miniplayer */
+  --mini-width: 460px;
+  --mini-height: 58px;
+  --mini-bottom: 30px;
+
   /* ── Sombras ── */
   --shadow-soft: 0 8px 25px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.6);
   --shadow-playback-pill: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-miniplayer: 0 12px 40px rgba(0, 0, 0, 0.65);
   --shadow-overlay: 0 18px 40px rgba(0, 0, 0, 0.55);
   --shadow-cover: 0 16px 48px rgba(0, 0, 0, 0.7);
   --shadow-notification: 0 12px 35px rgba(0, 0, 0, 0.8);

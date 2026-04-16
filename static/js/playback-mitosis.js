@@ -5,6 +5,7 @@
 import AnimationEngine from '/static/js/AnimationEngine.js';
 import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
 import Animator from '/static/js/Animator.js';
+import MiniMorphAnimator from '/static/js/MiniMorphAnimator.js';
 
 // ─── Dimensões do layout ───────────────────────────────────────────────────
 const PLAYER_W   = 340;   // largura da capa e da pílula de controles (px)
@@ -52,6 +53,9 @@ class PlaybackMitosisManager {
 
     // ─── WAAPI Animator (interruptible GPU-composited animations) ───
     this._animator = new Animator();
+
+    // ─── Mini ↔ Full morph animator ───
+    this._miniMorphAnimator = new MiniMorphAnimator(this);
 
     // ─── Theme dispatch dedup ───
     this._lastThemeKey = null;
@@ -152,9 +156,10 @@ class PlaybackMitosisManager {
 
     this._onNavigate = (e) => {
       if (e.detail.view === 'playback') {
-        this.morph();
+        const mini = document.querySelector('rolfsound-miniplayer');
+        this.morph(mini?.isVisible ? { from: 'mini' } : {});
       } else {
-        this.unmorph();
+        this.unmorph({ reason: 'tab-switch' });
       }
     };
     this.island.addEventListener('rolfsound-navigate', this._onNavigate);
@@ -198,12 +203,57 @@ class PlaybackMitosisManager {
   static PINCH_GAP       = 14;  // espaço entre ilha e filha na clivagem
   static BRIDGE_PINCH_W  = 14;  // largura da ponte no ponto de clivagem
 
-  morph() {
+  // ─────────────────────────────────────────────────────────────
+  // BACKDROP — overlay escuro + blur atrás do player expandido
+  // ─────────────────────────────────────────────────────────────
+
+  _showBackdrop() {
+    if (document.getElementById('rolfsound-player-backdrop')) return;
+    const bd = document.createElement('div');
+    bd.id = 'rolfsound-player-backdrop';
+    Object.assign(bd.style, {
+      position:            'fixed',
+      inset:               '0',
+      zIndex:              '990',
+      background:          'rgba(0,0,0,0)',
+      backdropFilter:      'blur(0px)',
+      webkitBackdropFilter:'blur(0px)',
+      transition:          'background 0.38s ease, backdrop-filter 0.38s ease, -webkit-backdrop-filter 0.38s ease',
+      pointerEvents:       'none',
+    });
+    document.body.appendChild(bd);
+    void bd.offsetHeight; // force reflow antes de animar
+    bd.style.background           = 'rgba(0,0,0,0.52)';
+    bd.style.backdropFilter       = 'blur(7px)';
+    bd.style.webkitBackdropFilter = 'blur(7px)';
+  }
+
+  _hideBackdrop() {
+    const bd = document.getElementById('rolfsound-player-backdrop');
+    if (!bd) return;
+    bd.style.background           = 'rgba(0,0,0,0)';
+    bd.style.backdropFilter       = 'blur(0px)';
+    bd.style.webkitBackdropFilter = 'blur(0px)';
+    setTimeout(() => bd.remove(), 420);
+  }
+
+  morph(opts = {}) {
     if (this.isMorphed) return;
     this.isMorphed = true;
+    this._showBackdrop();
     this.clearAnimationTimers();
     this._animator.cancelAll();
     if (this._division) { this._division.abort(); this._division = null; }
+
+    // ── Se vier do miniplayer, usa transição contínua mini → full ──
+    const mini = document.querySelector('rolfsound-miniplayer');
+    if (opts.from === 'mini' && mini?.isVisible) {
+      if (window.location.pathname !== '/playback') {
+        window.history.pushState({ rolfsound: 'playback' }, '', '/playback');
+      }
+      this._miniMorphAnimator.miniToFull(mini);
+      return;
+    }
 
     // ── Update URL without adding a duplicate entry ──
     if (window.location.pathname !== '/playback') {
@@ -349,12 +399,24 @@ class PlaybackMitosisManager {
   // UNMORPH — Absorção reversa (célula-filha volta para a ilha)
   // ─────────────────────────────────────────────────────────────
 
-  unmorph() {
+  unmorph(opts = {}) {
     if (!this.isMorphed) return;
     this.isMorphed = false;
+    this._hideBackdrop();
     this.stopRafLoop();
     this.clearAnimationTimers();
     this._animator.cancelAll();
+
+    // ── Se há playback ativo, fecha o full voltando ao miniplayer ──
+    // (opts.reason === 'tab-switch' indica saída via troca de aba)
+    const mini = document.querySelector('rolfsound-miniplayer');
+    if (window.playbackStore?.hasActivePlayback() && mini) {
+      if (window.location.pathname === '/playback') {
+        window.history.replaceState({ rolfsound: 'library' }, '', '/library');
+      }
+      this._miniMorphAnimator.fullToMini(mini);
+      return;
+    }
 
     // ── Restore URL — use replaceState so closing the player doesn't add a
     //    history entry (next Back press goes to the page before playback) ──
@@ -944,6 +1006,10 @@ class PlaybackMitosisManager {
   }
 
   clearDomReferences() {
+    if (this._onOutsideClick) {
+      document.removeEventListener('mousedown', this._onOutsideClick);
+      this._onOutsideClick = null;
+    }
     Object.keys(this.dom).forEach(key => { this.dom[key] = null; });
     // Cancela qualquer carga pendente e limpa referências de crossfade
     if (this._thumbPendingEl) {
@@ -962,6 +1028,20 @@ class PlaybackMitosisManager {
     this.dom.btnRepeat?.addEventListener('click',    () => this.toggleRepeat());
     this.dom.btnQueue?.addEventListener('click',     (e) => this.handleQueueClick(e));
     this.dom.progressBar?.addEventListener('click',  (e) => this.handleSeek(e));
+
+    // ── Click fora fecha o player ──────────────────────────────────────────────
+    this._onOutsideClick = (e) => {
+      if (!this.isMorphed) return;
+      const inPlayer = this.playerContainer?.contains(e.target);
+      const inQueue  = this.queueContainer?.contains(e.target);
+      // Cliques na ilha (shadow DOM) não chegam aqui com composed path contendo playerContainer,
+      // então usar composedPath para checar o island também.
+      const inIsland = e.composedPath?.().some(el => el.tagName === 'ROLFSOUND-ISLAND');
+      if (!inPlayer && !inQueue && !inIsland) {
+        this.unmorph({ reason: 'outside-click' });
+      }
+    };
+    document.addEventListener('mousedown', this._onOutsideClick);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1727,6 +1807,9 @@ class PlaybackMitosisManager {
 
     this.render();
 
+    // Propaga estado para o store global (miniplayer, ilha, outros consumidores)
+    window.playbackStore?.sync(this.state);
+
     // Sync now-playing waveform indicator on the island pill
     if (this.island?.setNowPlayingState) {
       this.island.setNowPlayingState(this.state.playState === 'playing');
@@ -1865,17 +1948,19 @@ class PlaybackMitosisManager {
       ? trackId
       : '';
 
-    if (youtubeId) {
-      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`);
-      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
-    }
-
+    // Prioridade: thumbnail indexado (Discogs/etc) primeiro, YouTube como fallback
     if (normalized) {
       if (normalized.includes('i.ytimg.com/vi/')) {
         candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
         candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
       }
       candidates.push(normalized);
+    }
+
+    // Fallback YouTube: só entra se não houver thumbnail indexado
+    if (youtubeId && !normalized) {
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`);
+      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
     }
 
     return [...new Set(candidates.filter(Boolean))];

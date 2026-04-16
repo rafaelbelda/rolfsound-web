@@ -11,13 +11,16 @@
     import AnimationEngine from '/static/js/AnimationEngine.js';
     window.AnimationEngine = AnimationEngine;
   </script>
+  <script type="module" src="/static/js/PlaybackStateStore.js"></script>
   <script type="module" src="/static/js/RolfsoundIsland.js"></script>
+  <script type="module" src="/static/js/RolfsoundMiniplayer.js"></script>
   <script type="module" src="/static/js/playback-mitosis.js"></script>
 </head>
 <body>
 
   <div id="cursor-dot"></div>
   <rolfsound-island active-tab="library"></rolfsound-island>
+  <rolfsound-miniplayer style="display:none"></rolfsound-miniplayer>
   <div class="bg-layer active"></div>
 
   <section id="view-vinyl-library" class="view-layer active">
