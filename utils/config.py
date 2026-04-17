@@ -16,6 +16,8 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 _DEFAULTS = {
     "core_url":                  "http://localhost:8765",
     "server_port":               8766,
+    # "sse" = push via /events/stream (default). "poll" = legacy /events every 2s.
+    "core_events_transport":     "sse",
     "log_file_level":           logging.INFO,
     "music_directory":           "./music",
     "recordings_directory":      "./recordings",

@@ -1,0 +1,32 @@
+/* skip-buttons/skip-buttons.css — shared by rolfsound-skip-back and rolfsound-skip-fwd */
+:host {
+  display: contents;
+}
+
+button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-lg, 10px);
+  color: var(--color-text-control, rgba(255,255,255,0.74));
+  transition: color 0.18s ease, transform 0.18s ease;
+  position: relative;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+button svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+button:active {
+  transform: scale(0.96);
+}

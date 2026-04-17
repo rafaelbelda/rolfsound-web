@@ -1,0 +1,1 @@
+os botes de pause, pular, mudar o momento da musica pelo slider, a capa da musica, nome do artista e etc, nao parecem atualizar mais.

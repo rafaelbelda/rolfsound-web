@@ -418,12 +418,12 @@ class RolfsoundMiniplayer extends HTMLElement {
     // ── Botões de skip ────────────────────────────────────────────────────────
     this.dom.btnPrev?.addEventListener('click', (e) => {
       e.stopPropagation();
-      window.playbackMitosisManager?.skipBack();
+      window.rolfsoundChannel?.send('intent.skip', { direction: 'back' });
     });
 
     this.dom.btnNext?.addEventListener('click', (e) => {
       e.stopPropagation();
-      window.playbackMitosisManager?.skipForward();
+      window.rolfsoundChannel?.send('intent.skip', { direction: 'fwd' });
     });
   }
 
@@ -539,7 +539,14 @@ class RolfsoundMiniplayer extends HTMLElement {
   }
 
   _togglePlayback() {
-    window.playbackMitosisManager?.togglePlayPause();
+    const store = window.playbackStore;
+    const state = store?.state?.playState || 'idle';
+    if (state === 'idle') {
+      window.rolfsoundChannel?.send('intent.play', {});
+    } else {
+      // core's /api/pause toggles between pause and resume
+      window.rolfsoundChannel?.send('intent.pause', {});
+    }
   }
 }
 

@@ -85,7 +85,7 @@ export default class MiniMorphAnimator {
 
     document.body.appendChild(container);
     manager.playerContainer = container;
-    manager._prefillPlayerContent(container);
+    manager._crossfader.prefill(container);
 
     // Pre-impact na ilha
     if (manager.island?.respondToImpact) {
@@ -121,7 +121,7 @@ export default class MiniMorphAnimator {
     // Revela conteúdo na fase final da animação
     AnimationEngine.schedule(manager, () => {
       if (!container.isConnected) return;
-      manager._revealPlayerStage(container);
+      manager._mitosis._revealPlayerStage(container);
     }, duration * 0.55);
 
     await anim.finished.catch(() => {});
@@ -144,7 +144,7 @@ export default class MiniMorphAnimator {
     container.style.border        = 'none';
     container.style.boxShadow     = 'none';
 
-    manager._settlePlayer(container);
+    manager._mitosis._settlePlayer(container);
     this._active = false;
   }
 

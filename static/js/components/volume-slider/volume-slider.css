@@ -1,0 +1,84 @@
+:host {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: block;
+}
+
+.vol-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: rgba(0,0,0,0.32);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-full, 50px);
+  color: rgba(255,255,255,0.6);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.2s ease;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+button:hover { background: rgba(0,0,0,0.52); color: rgba(255,255,255,0.9); }
+button:active { transform: scale(0.94); }
+button svg { pointer-events: none; }
+
+.track-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.22s var(--ease-standard, ease), opacity 0.18s ease;
+}
+
+:host(.open) .track-wrap {
+  max-height: 120px;
+  opacity: 1;
+}
+
+.vol-track {
+  width: 3px;
+  height: 100px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.vol-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.75);
+  transition: height 0.08s ease;
+  pointer-events: none;
+}
+
+.vol-thumb {
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+  transition: bottom 0.08s ease;
+}

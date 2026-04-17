@@ -146,4 +146,5 @@ async def queue_clear()               -> dict | None: return await _post("/queue
 async def queue_previous()            -> dict | None: return await _post("/queue/previous")
 async def queue_repeat(mode: str)     -> dict | None: return await _post("/queue/repeat", {"mode": mode})
 async def queue_shuffle(enabled: bool)-> dict | None: return await _post("/queue/shuffle", {"enabled": enabled})
+async def volume(value: float)        -> dict | None: return await _post("/volume", {"volume": max(0.0, min(1.0, value))})
 async def is_available()              -> bool:        return await get_status() is not None

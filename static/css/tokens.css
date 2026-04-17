@@ -1,0 +1,195 @@
+/* static/css/tokens.css
+ * Single source of truth for all design tokens.
+ * Adopted via adoptStyles.js in Shadow DOM components.
+ * global.css imports this file and keeps page-level resets only.
+ */
+
+:root {
+  /* ── Tipografia ── */
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
+  --font: var(--font-sans);
+
+  /* ── Paleta Base ── */
+  --color-base-black: #050505;
+  --color-base-black-strong: #000000;
+  --color-base-white: #f5f5f0;
+  --color-base-white-strong: #ffffff;
+
+  /* ── Fundos & Superfícies ── */
+  --color-bg-canvas: var(--color-base-black);
+  --color-bg-elevated: rgba(15, 15, 15, 0.6);
+  --color-bg-elevated-strong: rgba(15, 15, 15, 0.85);
+  --color-bg-overlay: rgba(10, 10, 10, 0.92);
+  --color-bg-overlay-strong: rgba(10, 10, 10, 0.98);
+  --color-bg-scrim: rgba(0, 0, 0, 0.7);
+  --color-surface-card: rgba(255, 255, 255, 0.04);
+  --color-surface-card-hover: rgba(255, 255, 255, 0.08);
+  --color-surface-card-pressed: rgba(255, 255, 255, 0.15);
+  --color-surface-ghost: rgba(255, 255, 255, 0.02);
+  --color-surface-interactive: rgba(255, 255, 255, 0.05);
+  --color-surface-interactive-hover: rgba(255, 255, 255, 0.1);
+  --color-surface-interactive-strong: rgba(255, 255, 255, 0.15);
+  --color-surface-inverse: var(--color-base-white);
+  --color-surface-inverse-hover: rgba(255, 255, 255, 0.8);
+
+  /* ── Bordas ── */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-soft: rgba(255, 255, 255, 0.07);
+  --color-border-default: rgba(255, 255, 255, 0.08);
+  --color-border-interactive: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.12);
+  --color-border-stronger: rgba(255, 255, 255, 0.15);
+  --color-border-focus: rgba(255, 255, 255, 0.2);
+  --color-border-cursor: rgba(255, 255, 255, 0.35);
+  --color-border-inverse: rgba(255, 255, 255, 0.85);
+
+  /* ── Texto ── */
+  --color-text-primary: var(--color-base-white);
+  --color-text-strong: rgba(255, 255, 255, 0.86);
+  --color-text-secondary: rgba(255, 255, 255, 0.6);
+  --color-text-emphasis: rgba(255, 255, 255, 0.7);
+  --color-text-soft: rgba(255, 255, 255, 0.55);
+  --color-text-tertiary: rgba(255, 255, 255, 0.5);
+  --color-text-muted: rgba(255, 255, 255, 0.4);
+  --color-text-time: rgba(255, 255, 255, 0.45);
+  --color-text-faint: rgba(255, 255, 255, 0.3);
+  --color-text-disabled: rgba(255, 255, 255, 0.22);
+  --color-text-control: rgba(255, 255, 255, 0.74);
+  --color-text-control-strong: rgba(255, 255, 255, 0.96);
+  --color-control-active: rgba(255, 255, 255, 0.95);
+  --color-control-inactive: rgba(255, 255, 255, 0.3);
+  --color-queue-active: rgba(255, 255, 255, 0.82);
+  --color-queue-inactive: rgba(255, 255, 255, 0.48);
+  --color-text-inverse: var(--color-base-black-strong);
+
+  /* ── Acentos & Estados ── */
+  --color-accent-success: #4ade80;
+  --color-accent-success-soft: rgba(74, 222, 128, 0.1);
+  --color-accent-success-border: rgba(74, 222, 128, 0.2);
+  --color-accent-success-glow: rgba(74, 222, 128, 0.5);
+  --color-accent-warning: #fbbf24;
+  --color-accent-warning-glow: rgba(251, 191, 36, 0.5);
+  --color-accent-danger: #f87171;
+  --color-accent-danger-soft: rgba(220, 38, 38, 0.1);
+  --color-accent-danger-border: rgba(220, 38, 38, 0.2);
+  --color-accent-danger-hover: rgba(220, 38, 38, 0.2);
+  --color-accent-danger-strong: #fca5a5;
+
+  /* ── Tokens Semânticos de Componentes ── */
+  --color-playback-shell: rgba(15, 15, 15, 0.92);
+  --color-playback-pill: rgba(12, 12, 12, 0.88);
+  --color-playback-cover: #0f0f0f;
+  --color-playback-gradient-start: rgba(0, 0, 0, 0.82);
+  --color-playback-gradient-mid: rgba(0, 0, 0, 0.3);
+  --color-playback-icon-muted: rgba(255, 255, 255, 0.12);
+  --color-progress-track: rgba(255, 255, 255, 0.12);
+  --color-progress-fill: rgba(255, 255, 255, 0.9);
+  --color-badge-bg: rgba(255, 255, 255, 0.88);
+  --color-badge-text: #000000;
+  --color-led: rgba(255, 255, 255, 0.2);
+  --color-vinyl-spine-default: #111111;
+  --color-library-scroll-thumb: rgba(255, 255, 255, 0.2);
+  --color-library-scroll-thumb-hover: rgba(255, 255, 255, 0.4);
+  --color-library-thumb-gradient-start: rgba(255, 255, 255, 0.05);
+  --color-library-thumb-gradient-end: rgba(255, 255, 255, 0.02);
+  --color-library-thumb-fallback-start: #1a1a2e;
+  --color-library-thumb-fallback-end: #16213e;
+
+  /* ── Raios ── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-pill: 16px;
+  --radius-pill-expanded: 24px;
+  --radius-round: 50%;
+  --radius-full: 999px;
+  --radius-dynamic-island: var(--radius-pill);
+  --radius-dynamic-island-expanded: var(--radius-pill-expanded);
+
+  /* ── Geometria do Miniplayer ── */
+  --mini-width: 460px;
+  --mini-height: 58px;
+  --mini-bottom: 30px;
+
+  /* ── Sombras ── */
+  --shadow-soft: 0 8px 25px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-playback-pill: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-miniplayer: 0 12px 40px rgba(0, 0, 0, 0.65);
+  --shadow-overlay: 0 18px 40px rgba(0, 0, 0, 0.55);
+  --shadow-cover: 0 16px 48px rgba(0, 0, 0, 0.7);
+  --shadow-notification: 0 12px 35px rgba(0, 0, 0, 0.8);
+
+  /* ── Blur ── */
+  --blur-glass: 20px;
+  --blur-overlay: 18px;
+  --blur-playback: 24px;
+  --blur-scene: 120px;
+  --blur-view-hidden: 10px;
+  --blur-view-inactive: 15px;
+
+  /* ── Motion ── */
+  --ease-standard:   cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.28, 0.64, 1);
+  --ease-exit:       cubic-bezier(0.3, 0, 1, 1);
+  --ease-snappy:     cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-impact: 0.42s;
+  --duration-fast: 0.15s;
+  --duration-base: 0.2s;
+  --duration-medium: 0.3s;
+  --duration-slow: 0.5s;
+  --duration-scene: 1.2s;
+  --impact-travel-min: 4;
+  --impact-travel-max: 12;
+  --impact-grow-min: 0.008;
+  --impact-grow-max: 0.024;
+  --impact-cross-grow: 0.006;
+  --impact-rebound-ratio: 0.24;
+  --impact-settle-ratio: 0.08;
+
+  /* ── Tema Reativo (gerenciado por NowPlayingThemeController) ── */
+  --rs-theme-base-rgb:     5 5 5;
+  --rs-theme-accent-rgb:   18 18 18;
+  --rs-theme-contrast-rgb: 12 12 12;
+  --rs-theme-intensity:    0;
+
+  /* ── Gradientes do backdrop ── */
+  --rs-backdrop-base-shape:      130% 100%;
+  --rs-backdrop-base-pos:        50% 60%;
+  --rs-backdrop-base-op-mid:     0.5;
+  --rs-backdrop-base-op-edge:    0.95;
+  --rs-backdrop-accent-shape:    80% 55%;
+  --rs-backdrop-accent-pos:      25% 8%;
+  --rs-backdrop-accent-op-peak:  0.55;
+  --rs-backdrop-accent-op-fade:  0.15;
+  --rs-backdrop-contrast-shape:  70% 50%;
+  --rs-backdrop-contrast-pos:    78% 95%;
+  --rs-backdrop-contrast-op-peak: 0.45;
+  --rs-backdrop-contrast-op-fade: 0.12;
+
+  /* ── Compatibilidade com tokens legados ── */
+  --black: var(--color-bg-canvas);
+  --white: var(--color-text-primary);
+  --gray: var(--color-text-muted);
+
+  /* ── Escala tipográfica ── */
+  --fs-2xs: 8px;
+  --fs-xs: 9px;
+  --fs-sm: 10px;
+  --fs-md: 11px;
+  --fs-lg: 12px;
+  --fs-xl: 13px;
+  --fs-2xl: 14px;
+  --font-size-caption: var(--fs-2xs);
+  --font-size-meta: var(--fs-xs);
+  --font-size-control: var(--fs-md);
+  --font-size-title-sm: 15px;
+  --font-size-title-md: 20px;
+  --font-size-icon-lg: 32px;
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rolfsound WebSocket Protocol",
+  "description": "Single source of truth for the WS envelope and all frame types.",
+
+  "envelope": {
+    "type": "object",
+    "required": ["type", "payload", "ts"],
+    "properties": {
+      "type":    { "type": "string", "description": "<namespace>.<name>" },
+      "payload": { "type": "object" },
+      "id":      { "type": "string", "description": "UUID — required on intent.*, echoed in ack.*" },
+      "ts":      { "type": "number", "description": "Unix milliseconds (Date.now())" }
+    }
+  },
+
+  "namespaces": {
+    "state":  "server → client — authoritative snapshot, idempotent",
+    "event":  "server → client — one-shot notification, must not be dropped",
+    "intent": "client → server — command",
+    "ack":    "server → client — correlated response to intent (same id)"
+  },
+
+  "server_frames": {
+    "state.playback": {
+      "description": "Full playback snapshot. Sent on connect, on core events, throttled ≤ 4 Hz.",
+      "payload": {
+        "state":             "string — idle | playing | paused | stopped",
+        "track_id":          "string | null",
+        "title":             "string | null",
+        "artist":            "string | null",
+        "album":             "string | null",
+        "thumbnail":         "string | null — URL",
+        "duration":          "number — seconds",
+        "position":          "number — seconds",
+        "position_updated_at": "number — unix-ms when position was sampled",
+        "volume":            "number — 0..1",
+        "shuffle":           "boolean",
+        "repeat_mode":       "string — off | one | all"
+      }
+    },
+    "state.queue": {
+      "description": "Full queue snapshot. Sent when queue is mutated.",
+      "payload": {
+        "tracks":        "array of track objects",
+        "current_index": "number | null"
+      }
+    },
+    "event.track_changed": {
+      "description": "Edge-trigger when the playing track changes.",
+      "payload": { "track_id": "string", "title": "string", "artist": "string", "thumbnail": "string | null" }
+    },
+    "event.track_finished": {
+      "description": "Edge-trigger when a track finishes naturally.",
+      "payload": { "track_id": "string", "filepath": "string" }
+    },
+    "event.progress": {
+      "description": "1 Hz tick during playback. Clients dead-reckon between ticks.",
+      "payload": { "position": "number", "duration": "number", "position_updated_at": "number" }
+    },
+    "ack.<intent_type>": {
+      "description": "Response correlated to intent id.",
+      "payload": { "ok": "boolean", "error": "string | null" }
+    }
+  },
+
+  "client_intents": {
+    "intent.play":          { "payload": {} },
+    "intent.pause":         { "payload": {} },
+    "intent.skip":          { "payload": { "direction": "fwd | back" } },
+    "intent.seek":          { "payload": { "position": "number — seconds" } },
+    "intent.shuffle.set":   { "payload": { "enabled": "boolean" } },
+    "intent.repeat.set":    { "payload": { "mode": "off | one | all" } },
+    "intent.volume.set":    { "payload": { "value": "number — 0..1" } },
+    "intent.queue.add":     { "payload": { "track_id": "string", "position": "number | null" } },
+    "intent.queue.remove":  { "payload": { "index": "number" } },
+    "intent.queue.move":    { "payload": { "from": "number", "to": "number" } },
+    "intent.queue.clear":   { "payload": {} },
+    "intent.ping":          { "payload": {} }
+  },
+
+  "backpressure": {
+    "queue_max": 32,
+    "on_full":   "drop oldest state.* frame — never drop event.*"
+  },
+
+  "reconnection": {
+    "backoff_ms":    [250, 500, 1000, 2000, 4000, 8000],
+    "cap_ms":        8000,
+    "heartbeat_s":   20,
+    "drop_after_s":  10,
+    "on_reconnect":  "server sends state.playback immediately; client flushes IntentQueue (cap 16)"
+  }
+}

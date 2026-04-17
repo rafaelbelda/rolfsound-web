@@ -10,7 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,19 +19,21 @@ from utils import config as cfg
 from db import database
 from downloads.manager import init_manager, get_manager
 from utils.event_poller import get_poller
+from utils.event_stream_client import get_client as get_event_stream_client
 from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
 from youtube.search import close_client as close_search_client
 from utils import core_client
 from utils.monitor_accumulator import get_accumulator
+from api.status_enricher import enrich_status
+from api.ws.endpoint import get_manager as get_ws_manager, ws_endpoint
+from api.ws import state_broadcaster
 
 from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues
 
 logger = logging.getLogger(__name__)
 
 DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard"
-
-_track_cache: dict = {"path": None, "data": None}
 
 
 @asynccontextmanager
@@ -66,15 +68,29 @@ async def lifespan(app: FastAPI):
     manager.on_complete(_on_download_complete)
     manager.start()
 
-    poller = get_poller()
-    _register_event_handlers(poller)
-    poller.start()
+    # Choose the Core → Web event transport (push vs. pull).
+    transport = cfg.get("core_events_transport", "sse")
+    if transport == "sse":
+        event_source = get_event_stream_client()
+        logger.info("Core event transport: SSE (push)")
+    else:
+        event_source = get_poller()
+        logger.info("Core event transport: polling (pull)")
+
+    _register_event_handlers(event_source)
+
+    ws_manager = get_ws_manager()
+    state_broadcaster.init(ws_manager, asyncio.get_event_loop(), event_source)
 
     start_cleanup_scheduler(database.get_connection)
 
     # Initialise persistent HTTP client for core communication.
     # This eliminates ~400-500ms TCP setup overhead on every API call.
     core_client.init_client()
+
+    # Start the event transport *after* handlers are registered AND the shared
+    # http client exists — handlers hit core_client.get_status() via state_broadcaster.
+    event_source.start()
 
     # Start the monitor accumulator — polls core's /monitor/samples and fans
     # out to connected SSE clients via /api/monitor/stream.
@@ -91,7 +107,7 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────────
     get_accumulator().stop()
-    poller.stop()
+    event_source.stop()
     manager.stop()
     await close_search_client()
     # Save queue state before closing the core connection.
@@ -151,7 +167,7 @@ async def _save_queue_state() -> None:
         logger.error(f"Failed to save queue state: {e}")
 
 
-def _register_event_handlers(poller):
+def _register_event_handlers(source):
     from db import database as db
 
     # Track the last played track_id and when it started, for skip detection.
@@ -211,93 +227,9 @@ def _register_event_handlers(poller):
         finally:
             conn.close()
 
-    poller.on("track_changed", on_track_changed)
-    poller.on("track_finished", on_track_finished)
+    source.on("track_changed", on_track_changed)
+    source.on("track_finished", on_track_finished)
 
-
-def _enrich_status(raw: dict) -> dict:
-    """
-    Reshape core's /status for the dashboard.
-    """
-    pb = raw.get("playback", {})
-    q  = raw.get("queue",    {})
-
-    if pb.get("playing"):
-        state = "playing"
-    elif pb.get("paused"):
-        state = "paused"
-    else:
-        state = "idle"
-
-    current_filepath = pb.get("current_track", "")
-
-    title     = os.path.basename(current_filepath) if current_filepath else ""
-    artist    = ""
-    thumbnail = ""
-    track_id  = os.path.basename(current_filepath) if current_filepath else ""
-
-    if current_filepath:
-        if current_filepath == _track_cache["path"]:
-            cached = _track_cache["data"]
-            track_id  = cached["track_id"]  or track_id
-            title     = cached["title"]     or title
-            artist    = cached["artist"]    or ""
-            thumbnail = cached["thumbnail"] or ""
-        else:
-            try:
-                conn = database.get_connection()
-                try:
-                    row = conn.execute(
-                        "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
-                        (current_filepath,)
-                    ).fetchone()
-                    if row:
-                        track_id  = row["id"]        or track_id
-                        title     = row["title"]      or title
-                        artist    = row["artist"]     or ""
-                        thumbnail = row["thumbnail"]  or ""
-                    _track_cache["path"] = current_filepath
-                    _track_cache["data"] = {"track_id": track_id, "title": title, "artist": artist, "thumbnail": thumbnail}
-                finally:
-                    conn.close()
-            except Exception as e:
-                logger.debug(f"Status enrichment DB lookup failed: {e}")
-
-    np = pb.get("now_playing", {})
-    if np:
-        if not track_id or track_id == os.path.basename(current_filepath):
-            track_id  = np.get("track_id")  or track_id
-        if not title   or title   == os.path.basename(current_filepath):
-            title     = np.get("title")     or title
-        if not thumbnail:
-            thumbnail = np.get("thumbnail") or ""
- 
-    queue_tracks = []
-    for t in q.get("tracks", []):
-        queue_tracks.append({
-            "track_id":  t.get("track_id",  ""),
-            "title":     t.get("title",     ""),
-            "thumbnail": t.get("thumbnail", ""),
-            "artist":    t.get("artist",    ""),
-            "filepath":  t.get("filepath",  ""),
-        })
-
-    raw["state"]                = state
-    raw["paused"]               = pb.get("paused", False)
-    raw["track_id"]             = track_id
-    raw["title"]                = title
-    raw["artist"]               = artist
-    raw["thumbnail"]            = thumbnail
-    raw["position"]             = pb.get("position_s",          0)
-    raw["duration"]             = pb.get("duration_s",          0)
-    raw["position_updated_at"]  = pb.get("position_updated_at", time.time())
-    raw["volume"]               = pb.get("volume",              1.0)
-    raw["queue"]                = queue_tracks
-    raw["queue_current_index"]  = q.get("current_index", -1)
-    raw["repeat_mode"]          = q.get("repeat_mode", "off")
-    raw["shuffle"]              = q.get("shuffle", False)
-
-    return raw
 
 
 def create_app() -> FastAPI:
@@ -328,6 +260,10 @@ def create_app() -> FastAPI:
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    @app.websocket("/api/ws")
+    async def websocket_route(ws: WebSocket):
+        await ws_endpoint(ws)
+
     @app.get("/api/status")
     async def get_status():
         raw = await core_client.get_status()
@@ -336,7 +272,7 @@ def create_app() -> FastAPI:
                 status_code=503,
                 content={"error": "core_unavailable", "message": "rolfsound-core is not reachable"},
             )
-        return _enrich_status(raw)
+        return enrich_status(raw)
 
     # ─── INICIALIZA O MOTOR JINJA2 ───
     templates = Jinja2Templates(directory=str(DASHBOARD_DIR))
