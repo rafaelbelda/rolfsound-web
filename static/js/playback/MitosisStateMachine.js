@@ -241,7 +241,6 @@ export default class MitosisStateMachine {
     if (controls) { controls.style.opacity = '1'; controls.style.transform = 'translateY(0) scale(1)'; }
 
     m._shell.cacheDomElements();
-    m.startRafLoop();
   }
 
   // ─── Unmorph (célula-filha → ilha) ──────────────────────────
@@ -251,7 +250,6 @@ export default class MitosisStateMachine {
     if (!m.isMorphed) return;
     m.isMorphed = false;
     this._hideBackdrop();
-    m.stopRafLoop();
     m.clearAnimationTimers();
     m._animator.cancelAll();
 

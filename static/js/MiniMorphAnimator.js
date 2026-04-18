@@ -168,7 +168,6 @@ export default class MiniMorphAnimator {
       return;
     }
 
-    manager.stopRafLoop();
     manager.clearAnimationTimers();
     manager._animator.cancelAll();
 

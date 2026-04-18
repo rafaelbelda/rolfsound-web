@@ -1,7 +1,7 @@
 # api/routes/queue.py
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
 from utils import core_client
 
@@ -17,12 +17,34 @@ class AddRequest(BaseModel):
 
 
 class RemoveRequest(BaseModel):
-    position: int
+    position: int | None = None
+    index: int | None = None    # intent.queue.remove sends {index}
+
+    @property
+    def resolved(self) -> int:
+        v = self.index if self.index is not None else self.position
+        if v is None:
+            raise ValueError("position or index required")
+        return v
 
 
 class MoveRequest(BaseModel):
-    from_pos: int
-    to_pos: int
+    # intent.queue.move sends {from, to} — "from" is a Python keyword so aliases needed
+    model_config = {"populate_by_name": True}
+    from_pos: int | None = Field(None, alias="from")
+    to_pos:   int | None = Field(None, alias="to")
+
+    @property
+    def resolved_from(self) -> int:
+        if self.from_pos is None:
+            raise ValueError("from required")
+        return self.from_pos
+
+    @property
+    def resolved_to(self) -> int:
+        if self.to_pos is None:
+            raise ValueError("to required")
+        return self.to_pos
 
 
 class RepeatRequest(BaseModel):
@@ -77,7 +99,7 @@ async def add_to_queue(req: AddRequest):
 
 @router.post("/queue/remove")
 async def remove_from_queue(req: RemoveRequest):
-    result = await core_client.queue_remove(req.position)
+    result = await core_client.queue_remove(req.resolved)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -85,7 +107,7 @@ async def remove_from_queue(req: RemoveRequest):
 
 @router.post("/queue/move")
 async def move_in_queue(req: MoveRequest):
-    result = await core_client.queue_move(req.from_pos, req.to_pos)
+    result = await core_client.queue_move(req.resolved_from, req.resolved_to)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
