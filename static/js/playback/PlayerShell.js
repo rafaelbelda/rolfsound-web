@@ -709,12 +709,7 @@ export default class PlayerShell {
         const filepath = item.dataset.filepath;
         if (!trackId) return;
         try {
-          await fetch('/api/queue/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ track_id: trackId, filepath })
-          });
-          AnimationEngine.schedule(m, () => m.pollStatus(), 200, '_pollRetry');
+          await window.rolfsoundChannel?.send('intent.queue.add', { track_id: trackId, filepath });
         } catch(e) { console.error('Add from history failed:', e); }
       });
     });
@@ -746,27 +741,18 @@ export default class PlayerShell {
           filepath: track.file_path ?? track.filepath ?? ''
         })
       });
-      AnimationEngine.schedule(m, () => m.pollStatus(), 250, '_pollRetry');
     } catch (e) { console.error('Play queue item failed:', e); }
   }
 
   async removeFromQueue(idx) {
-    const m = this._m;
     try {
-      await fetch('/api/queue/remove', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ position: idx })
-      });
-      AnimationEngine.schedule(m, () => m.pollStatus(), 200, '_pollRetry');
+      await window.rolfsoundChannel?.send('intent.queue.remove', { index: idx });
     } catch(e) { console.error('Remove from queue failed:', e); }
   }
 
   async clearQueue() {
-    const m = this._m;
     try {
-      await fetch('/api/queue/clear', { method: 'POST' });
-      AnimationEngine.schedule(m, () => m.pollStatus(), 200, '_pollRetry');
+      await window.rolfsoundChannel?.send('intent.queue.clear', {});
     } catch(e) { console.error('Clear queue failed:', e); }
   }
 

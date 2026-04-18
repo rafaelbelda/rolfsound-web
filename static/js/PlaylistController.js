@@ -56,12 +56,8 @@ export default class PlaylistController {
                     icon: nextIcon,
                     action: async () => {
                         try {
-                            // Fetch current queue index to calculate insert position
-                            const statusRes = await fetch('/api/status');
-                            const status = statusRes.ok ? await statusRes.json() : {};
-                            const currentIdx = status.queue_current_index ?? -1;
+                            const currentIdx = window.playbackMitosisManager?.state?.currentQueueIdx ?? -1;
                             const insertPos  = currentIdx + 1;
-
                             const r = await fetch('/api/queue/add', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },

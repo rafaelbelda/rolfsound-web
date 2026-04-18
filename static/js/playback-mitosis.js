@@ -217,9 +217,6 @@ class PlaybackMitosisManager {
     );
   }
 
-  // RAF loop removed — progress rendering delegated to <rolfsound-seek-bar>.
-  startRafLoop() {}
-  stopRafLoop()  {}
 
   // ─────────────────────────────────────────────────────────────
   // RENDER
@@ -295,7 +292,6 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
 
   destroy() {
-    this.stopRafLoop();
     if (this._division) { this._division.destroy(); this._division = null; }
     if (this._animator) this._animator.cancelAll();
     if (this._onNavigate && this.island) {

@@ -62,7 +62,7 @@ class RolfsoundPlayButton extends RolfsoundControl {
     } else if (this._playState === 'paused') {
       this._playState = 'playing';
       this._syncIcon();
-      await this.send('intent.pause', {});
+      await this.send('intent.play', {});
     } else {
       if (!this._hasQueue) return;
       this._playState = 'playing';

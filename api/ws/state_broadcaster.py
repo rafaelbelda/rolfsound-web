@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 _manager = None
 _loop: asyncio.AbstractEventLoop | None = None
+_refresh_task: asyncio.Task | None = None
+
+# Periodic refresh interval — safety net for position updates when core
+# doesn't emit playback_tick events (or EventPoller batches them).
+_REFRESH_INTERVAL_S = 2.0
 
 _CORE_TO_WS = {
     "track_changed":  "event.track_changed",
@@ -32,11 +37,12 @@ _SELF_CONTAINED = frozenset({"playback_tick"})
 
 
 def init(manager, loop: asyncio.AbstractEventLoop, source) -> None:
-    global _manager, _loop
+    global _manager, _loop, _refresh_task
     _manager = manager
     _loop = loop
     source.on("*", _on_core_event)
     source.on("state_refresh", _on_state_refresh)
+    _refresh_task = _loop.create_task(_periodic_refresh(), name="state-refresh")
     logger.info("StateBroadcaster initialised")
 
 
@@ -90,6 +96,25 @@ async def _handle_tick(data: dict) -> None:
         },
         "ts": int(time.time() * 1000),
     })
+
+
+async def _periodic_refresh() -> None:
+    """Periodically broadcast state.playback while WS clients are connected.
+
+    This is the safety net that keeps the seek bar in sync even when the core
+    doesn't emit playback_tick events — the EventPoller polls /events every 2s
+    but may miss position changes between event log entries.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_REFRESH_INTERVAL_S)
+            if _manager is None or _manager.client_count == 0:
+                continue
+            await _broadcast_snapshot()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Periodic refresh error: {e}")
 
 
 async def _broadcast_snapshot() -> None:

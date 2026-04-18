@@ -1,6 +1,9 @@
-/* static/css/global.css */
+/* static/css/global.css — Page resets and layout only.
+   Design tokens live in tokens.css (imported below). */
 
-/* ─── 1. VARIÁVEIS GLOBAIS (Source of Truth) ─── */
+@import '/static/css/tokens.css';
+
+/* ─── 1. VARIÁVEIS GLOBAIS ─── Definidas em tokens.css (importado acima) ─── */
 :root {
   /* ── Tipografia ── */
   --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
