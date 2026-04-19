@@ -2,13 +2,15 @@
 import RolfsoundControl           from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
 
-const CSS_URL = '/static/js/components/shuffle-toggle/shuffle-toggle.css';
+const CSS_URL      = '/static/js/components/shuffle-toggle/shuffle-toggle.css';
+const MAX_GUARD_MS = 3000;
 
 class RolfsoundShuffleToggle extends RolfsoundControl {
   constructor() {
     super();
-    this._enabled      = false;
-    this._guardUntilMs = 0;
+    this._enabled       = false;
+    this._guardUntilMs  = 0;
+    this._expectedValue = null; // Boolean we expect server to confirm
   }
 
   render() {
@@ -25,16 +27,32 @@ class RolfsoundShuffleToggle extends RolfsoundControl {
     `;
     this._btn = this.shadowRoot.querySelector('button');
     this._dot = this.shadowRoot.querySelector('.dot');
-    this._btn.addEventListener('click', () => this._onClick());
+    this._btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      e.preventDefault();
+      this._onClick();
+    });
     loadCss(CSS_URL).then(sheet => { this.shadowRoot.adoptedStyleSheets = [sheet]; });
   }
 
   subscribe() {
-    this.on('state.playback', s => {
-      if (Date.now() < this._guardUntilMs) return;
-      this._enabled = s.shuffle ?? false;
-      this._sync();
-    });
+    this.on('state.playback', s => this._applySnapshot(s));
+  }
+
+  _applySnapshot(s) {
+    if (Date.now() < this._guardUntilMs) {
+      const serverVal = s.shuffle ?? false;
+      if (this._expectedValue !== null && serverVal === this._expectedValue) {
+        this._guardUntilMs  = 0;
+        this._expectedValue = null;
+        // Fall through to apply confirmed state.
+      } else {
+        return;
+      }
+    }
+    this._expectedValue = null;
+    this._enabled = s.shuffle ?? false;
+    this._sync();
   }
 
   _sync() {
@@ -42,12 +60,12 @@ class RolfsoundShuffleToggle extends RolfsoundControl {
     this._dot?.classList.toggle('visible', this._enabled);
   }
 
-  async _onClick() {
-    this._enabled      = !this._enabled;
-    this._guardUntilMs = Date.now() + 2000;
+  _onClick() {
+    this._enabled       = !this._enabled;
+    this._expectedValue = this._enabled;
+    this._guardUntilMs  = Date.now() + MAX_GUARD_MS;
     this._sync();
-    await this.send('intent.shuffle.set', { enabled: this._enabled });
-    setTimeout(() => { this._guardUntilMs = 0; }, 2500);
+    this.send('intent.shuffle.set', { enabled: this._enabled });
   }
 }
 

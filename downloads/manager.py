@@ -26,10 +26,15 @@ class DownloadManager:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._on_complete_callbacks: list[Callable] = []
+        self._on_progress_callbacks: list[Callable] = []
 
     def on_complete(self, callback: Callable) -> None:
         """Register a callback to be called when a download completes."""
         self._on_complete_callbacks.append(callback)
+
+    def on_progress(self, callback: Callable) -> None:
+        """Register a callback called on every progress update: cb(track_id, pct, status)."""
+        self._on_progress_callbacks.append(callback)
 
     def start(self) -> None:
         self._stop_event.clear()
@@ -120,6 +125,11 @@ class DownloadManager:
                 conn.commit()
             finally:
                 conn.close()
+            for cb in self._on_progress_callbacks:
+                try:
+                    cb(track_id, pct, status)
+                except Exception as e:
+                    logger.error(f"Download progress callback error: {e}")
 
         update_progress(0, "downloading")
 

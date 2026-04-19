@@ -6,6 +6,10 @@
 //   - Saber qual aba está ativa para rotear a busca
 //   - Receber o evento 'rolfsound-search' da ilha e despachar para a API certa
 //   - Gerenciar debounce, cancelamento de requests e SSE
+//
+// Payload emitido em 'rolfsound-search-results':
+//   { library: Track[], youtube: Track[], state: 'idle'|'loading'|'streaming'|'done'|'error',
+//     tab: string, query: string, error?: string }
 
 export default class SearchController {
     /**
@@ -28,13 +32,8 @@ export default class SearchController {
     // ─── Setup ───────────────────────────────────────────────────────────────
 
     _attach() {
-        // Ouve qualquer pressionamento de tecla "imprimível" sem ser dentro de um input
         document.addEventListener('keydown', this._onKeydown);
-
-        // Ouve o evento de busca que a ilha dispara quando o usuário digita no input
         this._island.addEventListener('rolfsound-search', this._onSearch);
-
-        // Rastreia a aba ativa para rotear a busca
         this._island.addEventListener('rolfsound-navigate', this._onNavigate);
     }
 
@@ -48,26 +47,21 @@ export default class SearchController {
     // ─── Keydown Global ──────────────────────────────────────────────────────
 
     _onKeydown(e) {
-        // Ignora modificadores e teclas não-imprimíveis
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if (e.key.length !== 1) return;
 
-        // Ignora se já há algum campo editável focado (incluindo Shadow DOM)
         if (this._isAnyEditableFocused()) return;
 
-        // Não abre search enquanto o prompt mitótico de playlist estiver ativo
         if (this._island.shadowRoot?.getElementById('mitosis-playlist-input')) return;
 
-        // Ignora se a ilha está num estado que não suporta search (ex: morph de notificação)
         if (this._island.isLocked) return;
 
         const searchOpen = !!this._island.shadowRoot.getElementById('mitosis-search');
-        if (searchOpen) return; // Já aberta — o foco está no input, browser digita naturalmente
+        if (searchOpen) return;
 
         e.preventDefault();
         this._island.openSearch();
 
-        // Aguarda o input aparecer no shadow DOM e injeta o primeiro caractere
         const firstChar = e.key;
         const waitForInput = (attempts = 0) => {
             const input = this._island.shadowRoot.getElementById('search-input');
@@ -99,7 +93,6 @@ export default class SearchController {
         let currentRoot = root;
         let active = currentRoot?.activeElement || null;
 
-        // Caminha por hosts com shadowRoot para encontrar o foco real interno.
         while (active && active.shadowRoot && active.shadowRoot.activeElement) {
             currentRoot = active.shadowRoot;
             active = currentRoot.activeElement;
@@ -117,7 +110,7 @@ export default class SearchController {
         this._cancelPending();
 
         if (!query) {
-            this._dispatchResults([]);
+            this._dispatchResults({ library: [], youtube: [], state: 'idle', query: '', tab: this._activeTab });
             return;
         }
 
@@ -136,11 +129,13 @@ export default class SearchController {
         this._abortCtrl = new AbortController();
         const signal = this._abortCtrl.signal;
 
-        const results = [];
+        const library = [];
+        const youtube = [];
+
+        // Emite estado "loading" imediatamente, antes do fetch
+        this._dispatchResults({ library, youtube, state: 'loading', query, tab: this._activeTab });
 
         try {
-            // A API /api/search usa Server-Sent Events e combina resultados de
-            // library local + YouTube. Cada chunk é uma linha JSON.
             const url = `/api/search?q=${encodeURIComponent(query)}&tab=${encodeURIComponent(this._activeTab)}`;
             const res = await fetch(url, { signal });
 
@@ -149,7 +144,7 @@ export default class SearchController {
             const contentType = res.headers.get('Content-Type') || '';
 
             if (contentType.includes('text/event-stream')) {
-                // SSE: lê chunks conforme chegam
+                // Parser SSE correto: agrupa linhas em frames delimitados por linha em branco
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let buf = '';
@@ -159,34 +154,66 @@ export default class SearchController {
                     if (done) break;
                     buf += decoder.decode(value, { stream: true });
 
-                    let nl;
-                    while ((nl = buf.indexOf('\n')) !== -1) {
-                        const line = buf.slice(0, nl).trim();
-                        buf = buf.slice(nl + 1);
+                    let boundary;
+                    while ((boundary = buf.indexOf('\n\n')) !== -1) {
+                        const frame = buf.slice(0, boundary);
+                        buf = buf.slice(boundary + 2);
 
-                        if (line.startsWith('data:')) {
-                            try {
-                                const item = JSON.parse(line.slice(5).trim());
-                                results.push(item);
-                                // Resultados parciais em tempo real
-                                this._dispatchResults([...results]);
-                            } catch (_) {}
+                        let eventName = 'message';
+                        let dataLine = '';
+
+                        for (const line of frame.split('\n')) {
+                            if (line.startsWith('event:')) {
+                                eventName = line.slice(6).trim();
+                            } else if (line.startsWith('data:')) {
+                                dataLine = line.slice(5).trim();
+                            }
                         }
+
+                        if (!dataLine) continue;
+
+                        try {
+                            const payload = JSON.parse(dataLine);
+
+                            if (eventName === 'library') {
+                                const tracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+                                library.push(...tracks);
+                                this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'streaming', query, tab: this._activeTab });
+                            } else if (eventName === 'result') {
+                                youtube.push(payload);
+                                this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'streaming', query, tab: this._activeTab });
+                            } else if (eventName === 'done') {
+                                this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'done', query, tab: this._activeTab });
+                                return;
+                            } else if (eventName === 'error') {
+                                const msg = payload.error || payload.message || 'Search failed';
+                                this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'error', query, tab: this._activeTab, error: msg });
+                                return;
+                            }
+                        } catch (_) {}
                     }
                 }
+
             } else {
-                // JSON simples (fallback)
+                // Fallback JSON — classifica por presença de file_path
                 const data = await res.json();
-                results.push(...(data.results ?? data));
+                const items = Array.isArray(data.results ?? data) ? (data.results ?? data) : [];
+                for (const item of items) {
+                    if (item.file_path || item.filepath) library.push(item);
+                    else youtube.push(item);
+                }
             }
 
         } catch (err) {
             if (err.name !== 'AbortError') {
                 console.error('[SearchController] search error:', err);
+                this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'error', query, tab: this._activeTab, error: err.message });
+                return;
             }
+            return; // AbortError — silencioso
         }
 
-        this._dispatchResults(results);
+        this._dispatchResults({ library: [...library], youtube: [...youtube], state: 'done', query, tab: this._activeTab });
     }
 
     _cancelPending() {
@@ -198,10 +225,9 @@ export default class SearchController {
 
     // ─── Distribuição de Resultados ──────────────────────────────────────────
 
-    _dispatchResults(results) {
-        // Dispara um evento no window para que qualquer view possa ouvir
+    _dispatchResults(payload) {
         window.dispatchEvent(new CustomEvent('rolfsound-search-results', {
-            detail: { results, tab: this._activeTab }
+            detail: payload
         }));
     }
 }

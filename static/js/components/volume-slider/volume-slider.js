@@ -80,14 +80,13 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     this._applyPointer(e);
 
     const onMove = (ev) => { if (this._dragging) this._applyPointer(ev); };
-    const onUp   = async (ev) => {
+    const onUp   = (ev) => {
       this._dragging = false;
       this._track.removeEventListener('pointermove', onMove);
       this._track.removeEventListener('pointerup',   onUp);
       this._applyPointer(ev);
-      this._guardUntilMs = Date.now() + 1500;
-      await this.send('intent.volume.set', { value: this._volume });
-      setTimeout(() => { this._guardUntilMs = 0; }, 2000);
+      this._guardUntilMs = Date.now() + 800;
+      this.send('intent.volume.set', { value: this._volume });
     };
 
     this._track.addEventListener('pointermove', onMove);

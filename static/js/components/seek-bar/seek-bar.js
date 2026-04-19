@@ -39,13 +39,8 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._elFill    = this.shadowRoot.querySelector('.fill');
     this._elBar     = this.shadowRoot.querySelector('.bar');
 
-    // Single pointer-down entry point — handles both click and drag.
-    // Using only mousedown avoids the double-seek that happens when 'click'
-    // fires after mouseup with _dragging already reset to false.
-    this._elBar.addEventListener('mousedown', e => this._onMouseDown(e));
+    this._elBar.addEventListener('pointerdown', e => this._onPointerDown(e));
 
-    // Async — styles arrive shortly after first paint; no layout shift because
-    // all sizing is done by the host element (absolute positioning).
     loadCss(CSS_URL).then(sheet => {
       this.shadowRoot.adoptedStyleSheets = [sheet];
     });
@@ -88,7 +83,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
     return Math.min(this._pos + (Date.now() - this._anchorMs) / 1000, this._duration);
   }
 
-  // ── RAF ────────────────────────────────────────────────────���───────────
+  // ── RAF ────────────────────────────────────────────────────────────────
 
   _startRaf() {
     if (this._rafId) return;
@@ -104,7 +99,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._rafId = null;
   }
 
-  // ── Rendering ──────────────────────────────────────────────��──────────
+  // ── Rendering ──────────────────────────────────────────────────────────
 
   _renderProgress(pos, duration) {
     const pct = duration > 0 ? Math.max(0, Math.min(pos / duration, 1)) : 0;
@@ -119,13 +114,15 @@ class RolfsoundSeekBar extends RolfsoundControl {
   }
 
   // ── Input handling ─────────────────────────────────────────────────────
-  // Single mousedown handler — fires ONE seek on mouseup regardless of
-  // whether the user dragged or just clicked. No 'click' listener needed.
 
-  _onMouseDown(e) {
+  _onPointerDown(e) {
     if (!this._duration) return;
-    e.preventDefault();  // prevents text selection during drag
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.preventDefault();
     this._dragging = true;
+
+    // Kill CSS transition so fill is glued to the finger — zero lag during drag.
+    if (this._elFill) this._elFill.style.transition = 'none';
 
     this._dragMoveFn = (mv) => {
       const pct = this._pctFromEvent(mv);
@@ -138,6 +135,12 @@ class RolfsoundSeekBar extends RolfsoundControl {
       this._dragging = false;
       const position = this._pctFromEvent(up) * this._duration;
       this._unbindDrag();
+
+      // Re-enable transition after two frames so the final snap doesn't animate.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (this._elFill) this._elFill.style.transition = '';
+      }));
+
       this._seekTo(position);
     };
 
@@ -156,15 +159,15 @@ class RolfsoundSeekBar extends RolfsoundControl {
     return Math.max(0, Math.min((e.clientX - rect.left) / rect.width, 1));
   }
 
-  async _seekTo(position) {
+  _seekTo(position) {
     this._pos          = position;
     this._anchorMs     = this._playing ? Date.now() : 0;
+    // Guard covers the window between sending the seek and the server's first
+    // tick arriving with the new anchor. 800ms is enough for: core processes
+    // seek + emits playback_tick (1Hz) + broadcaster forwards it.
     this._guardUntilMs = Date.now() + 800;
     this._renderProgress(position, this._duration);
-
-    await this.send('intent.seek', { position });
-
-    setTimeout(() => { this._guardUntilMs = 0; }, 1000);
+    this.send('intent.seek', { position });
   }
 }
 

@@ -11,6 +11,45 @@ export const GAP          = 10;
 export const TOTAL_H      = SQUARE_H + GAP + CONTROLS_H; // 406px
 export const MITOSIS_DROP = 22;
 
+/**
+ * Compute pixel positions for each slot given a layout mode.
+ *
+ * Modes:
+ *   'player-only'          – player centred
+ *   'player+queue'         – player left, queue right  (existing 2-col)
+ *   'player+results'       – player left, results right
+ *   'player+results+queue' – player left, results centre, queue right
+ *
+ * @param {'player-only'|'player+queue'|'player+results'|'player+results+queue'} mode
+ * @returns {{ playerLeft: number, resultsLeft: number|null, queueLeft: number|null, targetTop: number }}
+ */
+export function computeLayout(mode) {
+    const targetTop = (window.innerHeight - TOTAL_H) / 2;
+
+    if (mode === 'player+queue') {
+        const combined = PLAYER_W + GAP + PLAYER_W;
+        const origin   = (window.innerWidth - combined) / 2;
+        return { playerLeft: origin, resultsLeft: null, queueLeft: origin + PLAYER_W + GAP, targetTop };
+    }
+    if (mode === 'player+results') {
+        const combined = PLAYER_W + GAP + PLAYER_W;
+        const origin   = (window.innerWidth - combined) / 2;
+        return { playerLeft: origin, resultsLeft: origin + PLAYER_W + GAP, queueLeft: null, targetTop };
+    }
+    if (mode === 'player+results+queue') {
+        const combined = 3 * PLAYER_W + 2 * GAP;
+        const origin   = (window.innerWidth - combined) / 2;
+        return {
+            playerLeft:  origin,
+            resultsLeft: origin + PLAYER_W + GAP,
+            queueLeft:   origin + 2 * (PLAYER_W + GAP),
+            targetTop
+        };
+    }
+    // player-only (default)
+    return { playerLeft: (window.innerWidth - PLAYER_W) / 2, resultsLeft: null, queueLeft: null, targetTop };
+}
+
 const BUDDING_OVERLAP = 6;
 const BUD_HEIGHT      = 52;
 const PINCH_GAP       = 14;

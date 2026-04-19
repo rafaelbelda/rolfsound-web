@@ -30,7 +30,11 @@ class RolfsoundSkipBack extends RolfsoundControl {
       </button>
     `;
     this.shadowRoot.querySelector('button')
-        .addEventListener('click', () => this._onClick());
+        .addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 && e.pointerType === 'mouse') return;
+          e.preventDefault();
+          this._onClick();
+        });
 
     loadCss(CSS_URL).then(sheet => {
       this.shadowRoot.adoptedStyleSheets = [sheet];
@@ -49,13 +53,11 @@ class RolfsoundSkipBack extends RolfsoundControl {
     return this._pos + (Date.now() - this._anchorMs) / 1000;
   }
 
-  async _onClick() {
+  _onClick() {
     if (this._livePos() > 3) {
-      // Restart current track — core handles it locally, no queue change
-      await this.send('intent.seek', { position: 0 });
+      this.send('intent.seek', { position: 0 });
     } else {
-      // Let the core decide what "back" means — it knows if there's a prev track
-      await this.send('intent.skip', { direction: 'back' });
+      this.send('intent.skip', { direction: 'back' });
     }
   }
 }
@@ -73,7 +75,11 @@ class RolfsoundSkipFwd extends RolfsoundControl {
       </button>
     `;
     this.shadowRoot.querySelector('button')
-        .addEventListener('click', () => this.send('intent.skip', { direction: 'fwd' }));
+        .addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 && e.pointerType === 'mouse') return;
+          e.preventDefault();
+          this.send('intent.skip', { direction: 'fwd' });
+        });
 
     loadCss(CSS_URL).then(sheet => {
       this.shadowRoot.adoptedStyleSheets = [sheet];

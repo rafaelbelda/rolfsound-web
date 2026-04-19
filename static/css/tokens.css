@@ -173,6 +173,12 @@
   --rs-backdrop-contrast-op-peak: 0.45;
   --rs-backdrop-contrast-op-fade: 0.12;
 
+  /* ── Search Results Panel ── */
+  --search-results-w: 420px;
+  --search-results-max-h: min(62vh, 540px);
+  --search-row-h: 52px;
+  --color-search-results-bg: rgba(10, 10, 10, 0.96);
+
   /* ── Compatibilidade com tokens legados ── */
   --black: var(--color-bg-canvas);
   --white: var(--color-text-primary);

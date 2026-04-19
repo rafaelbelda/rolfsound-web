@@ -66,6 +66,21 @@ async def lifespan(app: FastAPI):
         logger.info(f"Indexer scheduled for {track_id}")
 
     manager.on_complete(_on_download_complete)
+
+    # Broadcast download progress to all connected WS clients.
+    # Runs from the download worker thread — bridge back via run_coroutine_threadsafe.
+    def _on_download_progress(track_id: str, pct: int, status: str):
+        ws_manager = get_ws_manager()
+        asyncio.run_coroutine_threadsafe(
+            ws_manager.broadcast({
+                "type":    "event.download_progress",
+                "payload": {"track_id": track_id, "percent": pct, "status": status},
+                "ts":      int(time.time() * 1000),
+            }),
+            _loop,
+        )
+
+    manager.on_progress(_on_download_progress)
     manager.start()
 
     # Choose the Core → Web event transport (push vs. pull).

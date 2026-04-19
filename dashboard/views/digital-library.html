@@ -1331,6 +1331,8 @@
   });
 
   window.addEventListener('rolfsound-search', (e) => {
+    // Se o painel de resultados estiver aberto, ele é a fonte única — não filtrar a grid
+    if (document.body.dataset.searchPanel === 'open') return;
     const query = (e.detail.query || '').toLowerCase();
     if (libraryMode === 'digital') {
       renderLibrary(query);
@@ -1338,9 +1340,18 @@
   });
 
   window.addEventListener('rolfsound-search-results', (e) => {
+    // Se o painel de resultados estiver aberto, a grid da library não deve filtrar
+    if (document.body.dataset.searchPanel === 'open') return;
     if (libraryMode !== 'digital') return;
     if (e.detail?.tab && e.detail.tab !== 'digital' && e.detail.tab !== 'library') return;
     renderLibrary(getCurrentSearchQuery());
+  });
+
+  // Quando o painel de search fecha, restaurar a grid completa
+  window.addEventListener('rolfsound-search-close', () => {
+    if (libraryMode === 'digital') {
+      renderLibrary('');
+    }
   });
 
   window.addEventListener('rolfsound-playlist-picker-request', (e) => {

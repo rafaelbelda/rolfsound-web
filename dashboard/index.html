@@ -19,6 +19,8 @@
   <script type="module" src="/static/js/components/repeat-toggle/repeat-toggle.js"></script>
   <script type="module" src="/static/js/components/queue-button/queue-button.js"></script>
   <script type="module" src="/static/js/components/volume-slider/volume-slider.js"></script>
+  <script type="module" src="/static/js/components/track-row/track-row.js"></script>
+  <script type="module" src="/static/js/components/search-results/search-results.js"></script>
   <script type="module" src="/static/js/PlaybackStateStore.js"></script>
   <script type="module" src="/static/js/RolfsoundIsland.js"></script>
   <script type="module" src="/static/js/RolfsoundMiniplayer.js"></script>
@@ -29,6 +31,7 @@
   <div id="cursor-dot"></div>
   <rolfsound-island active-tab="library"></rolfsound-island>
   <rolfsound-miniplayer style="display:none"></rolfsound-miniplayer>
+  <rolfsound-search-results></rolfsound-search-results>
   <div class="bg-layer active"></div>
 
   <section id="view-vinyl-library" class="view-layer active">
@@ -46,13 +49,15 @@
   <script type="module">
     import Cursor from '/static/js/Cursor.js';
     import SearchController from '/static/js/SearchController.js';
+    import SearchLayoutCoordinator from '/static/js/SearchLayoutCoordinator.js';
     import ContextMenuController from '/static/js/ContextMenuController.js';
     import PlaylistController from '/static/js/PlaylistController.js';
 
     const meuCursor = new Cursor();
     window.meuCursor = meuCursor;
 
-    const island = document.querySelector('rolfsound-island');
+    const island     = document.querySelector('rolfsound-island');
+    const resultsEl  = document.querySelector('rolfsound-search-results');
     const views = {
         'library': document.getElementById('view-vinyl-library'),
         'digital': document.getElementById('view-digital-library'),
@@ -112,9 +117,112 @@
       }
     }
 
-    // Inicia o SearchController apenas quando o custom element estiver registrado
+    // Inicia o SearchController e o SearchLayoutCoordinator
     customElements.whenDefined('rolfsound-island').then(() => {
         window.searchController = new SearchController(island);
+        window.searchLayoutCoordinator = new SearchLayoutCoordinator(island, resultsEl);
+    });
+
+    // Acções globais das linhas de resultado de search
+    // Tracks which downloads should auto-play on completion.
+    const _pendingAutoplay = new Set(); // trackId
+
+    function scheduleAutoplay(trackId) {
+        _pendingAutoplay.add(trackId);
+    }
+
+    // Receive download progress via WebSocket — no polling needed.
+    window.rolfsoundChannel.on('event.download_progress', async ({ track_id, percent, status }) => {
+        if (!_pendingAutoplay.has(track_id)) return;
+        if (status === 'complete') {
+            _pendingAutoplay.delete(track_id);
+            const pr = await fetch('/api/play', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id })
+            });
+            if (pr.ok) island?.showNotification?.({ text: 'Now playing', duration: 2200 });
+        } else if (status === 'failed') {
+            _pendingAutoplay.delete(track_id);
+            island?.showNotification?.({ text: 'Download failed', duration: 2200 });
+        }
+    });
+
+    window.addEventListener('rolfsound-search-row-action', async (e) => {
+        const { action, track, source } = e.detail || {};
+        if (!track) return;
+
+        const trackId  = track.id || track.track_id || '';
+        const filepath = track.file_path || track.filepath || '';
+
+        const notify = (text) => island?.showNotification?.({ text, duration: 2200 });
+
+        if (action === 'play' || action === 'download') {
+            if (source === 'library' || filepath) {
+                // Track already in library — play directly
+                try {
+                    const r = await fetch('/api/play', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ track_id: trackId, filepath })
+                    });
+                    if (r.ok) notify('Playing now');
+                    else notify('Play failed');
+                } catch { notify('Play failed'); }
+            } else {
+                // YouTube — trigger download, then handle based on response status
+                try {
+                    const r = await fetch('/api/downloads', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            track_id: trackId,
+                            title: track.title || '',
+                            thumbnail: track.thumbnail || ''
+                        })
+                    });
+                    if (!r.ok) { notify('Download failed'); return; }
+                    const data = await r.json();
+
+                    if (data.status === 'exists') {
+                        // Already in library — play right now
+                        const pr = await fetch('/api/play', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ track_id: trackId })
+                        });
+                        if (pr.ok) notify('Playing now');
+                        else notify('Play failed');
+                    } else if (action === 'play') {
+                        // Downloading — auto-play when ready
+                        notify('Downloading… will play when ready');
+                        scheduleAutoplay(trackId);
+                    } else {
+                        notify('Download started');
+                    }
+                } catch { notify('Download failed'); }
+            }
+        } else if (action === 'queue') {
+            try {
+                const r = await fetch('/api/queue/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        track_id: trackId,
+                        filepath,
+                        title: track.title || '',
+                        thumbnail: track.thumbnail || ''
+                    })
+                });
+                if (r.ok) notify('Added to queue');
+                else notify('Queue failed');
+            } catch { notify('Queue failed'); }
+        }
+    });
+
+    // Atualiza estados das rows após mudança de playback
+    window.addEventListener('rolfsound-now-playing-changed', () => {
+        document.querySelector('rolfsound-search-results')?.refreshStates?.();
     });
 
     // Transição suave quando clica na Ilha

@@ -1,7 +1,7 @@
 // static/js/playback/PlayerShell.js
 // HTML building, DOM caching, queue panel, and outside-click for PlaybackMitosisManager.
 import AnimationEngine from '/static/js/AnimationEngine.js';
-import { PLAYER_W, SQUARE_H, CONTROLS_H, GAP, TOTAL_H } from './MitosisStateMachine.js';
+import { PLAYER_W, SQUARE_H, CONTROLS_H, GAP, TOTAL_H, computeLayout } from './MitosisStateMachine.js';
 
 export default class PlayerShell {
   constructor(manager) {
@@ -75,6 +75,11 @@ export default class PlayerShell {
           height: calc(100% + 20px);
           background: transparent;
           pointer-events: auto;
+        }
+
+        /* Disable hover-catcher when results panel is in the slot to the right */
+        .search-open #playback-controls-shell::after {
+          pointer-events: none;
         }
 
         #btn-queue {
@@ -474,6 +479,81 @@ export default class PlayerShell {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // LAYOUT — multi-column slot system
+  // ─────────────────────────────────────────────────────────────
+
+  /** Returns the current layout mode based on open panels. */
+  _currentMode() {
+    const m          = this._m;
+    const searchOpen = document.body.dataset.searchPanel === 'open';
+    const queueOpen  = m.isQueueOpen;
+    if (searchOpen && queueOpen) return 'player+results+queue';
+    if (searchOpen)              return 'player+results';
+    if (queueOpen)               return 'player+queue';
+    return 'player-only';
+  }
+
+  /**
+   * Animate player (and queue if open) to the positions defined by the layout mode.
+   * Also emits 'rolfsound-layout-applied' so the results panel can reposition.
+   * @param {'player-only'|'player+queue'|'player+results'|'player+results+queue'} mode
+   * @param {{ duration?: number }} opts
+   */
+  applyLayout(mode, opts = {}) {
+    const m        = this._m;
+    const duration = opts.duration ?? 480;
+    const ease     = 'cubic-bezier(0.32, 0.72, 0, 1)';
+
+    if (!m.playerContainer) return;
+
+    const { playerLeft, queueLeft, resultsLeft, targetTop } = computeLayout(mode);
+
+    // ── Animate player ──
+    const currentPlayerLeft = parseFloat(m.playerContainer.style.left);
+    if (!isNaN(currentPlayerLeft) && Math.abs(currentPlayerLeft - playerLeft) > 0.5) {
+      m._animator.play(m.playerContainer, [
+        { transform: 'none' },
+        { transform: `translateX(${playerLeft - currentPlayerLeft}px)` }
+      ], { duration, easing: ease });
+
+      AnimationEngine.schedule(m, () => {
+        if (!m.playerContainer) return;
+        m._animator.releaseAll(m.playerContainer);
+        m.playerContainer.style.left      = `${playerLeft}px`;
+        m.playerContainer.style.transform = 'none';
+      }, duration + 80, '_queueTimers');
+    } else {
+      m.playerContainer.style.left = `${playerLeft}px`;
+    }
+
+    // ── Gate hover-catcher ──
+    m.playerContainer.classList.toggle('search-open', mode.includes('results'));
+
+    // ── Animate queue panel if open ──
+    if (m.isQueueOpen && m.queueContainer && queueLeft != null) {
+      const currentQueueLeft = parseFloat(m.queueContainer.style.left);
+      if (!isNaN(currentQueueLeft) && Math.abs(currentQueueLeft - queueLeft) > 0.5) {
+        m._animator.play(m.queueContainer, [
+          { transform: 'none' },
+          { transform: `translateX(${queueLeft - currentQueueLeft}px)` }
+        ], { duration, easing: ease });
+
+        AnimationEngine.schedule(m, () => {
+          if (!m.queueContainer) return;
+          m._animator.releaseAll(m.queueContainer);
+          m.queueContainer.style.left      = `${queueLeft}px`;
+          m.queueContainer.style.transform = 'none';
+        }, duration + 80, '_queueTimers');
+      }
+    }
+
+    // ── Notify results panel of its new slot ──
+    window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
+      detail: { mode, playerLeft, resultsLeft, queueLeft, targetTop }
+    }));
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // QUEUE PANEL
   // ─────────────────────────────────────────────────────────────
 
@@ -506,10 +586,9 @@ export default class PlayerShell {
     const hint = m.playerContainer.querySelector('#queue-btn-hint');
     if (hint) hint.style.opacity = '0';
 
-    const combinedW        = PLAYER_W + GAP + PLAYER_W;
-    const targetPlayerLeft = (window.innerWidth  - combinedW) / 2;
-    const targetQueueLeft  = targetPlayerLeft + PLAYER_W + GAP;
-    const targetTop        = (window.innerHeight - TOTAL_H) / 2;
+    // Use mode-aware layout so 3-col works when search is also open
+    const mode             = this._currentMode(); // 'player+queue' or 'player+results+queue'
+    const { playerLeft: targetPlayerLeft, queueLeft: targetQueueLeft, targetTop } = computeLayout(mode);
 
     const panel = document.createElement('div');
     panel.id = 'queue-panel-container';
@@ -557,6 +636,12 @@ export default class PlayerShell {
       { transform: `translateX(${targetPlayerLeft - currentPlayerLeft}px)` }
     ], { duration: 480, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
 
+    // If search results panel needs to shift (3-col), notify via layout-applied
+    const { resultsLeft } = computeLayout(mode);
+    window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
+      detail: { mode, playerLeft: targetPlayerLeft, resultsLeft, queueLeft: targetQueueLeft, targetTop }
+    }));
+
     AnimationEngine.schedule(m, () => {
       if (!panel.parentNode || panel !== m.queueContainer) return;
 
@@ -585,6 +670,8 @@ export default class PlayerShell {
 
       this._loadRecentHistory().then(() => this.renderQueuePanel());
     }, 560, '_queueTimers');
+
+    window.dispatchEvent(new CustomEvent('rolfsound-queue-open', { bubbles: true }));
   }
 
   closeQueuePanel() {
@@ -599,10 +686,18 @@ export default class PlayerShell {
     const hint = m.playerContainer?.querySelector('#queue-btn-hint');
     if (hint) hint.style.opacity = '';
 
-    const targetPlayerLeft = (window.innerWidth  - PLAYER_W) / 2;
-    const targetTop        = (window.innerHeight - TOTAL_H)  / 2;
+    // After queue closes, the remaining mode may still be player+results
+    const modeAfter        = this._currentMode(); // computed with isQueueOpen=false already
+    const slots            = computeLayout(modeAfter);
+    const targetPlayerLeft = slots.playerLeft;
+    const targetTop        = slots.targetTop;
     const finalBtnLeft     = targetPlayerLeft + PLAYER_W + 4;
     const finalBtnTop      = targetTop + SQUARE_H + GAP;
+
+    // Notify results panel of potential slot change (2-col → still 2-col or 0-col)
+    window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
+      detail: { mode: modeAfter, playerLeft: targetPlayerLeft, resultsLeft: slots.resultsLeft, queueLeft: null, targetTop }
+    }));
 
     if (m.playerContainer) {
       const currentLeft  = parseFloat(m.playerContainer.style.left) || targetPlayerLeft;
@@ -640,6 +735,8 @@ export default class PlayerShell {
       if (panel.parentNode) panel.remove();
       if (panel === m.queueContainer) m.queueContainer = null;
     }, 480, '_queueTimers');
+
+    window.dispatchEvent(new CustomEvent('rolfsound-queue-close', { bubbles: true }));
   }
 
   renderQueuePanel() {

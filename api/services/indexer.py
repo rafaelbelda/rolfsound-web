@@ -271,9 +271,10 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
                         images = full.get("images", [])
                         # primary é a capa principal, secondary são fotos do vinil físico
                         primary = next((i for i in images if i.get("type") == "primary"), None)
-                        if primary:
-                            master["cover_image"] = primary["uri"]
-                            logger.debug(f"discogs: capa master {mid} (primary) ok")
+                        best = primary or (images[0] if images else None)
+                        if best:
+                            master["cover_image"] = best["uri"]
+                            logger.debug(f"discogs: capa master {mid} ({'primary' if primary else 'fallback'}) ok")
                 except Exception as e:
                     logger.debug(f"discogs: falha ao buscar master {mid}: {e}")
             return master
@@ -305,9 +306,10 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
                     master_data = mr.json()
                     images = master_data.get("images", [])
                     primary = next((i for i in images if i.get("type") == "primary"), None)
-                    if primary:
-                        release["cover_image"] = primary["uri"]
-                        logger.debug(f"discogs: capa master {master_id} (via release fallback) ok")
+                    best = primary or (images[0] if images else None)
+                    if best:
+                        release["cover_image"] = best["uri"]
+                        logger.debug(f"discogs: capa master {master_id} (via release fallback, {'primary' if primary else 'fallback'}) ok")
             except Exception as e:
                 logger.debug(f"discogs: falha ao buscar master {master_id}: {e}")
 
@@ -342,10 +344,21 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
             artist = shazam["artist"]
             title  = shazam["title"]
 
-    # Fallback final: usar título do YouTube
+    # Fallback final: usar título do YouTube (limpa ruído comum antes de buscar no Discogs)
     if not title and fallback_title:
-        logger.debug(f"shazam sem resultado, usando fallback_title={fallback_title!r}")
-        title = fallback_title
+        import re
+        cleaned = re.sub(
+            r"\s*[\(\[]"
+            r"(?:official\s+(?:music\s+)?(?:video|audio|lyric|visualizer)|"
+            r"lyrics?|hd|4k|hq|remaster(?:ed)?|ft\.?|feat\.?|"
+            r"full\s+(?:album|song)|audio|video|clip|premiere|"
+            r"prod\.?\s+\w+|\d{4}\s+remaster)[^\)\]]*[\)\]]"
+            r"|\s+-\s+(?:official\s+(?:music\s+)?(?:video|audio)|lyric\s+video)"
+            r"|\s+\|\s+.*$",
+            "", fallback_title, flags=re.IGNORECASE,
+        ).strip(" -")
+        logger.debug(f"shazam sem resultado, usando fallback_title={cleaned!r} (original={fallback_title!r})")
+        title = cleaned or fallback_title
 
     # Sem title nenhuma fonte identificou — retorna unidentified.
     if not title:
@@ -369,7 +382,7 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
         "duration":        fp["duration"],
         "mb_recording_id": mb_id,
         "discogs_id":      discogs.get("id")                  if discogs else None,
-        "thumbnail":       discogs.get("cover_image")         if discogs else None,
+        "thumbnail":       discogs.get("cover_image") or None if discogs else None,
         "label":           discogs.get("label", [None])[0]    if discogs else None,
         "year":            discogs.get("year")                if discogs else None,
     }

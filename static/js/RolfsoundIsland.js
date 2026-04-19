@@ -346,6 +346,11 @@ class RolfsoundIsland extends HTMLElement {
 
                 pill.querySelector('#search-input').addEventListener('keydown', (event) => {
                     if (event.key === 'Escape') this.closeSearch();
+                    // Allow ↓ to move focus into the results panel
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        document.querySelector('rolfsound-search-results')?.focusFirst();
+                    }
                 });
 
                 pill.querySelector('#search-input').addEventListener('input', (event) => {
@@ -360,6 +365,9 @@ class RolfsoundIsland extends HTMLElement {
                 const zoneRect = hoverZone.getBoundingClientRect();
                 const offset = (btnRect.left + btnRect.width / 2) - (zoneRect.left + zoneRect.width / 2);
                 pill.style.setProperty('--search-x-offset', `${offset}px`);
+
+                // Notify layout coordinator that search is open
+                window.dispatchEvent(new CustomEvent('rolfsound-search-open', { bubbles: true }));
             }
         });
     }
@@ -369,6 +377,9 @@ class RolfsoundIsland extends HTMLElement {
         if (!pill) return;
 
         this.removeAttribute('inspecting');
+
+        // Notify layout coordinator before animation so it can restore player position
+        window.dispatchEvent(new CustomEvent('rolfsound-search-close', { bubbles: true }));
 
         return AnimationEngine.runMitosisStrategy('search-close', { island: this }, {
             pill,
