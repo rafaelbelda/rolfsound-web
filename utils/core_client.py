@@ -14,37 +14,25 @@ so after the first request the connection is reused with near-zero overhead.
 Call init_client() from FastAPI lifespan startup.
 Call close_client() from FastAPI lifespan shutdown.
 
-TIMEOUT
-───────
-5s total / 2s connect. Core is local; the connect timeout is generous to
-survive transient GIL pressure from sounddevice/portaudio during playback
-transitions (the original 1s connect caused spurious 503s when core was
-busy tearing down an audio stream).
-
-ERROR LOGGING
-─────────────
-4xx responses (400 file_not_found, 404 etc.) are expected operational
-responses — logged at DEBUG. Only genuine infrastructure errors
-(network, timeout, unexpected 5xx) are logged at ERROR.
+VIA EXPRESSA (IPC)
+──────────────────
+Comandos de alta frequência (Volume, Seek, Remix) são delegados ao IpcClient,
+que contorna o HTTP e envia JSON diretamente para a memória do Core (Socket UDS/TCP)
+garantindo latência zero.
 """
 
 import logging
 import httpx
-import asyncio
-import json
-import platform
 from utils.config import get
+from utils.ipc_client import IpcClient  # <--- O nosso novo módulo modular
 
 logger  = logging.getLogger(__name__)
 
-# Generous timeout: core is local but can be briefly busy during stream teardown.
-# 2s connect (was 1s — caused spurious 503s during playback transitions).
-# 5s total (was 2s — gives sounddevice time to finish cleanup).
 TIMEOUT = httpx.Timeout(5.0, connect=2.0)
-
-# Module-level persistent client — initialised in init_client(), closed in close_client().
-# Reusing one client eliminates the ~400-500ms TCP setup overhead per request.
 _client: httpx.AsyncClient | None = None
+
+# Instância única da Via Expressa para comandos de latência zero
+ipc = IpcClient()
 
 
 def _url(path: str) -> str:
@@ -115,53 +103,15 @@ async def _post(path: str, data: dict = None) -> dict | None:
         logger.error(f"Core error POST {path}: {e}")
     return None
 
-IPC_SOCKET_PATH = "/tmp/rolfsound.sock"
-IPC_HOST = "127.0.0.1"
-IPC_PORT = 8767
-IS_WINDOWS = platform.system() == "Windows"
-_ipc_writer: asyncio.StreamWriter | None = None
-_ipc_lock: asyncio.Lock | None = None
-
-async def _send_ipc(cmd: str, payload: dict):
-    """Envia comandos de alta frequência direto para a memória do Core"""
-    global _ipc_writer, _ipc_lock
-    
-    if _ipc_lock is None:
-        _ipc_lock = asyncio.Lock()
-        
-    try:
-        async with _ipc_lock:
-            if _ipc_writer is None or _ipc_writer.is_closing():
-                if IS_WINDOWS:
-                    _, _ipc_writer = await asyncio.wait_for(
-                        asyncio.open_connection(IPC_HOST, IPC_PORT), 
-                        timeout=1.0
-                    )
-                else:
-                    _, _ipc_writer = await asyncio.wait_for(
-                        asyncio.open_unix_connection(IPC_SOCKET_PATH),
-                        timeout=1.0
-                    )
-        
-        # Envia de verdade para o Core!
-        msg = json.dumps({"cmd": cmd, **payload}) + "\n"
-        _ipc_writer.write(msg.encode('utf-8'))
-        await _ipc_writer.drain()
-        
-    except asyncio.TimeoutError:
-        logger.error(f"Timeout na Via Expressa ao enviar '{cmd}'. O Core está ligado na porta {IPC_PORT}?")
-        _ipc_writer = None
-    except Exception as e:
-        logger.error(f"Falha no IPC Socket para '{cmd}': {e}")
-        _ipc_writer = None
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def get_status() -> dict | None:    return await _get("/status")
 async def get_queue()  -> dict | None:    return await _get("/queue")
-async def get_monitor_samples(since: int = 0) -> dict | None:
-    return await _get("/monitor/samples", {"since": since})
 async def get_events(since: int = 0):     return await _get("/events", {"since": since})
+async def get_monitor_samples(since: int = 0) -> dict | None:
+    # Depreciado: Agora os samples fluem nativamente pelo SSE (Fase 2)
+    return await _get("/monitor/samples", {"since": since})
 
 async def play(filepath=None, track_id=None) -> dict | None:
     p = {}
@@ -171,10 +121,6 @@ async def play(filepath=None, track_id=None) -> dict | None:
 
 async def pause()                    -> dict | None: return await _post("/pause")
 async def skip()                     -> dict | None: return await _post("/skip")
-
-async def seek(position: float) -> dict | None: 
-    await _send_ipc("seek", {"pos": position})
-    return {"ok": True}
 
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
@@ -191,8 +137,16 @@ async def queue_clear()               -> dict | None: return await _post("/queue
 async def queue_previous()            -> dict | None: return await _post("/queue/previous")
 async def queue_repeat(mode: str)     -> dict | None: return await _post("/queue/repeat", {"mode": mode})
 async def queue_shuffle(enabled: bool)-> dict | None: return await _post("/queue/shuffle", {"enabled": enabled})
+
+
+# ── Via Expressa (IPC Socket - Zero Latência) ─────────────────────────────────
+
+async def seek(position: float) -> dict | None: 
+    await ipc.send_command("seek", {"pos": position})
+    return {"ok": True}
+
 async def volume(value: float) -> dict | None: 
-    await _send_ipc("volume", {"val": max(0.0, min(1.0, value))})
+    await ipc.send_command("volume", {"val": max(0.0, min(1.0, value))})
     return {"ok": True}
 
 async def remix_set(pitch_semitones: float | None = None,
@@ -201,17 +155,18 @@ async def remix_set(pitch_semitones: float | None = None,
     if pitch_semitones is not None: p["pitch_semitones"] = float(pitch_semitones)
     if tempo_ratio     is not None: p["tempo_ratio"]     = float(tempo_ratio)
     
-    # Envia pela Via Expressa (Socket IPC)
-    await _send_ipc("set_remix", p)
+    await ipc.send_command("set_remix", p)
     return {"ok": True}
 
 async def remix_reset() -> dict | None: 
-    # Envia pela Via Expressa (Socket IPC)
-    await _send_ipc("reset_remix", {})
+    await ipc.send_command("reset_remix", {})
     return {"ok": True}
 
+
+# ── Configurações Mistas ──────────────────────────────────────────────────────
+
 async def remix_reset_flag(enabled: bool)  -> dict | None: 
-    # Este continua no HTTP pois é apenas um clique de configuração
+    # Continua no HTTP pois é apenas um clique de configuração
     return await _post("/remix/reset_flag", {"enabled": bool(enabled)})
 
 async def is_available() -> bool:        return await get_status() is not None

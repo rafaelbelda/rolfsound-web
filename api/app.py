@@ -18,7 +18,6 @@ from fastapi.templating import Jinja2Templates
 from utils import config as cfg
 from db import database
 from downloads.manager import init_manager, get_manager
-from utils.event_poller import get_poller
 from utils.event_stream_client import get_client as get_event_stream_client
 from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
@@ -83,14 +82,8 @@ async def lifespan(app: FastAPI):
     manager.on_progress(_on_download_progress)
     manager.start()
 
-    # Choose the Core → Web event transport (push vs. pull).
-    transport = cfg.get("core_events_transport", "sse")
-    if transport == "sse":
-        event_source = get_event_stream_client()
-        logger.info("Core event transport: SSE (push)")
-    else:
-        event_source = get_poller()
-        logger.info("Core event transport: polling (pull)")
+    event_source = get_event_stream_client()
+    logger.info("Core event transport: SSE (push)")
 
     _register_event_handlers(event_source)
 
@@ -109,7 +102,7 @@ async def lifespan(app: FastAPI):
 
     # Start the monitor accumulator — polls core's /monitor/samples and fans
     # out to connected SSE clients via /api/monitor/stream.
-    get_accumulator().start()
+    # get_accumulator().start()
 
     # ── Restore persisted queue state ─────────────────────────────────
     await _restore_queue_state()
@@ -121,7 +114,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────
-    get_accumulator().stop()
+    # get_accumulator().stop()
     event_source.stop()
     manager.stop()
     await close_search_client()
