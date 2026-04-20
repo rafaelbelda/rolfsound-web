@@ -1,0 +1,128 @@
+:host {
+  display: block;
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.panel {
+  pointer-events: auto;
+  min-width: 220px;
+  padding: 12px 14px;
+  background: var(--color-playback-pill, rgba(18, 18, 22, 0.92));
+  backdrop-filter: blur(var(--blur-playback, 14px));
+  -webkit-backdrop-filter: blur(var(--blur-playback, 14px));
+  border: 1px solid var(--color-border-soft, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  color: var(--color-playback-control, #fff);
+  font: 12px/1.4 system-ui, -apple-system, sans-serif;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top center;
+  transition: opacity 0.18s ease, transform 0.22s var(--ease-standard, ease);
+}
+
+:host(.open) .panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.panel[aria-hidden="true"] {
+  pointer-events: none;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+button.reset {
+  all: unset;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  opacity: 0.65;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+button.reset:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.row {
+  margin: 8px 0;
+}
+
+.row label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  opacity: 0.78;
+  margin-bottom: 4px;
+}
+
+.row .value {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.95;
+}
+
+input[type="range"] {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent, #ffb86b);
+  border: none;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent, #ffb86b);
+  border: none;
+}
+
+footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-soft, rgba(255, 255, 255, 0.07));
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  opacity: 0.78;
+  cursor: pointer;
+}
+
+.toggle input {
+  accent-color: var(--color-accent, #ffb86b);
+}
+
+.stems-slot:empty {
+  display: none;
+}

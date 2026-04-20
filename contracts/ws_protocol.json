@@ -46,6 +46,16 @@
         "current_index": "number | null"
       }
     },
+    "state.remix": {
+      "description": "Remix parameters currently applied to the playback stream. Sent on connect and on every remix_changed event from core.",
+      "payload": {
+        "pitch_semitones":       "number — -12..+12 (0 = no shift)",
+        "tempo_ratio":           "number — 0.5..2.0 (1.0 = original BPM)",
+        "reset_on_track_change": "boolean — user preference",
+        "stems_available":       "boolean — reserved for Phase 3, always false in Phase 0",
+        "stems":                 "array — reserved for Phase 3, empty in Phase 0"
+      }
+    },
     "event.track_changed": {
       "description": "Edge-trigger when the playing track changes.",
       "payload": { "track_id": "string", "title": "string", "artist": "string", "thumbnail": "string | null" }
@@ -76,6 +86,9 @@
     "intent.queue.remove":  { "payload": { "index": "number" } },
     "intent.queue.move":    { "payload": { "from": "number", "to": "number" } },
     "intent.queue.clear":   { "payload": {} },
+    "intent.remix.set":     { "payload": { "pitch_semitones": "number? — optional partial update", "tempo_ratio": "number? — optional partial update" } },
+    "intent.remix.reset":   { "payload": {} },
+    "intent.remix.reset_flag.set": { "payload": { "enabled": "boolean — reset remix on track change preference" } },
     "intent.ping":          { "payload": {} }
   },
 

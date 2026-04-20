@@ -33,7 +33,7 @@ _CORE_TO_WS = {
 }
 
 # Events that carry their own payload and must NOT trigger a full /status fetch.
-_SELF_CONTAINED = frozenset({"playback_tick"})
+_SELF_CONTAINED = frozenset({"playback_tick", "remix_changed"})
 
 
 def init(manager, loop: asyncio.AbstractEventLoop, source) -> None:
@@ -68,6 +68,10 @@ async def _handle_event(event: dict) -> None:
         await _handle_tick(data)
         return  # no /status fetch — tick is self-contained
 
+    if event_type == "remix_changed":
+        await _handle_remix(data)
+        return  # self-contained — no /status fetch
+
     if event_type == "playback_state_changed":
         await _broadcast_snapshot()
         return  # snapshot carries full state; no extra WS event needed
@@ -81,6 +85,20 @@ async def _handle_event(event: dict) -> None:
         })
 
     await _broadcast_snapshot()
+
+
+async def _handle_remix(data: dict) -> None:
+    """Forward core remix_changed as state.remix. reset_on_track_change isn't in
+    the event payload, so refetch it lazily from the latest /status snapshot the
+    periodic refresh puts on the wire — clients treat missing fields as unchanged."""
+    await _manager.broadcast({
+        "type":    "state.remix",
+        "payload": {
+            "pitch_semitones": data.get("pitch_semitones", 0.0),
+            "tempo_ratio":     data.get("tempo_ratio",     1.0),
+        },
+        "ts": int(time.time() * 1000),
+    })
 
 
 async def _handle_tick(data: dict) -> None:
@@ -122,25 +140,51 @@ async def _broadcast_snapshot() -> None:
     raw = await core_client.get_status()
     if raw is None:
         return
+    now_ms = int(time.time() * 1000)
     await _manager.broadcast({
         "type":    "state.playback",
         "payload": enrich_status(raw),
-        "ts":      int(time.time() * 1000),
+        "ts":      now_ms,
     })
+    remix = raw.get("remix") or {}
+    if remix:
+        await _manager.broadcast({
+            "type":    "state.remix",
+            "payload": {
+                "pitch_semitones":       remix.get("pitch_semitones", 0.0),
+                "tempo_ratio":           remix.get("tempo_ratio",     1.0),
+                "reset_on_track_change": remix.get("reset_on_track_change", True),
+            },
+            "ts": now_ms,
+        })
 
 
 async def send_initial_snapshot(ws_queue: asyncio.Queue) -> None:
-    """Push a fresh state.playback snapshot into a freshly connected client queue."""
+    """Push a fresh state.playback + state.remix snapshot into a freshly connected client queue."""
     from api.status_enricher import enrich_status
     raw = await core_client.get_status()
     if raw is None:
         return
-    frame = {
-        "type":    "state.playback",
-        "payload": enrich_status(raw),
-        "ts":      int(time.time() * 1000),
-    }
+    now_ms = int(time.time() * 1000)
     try:
-        ws_queue.put_nowait(frame)
+        ws_queue.put_nowait({
+            "type":    "state.playback",
+            "payload": enrich_status(raw),
+            "ts":      now_ms,
+        })
     except asyncio.QueueFull:
         pass
+    remix = raw.get("remix") or {}
+    if remix:
+        try:
+            ws_queue.put_nowait({
+                "type":    "state.remix",
+                "payload": {
+                    "pitch_semitones":       remix.get("pitch_semitones", 0.0),
+                    "tempo_ratio":           remix.get("tempo_ratio",     1.0),
+                    "reset_on_track_change": remix.get("reset_on_track_change", True),
+                },
+                "ts": now_ms,
+            })
+        except asyncio.QueueFull:
+            pass

@@ -1,0 +1,33 @@
+:host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remix-btn {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--color-playback-control, #fff);
+  opacity: 0.78;
+  cursor: pointer;
+  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease;
+}
+
+.remix-btn:hover {
+  opacity: 1;
+  background: var(--color-playback-control-hover, rgba(255, 255, 255, 0.08));
+}
+
+.remix-btn:active {
+  transform: scale(0.92);
+}
+
+:host(.active) .remix-btn {
+  opacity: 1;
+  color: var(--color-accent, #ffb86b);
+}

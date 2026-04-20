@@ -1,5 +1,6 @@
 # api/services/indexer.py
 
+import asyncio
 import logging
 import subprocess
 import json
@@ -16,6 +17,11 @@ _ROOT   = Path(__file__).parent.parent.parent
 _FPCALC = str(_ROOT / ("fpcalc.exe" if __import__("sys").platform == "win32" else "fpcalc"))
 
 _USER_AGENT = "Rolfsound/1.0"
+
+# shazamio_core (Rust) segfaults on Python 3.14 — isolate the Shazam call
+# in a subprocess so a crash kills only that worker, not the web process.
+_SHAZAM_WORKER = str(Path(__file__).parent / "_shazam_worker.py")
+_SHAZAM_TIMEOUT = 30  # seconds
 
 
 def _discogs_auth_header() -> str | None:
@@ -158,12 +164,15 @@ async def lookup_acoustid(fp: dict) -> dict | None:
 
 
 async def lookup_shazam(file_path: str) -> dict | None:
-    """Identifica a faixa via Shazam. Retorna {artist, title} ou None."""
-    import tempfile, os
+    """Identifica a faixa via Shazam. Retorna {artist, title} ou None.
+
+    Converte o áudio para WAV mono 16kHz via PyAV e delega a chamada ao
+    shazamio para um subprocess worker — se ele segfaltar (shazamio_core
+    é instável em Python 3.14), só o worker morre.
+    """
+    import tempfile, os, sys, json
     import numpy as np
 
-    # Converte para WAV mono 16kHz via PyAV (sem ffmpeg.exe externo).
-    # Apenas os primeiros 20s bastam para o Shazam reconhecer a faixa.
     tmp_wav = None
     try:
         import av
@@ -171,7 +180,7 @@ async def lookup_shazam(file_path: str) -> dict | None:
         os.close(fd)
 
         TARGET_SR = 16000
-        MAX_SAMPLES = TARGET_SR * 20  # 20 segundos
+        MAX_SAMPLES = TARGET_SR * 20  # 20 segundos bastam pro Shazam
 
         frames: list[np.ndarray] = []
         collected = 0
@@ -198,11 +207,10 @@ async def lookup_shazam(file_path: str) -> dict | None:
 
         pcm = np.concatenate(frames).astype(np.int16).tobytes()
 
-        # Escreve WAV manualmente (header PCM 16-bit mono)
         import wave
         with wave.open(tmp_wav, "wb") as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2)  # 16-bit
+            wf.setsampwidth(2)
             wf.setframerate(TARGET_SR)
             wf.writeframes(pcm)
 
@@ -210,16 +218,37 @@ async def lookup_shazam(file_path: str) -> dict | None:
             logger.warning("shazam: WAV vazio após conversão")
             return None
 
-        from shazamio import Shazam
-        result = await Shazam().recognize(tmp_wav)
-        track = result.get("track")
-        if not track:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, _SHAZAM_WORKER, tmp_wav,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_SHAZAM_TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning("shazam: worker timeout")
+            return None
+
+        if proc.returncode != 0:
+            err = (stderr or b"").decode("utf-8", errors="replace").strip()
+            logger.warning(f"shazam: worker exit={proc.returncode} stderr={err[:200]}")
+            return None
+
+        line = (stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
+        payload = line[-1] if line else "null"
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.warning(f"shazam: bad worker output {payload[:100]!r}")
+            return None
+
+        if not data:
             logger.debug("shazam: sem resultado")
             return None
-        artist = track.get("subtitle", "")
-        title  = track.get("title", "")
-        logger.debug(f"shazam: {artist} - {title}")
-        return {"artist": artist, "title": title}
+        logger.debug(f"shazam: {data.get('artist')} - {data.get('title')}")
+        return {"artist": data.get("artist", ""), "title": data.get("title", "")}
     except Exception as e:
         logger.warning(f"shazam error: {e}")
         return None
@@ -357,7 +386,7 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
             r"|\s+\|\s+.*$",
             "", fallback_title, flags=re.IGNORECASE,
         ).strip(" -")
-        logger.debug(f"shazam sem resultado, usando fallback_title={cleaned!r} (original={fallback_title!r})")
+        logger.debug(f"usando fallback_title={cleaned!r} (original={fallback_title!r})")
         title = cleaned or fallback_title
 
     # Sem title nenhuma fonte identificou — retorna unidentified.

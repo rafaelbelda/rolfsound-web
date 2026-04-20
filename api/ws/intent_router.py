@@ -49,20 +49,35 @@ async def _queue_add(p):
 async def _queue_remove(p): return await core_client.queue_remove(int(p["index"]))
 async def _queue_move(p):   return await core_client.queue_move(int(p["from"]), int(p["to"]))
 async def _queue_clear(p):  return await core_client.queue_clear()
+
+async def _remix_set(p):
+    pitch = p.get("pitch_semitones")
+    tempo = p.get("tempo_ratio")
+    return await core_client.remix_set(
+        pitch_semitones=float(pitch) if pitch is not None else None,
+        tempo_ratio    =float(tempo) if tempo is not None else None,
+    )
+
+async def _remix_reset(p):        return await core_client.remix_reset()
+async def _remix_reset_flag(p):   return await core_client.remix_reset_flag(bool(p.get("enabled", True)))
+
 async def _ping(p):         return {"pong": True}
 
 
 _ROUTES = {
-    "intent.play":         _play,
-    "intent.pause":        _pause,
-    "intent.skip":         _skip,
-    "intent.seek":         _seek,
-    "intent.shuffle.set":  _shuffle,
-    "intent.repeat.set":   _repeat,
-    "intent.volume.set":   _volume,
-    "intent.queue.add":    _queue_add,
-    "intent.queue.remove": _queue_remove,
-    "intent.queue.move":   _queue_move,
-    "intent.queue.clear":  _queue_clear,
-    "intent.ping":         _ping,
+    "intent.play":                 _play,
+    "intent.pause":                _pause,
+    "intent.skip":                 _skip,
+    "intent.seek":                 _seek,
+    "intent.shuffle.set":          _shuffle,
+    "intent.repeat.set":           _repeat,
+    "intent.volume.set":           _volume,
+    "intent.queue.add":            _queue_add,
+    "intent.queue.remove":         _queue_remove,
+    "intent.queue.move":           _queue_move,
+    "intent.queue.clear":          _queue_clear,
+    "intent.remix.set":            _remix_set,
+    "intent.remix.reset":          _remix_reset,
+    "intent.remix.reset_flag.set": _remix_reset_flag,
+    "intent.ping":                 _ping,
 }

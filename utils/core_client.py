@@ -30,6 +30,9 @@ responses — logged at DEBUG. Only genuine infrastructure errors
 
 import logging
 import httpx
+import asyncio
+import json
+import platform
 from utils.config import get
 
 logger  = logging.getLogger(__name__)
@@ -112,6 +115,45 @@ async def _post(path: str, data: dict = None) -> dict | None:
         logger.error(f"Core error POST {path}: {e}")
     return None
 
+IPC_SOCKET_PATH = "/tmp/rolfsound.sock"
+IPC_HOST = "127.0.0.1"
+IPC_PORT = 8767
+IS_WINDOWS = platform.system() == "Windows"
+_ipc_writer: asyncio.StreamWriter | None = None
+_ipc_lock: asyncio.Lock | None = None
+
+async def _send_ipc(cmd: str, payload: dict):
+    """Envia comandos de alta frequência direto para a memória do Core"""
+    global _ipc_writer, _ipc_lock
+    
+    if _ipc_lock is None:
+        _ipc_lock = asyncio.Lock()
+        
+    try:
+        async with _ipc_lock:
+            if _ipc_writer is None or _ipc_writer.is_closing():
+                if IS_WINDOWS:
+                    _, _ipc_writer = await asyncio.wait_for(
+                        asyncio.open_connection(IPC_HOST, IPC_PORT), 
+                        timeout=1.0
+                    )
+                else:
+                    _, _ipc_writer = await asyncio.wait_for(
+                        asyncio.open_unix_connection(IPC_SOCKET_PATH),
+                        timeout=1.0
+                    )
+        
+        # Envia de verdade para o Core!
+        msg = json.dumps({"cmd": cmd, **payload}) + "\n"
+        _ipc_writer.write(msg.encode('utf-8'))
+        await _ipc_writer.drain()
+        
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout na Via Expressa ao enviar '{cmd}'. O Core está ligado na porta {IPC_PORT}?")
+        _ipc_writer = None
+    except Exception as e:
+        logger.error(f"Falha no IPC Socket para '{cmd}': {e}")
+        _ipc_writer = None
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -129,7 +171,10 @@ async def play(filepath=None, track_id=None) -> dict | None:
 
 async def pause()                    -> dict | None: return await _post("/pause")
 async def skip()                     -> dict | None: return await _post("/skip")
-async def seek(position: float)      -> dict | None: return await _post("/seek", {"position": position})
+
+async def seek(position: float) -> dict | None: 
+    await _send_ipc("seek", {"pos": position})
+    return {"ok": True}
 
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
@@ -146,5 +191,27 @@ async def queue_clear()               -> dict | None: return await _post("/queue
 async def queue_previous()            -> dict | None: return await _post("/queue/previous")
 async def queue_repeat(mode: str)     -> dict | None: return await _post("/queue/repeat", {"mode": mode})
 async def queue_shuffle(enabled: bool)-> dict | None: return await _post("/queue/shuffle", {"enabled": enabled})
-async def volume(value: float)        -> dict | None: return await _post("/volume", {"volume": max(0.0, min(1.0, value))})
-async def is_available()              -> bool:        return await get_status() is not None
+async def volume(value: float) -> dict | None: 
+    await _send_ipc("volume", {"val": max(0.0, min(1.0, value))})
+    return {"ok": True}
+
+async def remix_set(pitch_semitones: float | None = None,
+                    tempo_ratio:     float | None = None) -> dict | None:
+    p: dict = {}
+    if pitch_semitones is not None: p["pitch_semitones"] = float(pitch_semitones)
+    if tempo_ratio     is not None: p["tempo_ratio"]     = float(tempo_ratio)
+    
+    # Envia pela Via Expressa (Socket IPC)
+    await _send_ipc("set_remix", p)
+    return {"ok": True}
+
+async def remix_reset() -> dict | None: 
+    # Envia pela Via Expressa (Socket IPC)
+    await _send_ipc("reset_remix", {})
+    return {"ok": True}
+
+async def remix_reset_flag(enabled: bool)  -> dict | None: 
+    # Este continua no HTTP pois é apenas um clique de configuração
+    return await _post("/remix/reset_flag", {"enabled": bool(enabled)})
+
+async def is_available() -> bool:        return await get_status() is not None

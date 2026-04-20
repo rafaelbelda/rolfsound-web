@@ -259,9 +259,11 @@ export default class PlayerShell {
             <rolfsound-play-button></rolfsound-play-button>
             <rolfsound-skip-fwd></rolfsound-skip-fwd>
             <rolfsound-repeat-toggle></rolfsound-repeat-toggle>
+            <rolfsound-remix-button id="btn-remix"></rolfsound-remix-button>
           </div>
 
           <rolfsound-queue-button id="btn-queue"></rolfsound-queue-button>
+          <rolfsound-remix-panel id="remix-panel" style="top:100%;left:0;margin-top:6px;"></rolfsound-remix-panel>
 
           <div id="queue-btn-hint" aria-hidden="true">
             <span class="queue-hint-line-v"></span>
