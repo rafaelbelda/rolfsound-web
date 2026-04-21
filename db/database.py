@@ -14,6 +14,11 @@ def init(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with _connect() as conn:
         _create_tables(conn)
+        # ---> NOVO: Migração segura para bases de dados existentes
+        try:
+            conn.execute("ALTER TABLE tracks ADD COLUMN bpm INTEGER")
+        except sqlite3.OperationalError:
+            pass # A coluna já existe
     logger.info(f"Database initialized at {db_path}")
 
 
@@ -59,6 +64,7 @@ def _create_tables(conn):
             discogs_id      TEXT,
             label           TEXT,
             year            INTEGER,
+            bpm             INTEGER,
             fingerprint     TEXT
         );
 
@@ -189,7 +195,7 @@ def list_unidentified_tracks(conn) -> list[dict]:
 def update_track_metadata(conn, track_id: str, data: dict) -> None:
     allowed = {
         "title", "artist", "duration", "thumbnail",
-        "status", "mb_recording_id", "discogs_id", "label", "year", "fingerprint"
+        "status", "mb_recording_id", "discogs_id", "label", "year", "bpm", "fingerprint"
     }
     updates = {k: v for k, v in data.items() if k in allowed and v is not None}
     if not updates:

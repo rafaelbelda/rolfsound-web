@@ -31,10 +31,11 @@ _CORE_TO_WS = {
     "track_changed":  "event.track_changed",
     "track_finished": "event.track_finished",
     "audio_monitor":  "audio_monitor",
+    "playback_state_changed": "state.playback",
 }
 
 # Events that carry their own payload and must NOT trigger a full /status fetch.
-_SELF_CONTAINED = frozenset({"playback_tick", "remix_changed", "audio_monitor"})
+_SELF_CONTAINED = frozenset({"playback_tick", "remix_changed", "audio_monitor", "playback_state_changed"})
 
 
 def init(manager, loop: asyncio.AbstractEventLoop, source) -> None:
@@ -65,6 +66,7 @@ async def _handle_event(event: dict) -> None:
     event_type = event.get("type", "")
     data       = event.get("data", {})
 
+    # 1. Tratamento Especial: Monitor de Áudio (Caminho mais rápido)
     if event_type == "audio_monitor":
         await _manager.broadcast({
             "type": "audio_monitor",
@@ -73,18 +75,25 @@ async def _handle_event(event: dict) -> None:
         })
         return 
 
+    # 2. Tratamento Especial: Mudança de Estado (Cura o Bumerangue)
+    if event_type == "playback_state_changed":
+        await _manager.broadcast({
+            "type": "state.playback",
+            "payload": data,
+            "ts": int(time.time() * 1000),
+        })
+        return # <--- ESSENCIAL: impede que o código abaixo peça um snapshot via HTTP!
+
+    # 3. Outros eventos autossuficientes
     if event_type == "playback_tick":
         await _handle_tick(data)
-        return  # no /status fetch — tick is self-contained
+        return
 
     if event_type == "remix_changed":
         await _handle_remix(data)
-        return  # self-contained — no /status fetch
+        return
 
-    if event_type == "playback_state_changed":
-        await _broadcast_snapshot()
-        return  # snapshot carries full state; no extra WS event needed
-
+    # 4. Fallback: Mapeamento genérico para eventos que sobraram
     ws_type = _CORE_TO_WS.get(event_type)
     if ws_type:
         await _manager.broadcast({
@@ -93,7 +102,9 @@ async def _handle_event(event: dict) -> None:
             "ts":      int(time.time() * 1000),
         })
 
-    await _broadcast_snapshot()
+    # 5. Só faz snapshot se o evento for desconhecido
+    if event_type not in _SELF_CONTAINED:
+        await _broadcast_snapshot()
 
 
 async def _handle_remix(data: dict) -> None:

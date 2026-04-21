@@ -416,6 +416,26 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
         "year":            discogs.get("year")                if discogs else None,
     }
 
+async def detect_bpm(file_path: str) -> int | None:
+    """Usa o filtro nativo do FFMPEG para detetar o BPM sem bibliotecas pesadas."""
+    import re
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-i", file_path, "-af", "bpm", "-f", "null", "-",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=45.0)
+        output = stderr.decode("utf-8", errors="ignore")
+        
+        # O FFMPEG devolve algo como: "[Parsed_bpm_0 @ 0x...] BPM: 124.5"
+        match = re.search(r"BPM:\s*([\d\.]+)", output)
+        if match:
+            bpm_float = float(match.group(1))
+            return int(round(bpm_float))
+    except Exception as e:
+        logger.warning(f"Falha na deteção de BPM para {file_path}: {e}")
+    return None
 
 async def index_file(track_id: str, file_path: str) -> dict:
     """
@@ -454,6 +474,13 @@ async def index_file(track_id: str, file_path: str) -> dict:
         # Só sobrescreve thumbnail se o Discogs devolveu uma
         if meta.get("thumbnail"):
             update["thumbnail"] = meta["thumbnail"]
+
+    # ---> NOVO: Detetar BPM via FFMPEG e adicionar ao update
+    logger.debug(f"A iniciar cálculo de BPM para {track_id}...")
+    bpm = await detect_bpm(file_path)
+    if bpm:
+        update["bpm"] = bpm
+        logger.debug(f"BPM detetado para {track_id}: {bpm}")
 
     # Always store the Chromaprint fingerprint for duplicate detection.
     if raw_fp and raw_fp.get("fingerprint"):

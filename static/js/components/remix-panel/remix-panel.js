@@ -19,12 +19,8 @@ const PITCH_MAX =  12;
 const TEMPO_MIN =  0.5;
 const TEMPO_MAX =  2.0;
 
-// Emit intents at most once per frame (~60 Hz cap; core coalesces further).
 const EMIT_COALESCE_MS = 16;
-// Suppress incoming state.remix echoes for this window after a local commit
-// so the user's in-flight drag isn't overwritten by a stale snapshot.
 const GUARD_MS = 800;
-
 
 class RolfsoundRemixPanel extends RolfsoundControl {
   constructor() {
@@ -32,11 +28,13 @@ class RolfsoundRemixPanel extends RolfsoundControl {
     this._open          = false;
     this._pitch         = 0.0;
     this._tempo         = 1.0;
+    this._baseBpm       = null; // Armazena o BPM original da música
     this._resetOnTrack  = true;
+    
     this._guardUntilMs  = 0;
     this._lastEmitMs    = 0;
     this._emitTimer     = null;
-    this._pending       = null;   // { pitch?, tempo? }
+    this._pending       = null;
     this._onWindowToggle = () => this._toggle();
   }
 
@@ -45,25 +43,38 @@ class RolfsoundRemixPanel extends RolfsoundControl {
       <div class="panel" aria-hidden="true">
         <header>
           <span class="title">Remix</span>
-          <button class="reset" title="Reset">Reset</button>
+          <button class="reset-btn" title="Restaurar originais">Reset</button>
         </header>
 
-        <div class="row" data-param="pitch">
-          <label>Pitch <span class="value pitch-val">0 st</span></label>
-          <input type="range" class="pitch" min="${PITCH_MIN}" max="${PITCH_MAX}" step="0.1" value="0" />
+        <div class="control-group">
+          <div class="label-row">
+            <span class="label">Pitch</span>
+            <span class="value pitch-val">0.0 st</span>
+          </div>
+          <div class="slider-row">
+            <button class="step-btn pitch-down" title="-0.5 st">−</button>
+            <input type="range" class="pitch" min="${PITCH_MIN}" max="${PITCH_MAX}" step="0.5" value="0" />
+            <button class="step-btn pitch-up" title="+0.5 st">+</button>
+          </div>
         </div>
 
-        <div class="row" data-param="tempo">
-          <label>Tempo <span class="value tempo-val">1.00×</span></label>
-          <input type="range" class="tempo" min="${TEMPO_MIN}" max="${TEMPO_MAX}" step="0.01" value="1" />
+        <div class="control-group">
+          <div class="label-row">
+            <span class="label">Tempo <span class="bpm-badge" style="display:none;">BPM</span></span>
+            <span class="value tempo-val">1.00×</span>
+          </div>
+          <div class="slider-row">
+            <button class="step-btn tempo-down" title="Reduzir precisão">−</button>
+            <input type="range" class="tempo" min="${TEMPO_MIN}" max="${TEMPO_MAX}" step="0.01" value="1" />
+            <button class="step-btn tempo-up" title="Aumentar precisão">+</button>
+          </div>
         </div>
-
-        <div class="stems-slot"><!-- Phase 3: stems injected here --></div>
 
         <footer>
           <label class="toggle">
             <input type="checkbox" class="reset-flag" checked />
-            <span>Reset on track change</span>
+            <span class="toggle-track"></span>
+            <span>Reset na próxima faixa</span>
           </label>
         </footer>
       </div>
@@ -74,13 +85,22 @@ class RolfsoundRemixPanel extends RolfsoundControl {
     this._tempoEl   = this.shadowRoot.querySelector('.tempo');
     this._pitchVal  = this.shadowRoot.querySelector('.pitch-val');
     this._tempoVal  = this.shadowRoot.querySelector('.tempo-val');
-    this._resetBtn  = this.shadowRoot.querySelector('.reset');
+    this._bpmBadge  = this.shadowRoot.querySelector('.bpm-badge');
+    this._resetBtn  = this.shadowRoot.querySelector('.reset-btn');
     this._flagEl    = this.shadowRoot.querySelector('.reset-flag');
 
+    // Bind de Eventos dos Sliders (Arrastar)
     this._pitchEl.addEventListener('input',   e => this._onPitchInput(e));
     this._pitchEl.addEventListener('change',  () => this._commit());
     this._tempoEl.addEventListener('input',   e => this._onTempoInput(e));
     this._tempoEl.addEventListener('change',  () => this._commit());
+
+    // Bind de Eventos dos Botões de Precisão (Cliques)
+    this.shadowRoot.querySelector('.pitch-down').addEventListener('click', () => this._stepPitch(-1));
+    this.shadowRoot.querySelector('.pitch-up').addEventListener('click',   () => this._stepPitch(1));
+    this.shadowRoot.querySelector('.tempo-down').addEventListener('click', () => this._stepTempo(-1));
+    this.shadowRoot.querySelector('.tempo-up').addEventListener('click',   () => this._stepTempo(1));
+
     this._resetBtn.addEventListener('click',  () => this._onReset());
     this._flagEl.addEventListener('change',   () => this._onFlagChange());
 
@@ -92,25 +112,37 @@ class RolfsoundRemixPanel extends RolfsoundControl {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener('rolfsound:remix-panel:toggle', this._onWindowToggle);
-    if (this._emitTimer) { clearTimeout(this._emitTimer); this._emitTimer = null; }
+    if (this._emitTimer) clearTimeout(this._emitTimer);
   }
 
   subscribe() {
+    // Escuta mudanças nos rácios de Remix
     this.on('state.remix', s => {
       if (Date.now() < this._guardUntilMs) return;
+      
       if (typeof s.pitch_semitones === 'number') {
         this._pitch = s.pitch_semitones;
         this._pitchEl.value = String(this._pitch);
-        this._pitchVal.textContent = this._formatPitch(this._pitch);
       }
       if (typeof s.tempo_ratio === 'number') {
         this._tempo = s.tempo_ratio;
         this._tempoEl.value = String(this._tempo);
-        this._tempoVal.textContent = this._formatTempo(this._tempo);
       }
       if (typeof s.reset_on_track_change === 'boolean') {
         this._resetOnTrack = s.reset_on_track_change;
         this._flagEl.checked = this._resetOnTrack;
+      }
+      this._updateVisuals();
+    });
+
+    this.on('state.playback', s => {
+      // Procura primeiro na raiz (onde o nosso enricher acabou de o colocar)
+      const track = s?.queue?.tracks?.[s.queue?.current_index];
+      const bpm = s?.bpm || track?.bpm || track?.metadata?.bpm || null;
+      
+      if (this._baseBpm !== bpm) {
+        this._baseBpm = bpm;
+        this._updateVisuals();
       }
     });
   }
@@ -118,19 +150,56 @@ class RolfsoundRemixPanel extends RolfsoundControl {
   _toggle() {
     this._open = !this._open;
     this._panel.setAttribute('aria-hidden', String(!this._open));
-    this.classList.toggle('open', this._open);
   }
 
   _onPitchInput(e) {
     this._pitch = parseFloat(e.target.value);
-    this._pitchVal.textContent = this._formatPitch(this._pitch);
+    this._updateVisuals();
     this._scheduleEmit({ pitch_semitones: this._pitch });
   }
 
   _onTempoInput(e) {
     this._tempo = parseFloat(e.target.value);
-    this._tempoVal.textContent = this._formatTempo(this._tempo);
+    this._updateVisuals();
     this._scheduleEmit({ tempo_ratio: this._tempo });
+  }
+
+  // --- Botões de Precisão Apple-like ---
+  _stepPitch(direction) {
+    // Altera exatamente 0.5 semitons
+    let p = this._pitch + (direction * 0.5);
+    p = Math.max(PITCH_MIN, Math.min(PITCH_MAX, p));
+    this._pitch = p;
+    this._pitchEl.value = String(p);
+    this._updateVisuals();
+    this._commit();
+  }
+
+  _stepTempo(direction) {
+    // Se soubermos o BPM, alteramos exatamente 1 BPM. Senão, alteramos 0.01 do rácio.
+    const stepAmount = this._baseBpm ? (1.0 / this._baseBpm) : 0.01;
+    let t = this._tempo + (direction * stepAmount);
+    t = Math.max(TEMPO_MIN, Math.min(TEMPO_MAX, t));
+    this._tempo = t;
+    this._tempoEl.value = String(t);
+    this._updateVisuals();
+    this._commit();
+  }
+
+  _updateVisuals() {
+    // Atualiza Texto do Pitch
+    const sign = this._pitch > 0 ? '+' : '';
+    this._pitchVal.textContent = `${sign}${this._pitch.toFixed(1).replace(/\.0$/, '.0')} st`;
+    
+    // Atualiza Texto do Tempo (BPM ou Ratio)
+    if (this._baseBpm) {
+      this._bpmBadge.style.display = 'inline-block';
+      const currentBpm = Math.round(this._baseBpm * this._tempo);
+      this._tempoVal.textContent = currentBpm;
+    } else {
+      this._bpmBadge.style.display = 'none';
+      this._tempoVal.textContent = `${this._tempo.toFixed(2)}×`;
+    }
   }
 
   _scheduleEmit(partial) {
@@ -149,8 +218,6 @@ class RolfsoundRemixPanel extends RolfsoundControl {
   }
 
   _commit() {
-    // Final commit on pointerup — guarantees state matches the released slider
-    // value in case the coalesced emit raced the release.
     if (this._emitTimer) { clearTimeout(this._emitTimer); this._emitTimer = null; }
     this._pending = null;
     this._guardUntilMs = Date.now() + GUARD_MS;
@@ -165,8 +232,7 @@ class RolfsoundRemixPanel extends RolfsoundControl {
     this._tempo = 1.0;
     this._pitchEl.value = '0';
     this._tempoEl.value = '1';
-    this._pitchVal.textContent = this._formatPitch(0);
-    this._tempoVal.textContent = this._formatTempo(1);
+    this._updateVisuals();
     this._guardUntilMs = Date.now() + GUARD_MS;
     this.send('intent.remix.reset', {});
   }
@@ -174,15 +240,6 @@ class RolfsoundRemixPanel extends RolfsoundControl {
   _onFlagChange() {
     this._resetOnTrack = this._flagEl.checked;
     this.send('intent.remix.reset_flag.set', { enabled: this._resetOnTrack });
-  }
-
-  _formatPitch(v) {
-    const sign = v > 0 ? '+' : '';
-    return `${sign}${v.toFixed(1).replace(/\.0$/, '')} st`;
-  }
-
-  _formatTempo(v) {
-    return `${v.toFixed(2)}×`;
   }
 }
 

@@ -32,6 +32,7 @@ def enrich_status(raw: dict) -> dict:
     artist    = ""
     thumbnail = ""
     track_id  = os.path.basename(current_filepath) if current_filepath else ""
+    bpm       = None
 
     if current_filepath:
         if current_filepath == _track_cache["path"]:
@@ -40,6 +41,7 @@ def enrich_status(raw: dict) -> dict:
             title     = cached["title"]     or title
             artist    = cached["artist"]    or ""
             thumbnail = cached["thumbnail"] or ""
+            bpm       = cached.get("bpm")
         else:
             try:
                 conn = database.get_connection()
@@ -53,10 +55,12 @@ def enrich_status(raw: dict) -> dict:
                         title     = row["title"]     or title
                         artist    = row["artist"]    or ""
                         thumbnail = row["thumbnail"] or ""
+                        bpm       = row["bpm"]
                     _track_cache["path"] = current_filepath
                     _track_cache["data"] = {
                         "track_id": track_id, "title": title,
                         "artist": artist,     "thumbnail": thumbnail,
+                        "bpm": bpm,
                     }
                 finally:
                     conn.close()
@@ -88,6 +92,7 @@ def enrich_status(raw: dict) -> dict:
     raw["title"]                = title
     raw["artist"]               = artist
     raw["thumbnail"]            = thumbnail
+    raw["bpm"]                  = bpm
     raw["position"]             = pb.get("position_s",          0)
     raw["duration"]             = pb.get("duration_s",          0)
     # Unix ms — consistent with ws_protocol.json contract and seek-bar._anchorMs
