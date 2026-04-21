@@ -4,6 +4,18 @@ import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
 
 const CSS_URL = '/static/js/components/volume-slider/volume-slider.css';
 
+// Utilitário de limite de cadência (Throttle)
+const throttle = (func, limit) => {
+  let inThrottle;
+  return function(...args) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  }
+};
+
 class RolfsoundVolumeSlider extends RolfsoundControl {
   constructor() {
     super();
@@ -11,6 +23,12 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     this._dragging     = false;
     this._guardUntilMs = 0;
     this._open         = false;
+
+    // CRIAMOS O ENVIO SUAVE USANDO A SUA PRÓPRIA ABSTRAÇÃO (this.send)
+    // 50ms é seguro para o hardware de áudio processar sem engarrafar.
+    this._sendThrottledVol = throttle((vol) => {
+      this.send('intent.volume.set', { value: vol });
+    }, 50);
   }
 
   render() {
@@ -79,14 +97,23 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     this._track.setPointerCapture(e.pointerId);
     this._applyPointer(e);
 
-    const onMove = (ev) => { if (this._dragging) this._applyPointer(ev); };
-    const onUp   = (ev) => {
+    const onMove = (ev) => { 
+      if (this._dragging) {
+        this._applyPointer(ev);
+        this._guardUntilMs = Date.now() + 800;
+      }
+    };
+
+    const onUp = (ev) => {
       this._dragging = false;
       this._track.removeEventListener('pointermove', onMove);
       this._track.removeEventListener('pointerup',   onUp);
+      
       this._applyPointer(ev);
-      this._guardUntilMs = Date.now() + 800;
+      
+      // O toque final envia SEM throttle para cravar o número exato onde o dedo parou
       this.send('intent.volume.set', { value: this._volume });
+      this._guardUntilMs = Date.now() + 800;
     };
 
     this._track.addEventListener('pointermove', onMove);
@@ -98,7 +125,14 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     const relY   = e.clientY - rect.top;
     const pct    = 1 - Math.max(0, Math.min(1, relY / rect.height));
     this._volume = Math.round(pct * 100) / 100;
+    
+    // 1. Optimistic UI: O ecrã atualiza na mesma hora (Latência 0 visual)
     this._syncVisual();
+
+    // 2. Real-time Audio: Informa o servidor enquanto arrasta (com suavidade)
+    if (this._dragging) {
+      this._sendThrottledVol(this._volume);
+    }
   }
 }
 

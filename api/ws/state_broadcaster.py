@@ -57,6 +57,7 @@ def _on_state_refresh(_data: dict) -> None:
 
 def _on_core_event(event: dict) -> None:
     """Called from EventPoller thread — must not touch the event loop directly."""
+
     if _loop is None or _manager is None:
         return
     asyncio.run_coroutine_threadsafe(_handle_event(event), _loop)
@@ -73,7 +74,7 @@ async def _handle_event(event: dict) -> None:
             "payload": data,
             "ts": int(time.time() * 1000),
         })
-        return 
+        return
 
     # 2. Tratamento Especial: Mudança de Estado (Cura o Bumerangue)
     if event_type == "playback_state_changed":
