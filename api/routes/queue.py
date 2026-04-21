@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
-from utils import core_client
+from utils.core import core
 
 router = APIRouter()
 
@@ -61,7 +61,7 @@ class SaveAsPlaylistRequest(BaseModel):
 
 @router.get("/queue")
 async def get_queue():
-    result = await core_client.get_queue()
+    result = await core.get_queue()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -88,7 +88,7 @@ async def add_to_queue(req: AddRequest):
         finally:
             conn.close()
 
-    result = await core_client.queue_add(
+    result = await core.queue_add(
         req.track_id, req.filepath, req.title,
         thumbnail=req.thumbnail, artist=artist, position=req.position,
     )
@@ -99,7 +99,7 @@ async def add_to_queue(req: AddRequest):
 
 @router.post("/queue/remove")
 async def remove_from_queue(req: RemoveRequest):
-    result = await core_client.queue_remove(req.resolved)
+    result = await core.queue_remove(req.resolved)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -107,7 +107,7 @@ async def remove_from_queue(req: RemoveRequest):
 
 @router.post("/queue/move")
 async def move_in_queue(req: MoveRequest):
-    result = await core_client.queue_move(req.resolved_from, req.resolved_to)
+    result = await core.queue_move(req.resolved_from, req.resolved_to)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -115,7 +115,7 @@ async def move_in_queue(req: MoveRequest):
 
 @router.post("/queue/clear")
 async def clear_queue():
-    result = await core_client.queue_clear()
+    result = await core.queue_clear()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -125,7 +125,7 @@ async def clear_queue():
 # The dashboard calls API.skipBack() -> POST /api/queue/previous.
 @router.post("/queue/previous")
 async def previous_in_queue():
-    result = await core_client.queue_previous()
+    result = await core.queue_previous()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -133,7 +133,7 @@ async def previous_in_queue():
 
 @router.post("/queue/repeat")
 async def set_repeat(req: RepeatRequest):
-    result = await core_client.queue_repeat(req.mode)
+    result = await core.queue_repeat(req.mode)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -141,7 +141,7 @@ async def set_repeat(req: RepeatRequest):
 
 @router.post("/queue/shuffle")
 async def set_shuffle(req: ShuffleRequest):
-    result = await core_client.queue_shuffle(req.enabled)
+    result = await core.queue_shuffle(req.enabled)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -150,7 +150,7 @@ async def set_shuffle(req: ShuffleRequest):
 @router.post("/queue/save-as-playlist")
 async def save_queue_as_playlist(req: SaveAsPlaylistRequest):
     from db import database
-    queue_data = await core_client.get_queue()
+    queue_data = await core.get_queue()
     if queue_data is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
 

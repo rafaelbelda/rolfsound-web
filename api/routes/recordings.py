@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from utils.config import get
-from utils import core_client
+from utils.core import core
 
 router = APIRouter()
 
@@ -87,7 +87,7 @@ async def queue_recording(name: str):
     path = _recordings_dir() / name
     if not path.exists():
         raise HTTPException(status_code=404, detail="Recording not found")
-    result = await core_client.queue_add(
+    result = await core.queue_add(
         track_id=name,
         filepath=str(path),
         title=name,

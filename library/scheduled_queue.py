@@ -40,7 +40,7 @@ def _run() -> None:
 
 def _check_and_fire() -> None:
     from db import database
-    from utils import core_client
+    from utils.core import core
 
     conn = _db_conn_factory()
     try:
@@ -58,9 +58,9 @@ def _check_and_fire() -> None:
         logger.info(f"Firing scheduled queue #{sq_id} '{name}' with {len(tracks)} tracks")
 
         async def _fire():
-            await core_client.queue_clear()
+            await core.queue_clear()
             for track in tracks:
-                await core_client.queue_add(
+                await core.queue_add(
                     track.get("track_id", ""),
                     track.get("filepath", ""),
                     track.get("title", ""),
@@ -68,7 +68,7 @@ def _check_and_fire() -> None:
                     artist=track.get("artist", ""),
                 )
             if tracks:
-                from utils import core_client as cc
+                from utils.core import core as cc
                 await cc.play(filepath=tracks[0].get("filepath", ""))
 
         if _loop and not _loop.is_closed():

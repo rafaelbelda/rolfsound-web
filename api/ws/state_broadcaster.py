@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 
-from utils import core_client
+from utils.core import core
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ async def _periodic_refresh() -> None:
 
 async def _broadcast_snapshot() -> None:
     from api.status_enricher import enrich_status
-    raw = await core_client.get_status()
+    raw = await core.get_status()
     if raw is None:
         return
     now_ms = int(time.time() * 1000)
@@ -182,7 +182,7 @@ async def _broadcast_snapshot() -> None:
 async def send_initial_snapshot(ws_queue: asyncio.Queue) -> None:
     """Push a fresh state.playback + state.remix snapshot into a freshly connected client queue."""
     from api.status_enricher import enrich_status
-    raw = await core_client.get_status()
+    raw = await core.get_status()
     if raw is None:
         return
     now_ms = int(time.time() * 1000)

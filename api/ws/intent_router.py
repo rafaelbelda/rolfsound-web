@@ -1,12 +1,12 @@
 # api/ws/intent_router.py
 """
-Maps intent.* frames from WS clients to core_client calls.
+Maps intent.* frames from WS clients to core calls.
 Single point of audit for all client-initiated commands.
 """
 
 import logging
 
-from utils import core_client
+from utils.core import core
 
 logger = logging.getLogger(__name__)
 
@@ -24,42 +24,42 @@ async def route(intent_type: str, payload: dict) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-async def _play(p):    return await core_client.play()
-async def _pause(p):   return await core_client.pause()
+async def _play(p):    return await core.play()
+async def _pause(p):   return await core.pause()
 
 async def _skip(p):
     return (
-        await core_client.queue_previous()
+        await core.queue_previous()
         if p.get("direction") == "back"
-        else await core_client.skip()
+        else await core.skip()
     )
 
-async def _seek(p):    return await core_client.seek(float(p["position"]))
-async def _shuffle(p): return await core_client.queue_shuffle(bool(p["enabled"]))
-async def _repeat(p):  return await core_client.queue_repeat(str(p["mode"]))
-async def _volume(p):  return await core_client.volume(float(p["value"]))
+async def _seek(p):    return await core.seek(float(p["position"]))
+async def _shuffle(p): return await core.queue_shuffle(bool(p["enabled"]))
+async def _repeat(p):  return await core.queue_repeat(str(p["mode"]))
+async def _volume(p):  return await core.volume(float(p["value"]))
 
 async def _queue_add(p):
-    return await core_client.queue_add(
+    return await core.queue_add(
         p["track_id"], p.get("filepath", ""), p.get("title", ""),
         thumbnail=p.get("thumbnail", ""), artist=p.get("artist", ""),
         position=p.get("position"),
     )
 
-async def _queue_remove(p): return await core_client.queue_remove(int(p["index"]))
-async def _queue_move(p):   return await core_client.queue_move(int(p["from"]), int(p["to"]))
-async def _queue_clear(p):  return await core_client.queue_clear()
+async def _queue_remove(p): return await core.queue_remove(int(p["index"]))
+async def _queue_move(p):   return await core.queue_move(int(p["from"]), int(p["to"]))
+async def _queue_clear(p):  return await core.queue_clear()
 
 async def _remix_set(p):
     pitch = p.get("pitch_semitones")
     tempo = p.get("tempo_ratio")
-    return await core_client.remix_set(
+    return await core.remix_set(
         pitch_semitones=float(pitch) if pitch is not None else None,
         tempo_ratio    =float(tempo) if tempo is not None else None,
     )
 
-async def _remix_reset(p):        return await core_client.remix_reset()
-async def _remix_reset_flag(p):   return await core_client.remix_reset_flag(bool(p.get("enabled", True)))
+async def _remix_reset(p):        return await core.remix_reset()
+async def _remix_reset_flag(p):   return await core.remix_reset_flag(bool(p.get("enabled", True)))
 
 async def _ping(p):         return {"pong": True}
 

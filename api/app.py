@@ -22,8 +22,7 @@ from utils.event_stream_client import get_client as get_event_stream_client
 from library.cleanup import start_cleanup_scheduler
 from youtube.ytdlp import cleanup_temp_files
 from youtube.search import close_client as close_search_client
-from utils import core_client
-from utils.monitor_accumulator import get_accumulator
+from utils.core import core, http_client
 from api.status_enricher import enrich_status
 from api.ws.endpoint import get_manager as get_ws_manager, ws_endpoint
 from api.ws import state_broadcaster
@@ -94,7 +93,8 @@ async def lifespan(app: FastAPI):
 
     # Initialise persistent HTTP client for core communication.
     # This eliminates ~400-500ms TCP setup overhead on every API call.
-    core_client.init_client()
+    # Before: core_client.init_client()
+    http_client.init_client()
 
     # Start the event transport *after* handlers are registered AND the shared
     # http client exists — handlers hit core_client.get_status() via state_broadcaster.
@@ -120,7 +120,8 @@ async def lifespan(app: FastAPI):
     await close_search_client()
     # Save queue state before closing the core connection.
     await _save_queue_state()
-    await core_client.close_client()
+    # Before: await core_client.close_client()
+    await http_client.close_client()
     logger.info("rolfsound-control stopped")
 
 
@@ -138,7 +139,7 @@ async def _restore_queue_state() -> None:
 
     logger.info(f"Restoring {len(tracks)} queued tracks from last session")
     for i, track in enumerate(tracks):
-        await core_client.queue_add(
+        await core.queue_add(
             track.get("track_id", ""),
             track.get("filepath", ""),
             track.get("title", ""),
@@ -149,15 +150,15 @@ async def _restore_queue_state() -> None:
     repeat_mode = state.get("repeat_mode", "off")
     shuffle = state.get("shuffle", False)
     if repeat_mode != "off":
-        await core_client.queue_repeat(repeat_mode)
+        await core.queue_repeat(repeat_mode)
     if shuffle:
-        await core_client.queue_shuffle(True)
+        await core.queue_shuffle(True)
 
 
 async def _save_queue_state() -> None:
     """Persist current core queue state to SQLite before shutdown."""
     try:
-        status = await core_client.get_status()
+        status = await core.get_status()
         if status is None:
             return
         q = status.get("queue", {})
@@ -274,7 +275,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     async def get_status():
-        raw = await core_client.get_status()
+        raw = await core.get_status()
         if raw is None:
             return JSONResponse(
                 status_code=503,

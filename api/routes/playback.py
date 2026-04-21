@@ -3,7 +3,7 @@
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from utils import core_client
+from utils.core import core
 
 router = APIRouter()
 
@@ -30,9 +30,9 @@ async def play(req: PlayRequest = None):
     if filepath:
         filepath = str(Path(filepath).resolve())
 
-    # Pass None (not empty string) so core_client skips adding to the dict.
+    # Pass None (not empty string) so core skips adding to the dict.
     # Core receiving {"filepath": ""} is treated as no filepath provided.
-    result = await core_client.play(
+    result = await core.play(
         filepath=filepath if filepath else None,
         track_id=track_id if track_id else None,
     )
@@ -43,7 +43,7 @@ async def play(req: PlayRequest = None):
 
 @router.post("/pause")
 async def pause():
-    result = await core_client.pause()
+    result = await core.pause()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -51,7 +51,7 @@ async def pause():
 
 @router.post("/skip")
 async def skip():
-    result = await core_client.skip()
+    result = await core.skip()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
@@ -59,7 +59,7 @@ async def skip():
 
 @router.post("/seek")
 async def seek(req: SeekRequest):
-    result = await core_client.seek(req.position)
+    result = await core.seek(req.position)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result
