@@ -19,10 +19,10 @@ def enrich_status(raw: dict) -> dict:
     pb = raw.get("playback", {})
     q  = raw.get("queue",    {})
 
-    if pb.get("playing"):
-        state = "playing"
-    elif pb.get("paused"):
+    if pb.get("paused"):          
         state = "paused"
+    elif pb.get("playing"):       
+        state = "playing"
     else:
         state = "idle"
 
