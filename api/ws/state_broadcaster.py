@@ -30,10 +30,11 @@ _REFRESH_INTERVAL_S = 2.0
 _CORE_TO_WS = {
     "track_changed":  "event.track_changed",
     "track_finished": "event.track_finished",
+    "audio_monitor":  "audio_monitor",
 }
 
 # Events that carry their own payload and must NOT trigger a full /status fetch.
-_SELF_CONTAINED = frozenset({"playback_tick", "remix_changed"})
+_SELF_CONTAINED = frozenset({"playback_tick", "remix_changed", "audio_monitor"})
 
 
 def init(manager, loop: asyncio.AbstractEventLoop, source) -> None:
@@ -63,6 +64,14 @@ def _on_core_event(event: dict) -> None:
 async def _handle_event(event: dict) -> None:
     event_type = event.get("type", "")
     data       = event.get("data", {})
+
+    if event_type == "audio_monitor":
+        await _manager.broadcast({
+            "type": "audio_monitor",
+            "payload": data,
+            "ts": int(time.time() * 1000),
+        })
+        return 
 
     if event_type == "playback_tick":
         await _handle_tick(data)
