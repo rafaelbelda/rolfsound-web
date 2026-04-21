@@ -1,8 +1,21 @@
 // static/js/components/seek-bar/seek-bar.js
 import RolfsoundControl           from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
+// Caminho corrigido para subir dois níveis e entrar em channel
+import channel                    from '../../channel/RolfsoundChannel.js'; 
 
 const CSS_URL = '/static/js/components/seek-bar/seek-bar.css';
+
+const throttle = (func, limit) => {
+  let inThrottle;
+  return function(...args) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  }
+};
 
 class RolfsoundSeekBar extends RolfsoundControl {
   constructor() {
@@ -14,11 +27,12 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._playing      = false;
     this._rafId        = null;
     this._dragging     = false;
-    this._dragMoveFn   = null;
-    this._dragUpFn     = null;
-  }
 
-  // RolfsoundControl calls render() then subscribe() on connectedCallback.
+    // Scrubbing real-time: 80ms é o equilíbrio perfeito para o Raspberry Pi
+    this._sendThrottledSeek = throttle((pos) => {
+      this.send('intent.seek', { position: pos });
+    }, 80);
+  }
 
   render() {
     this.shadowRoot.innerHTML = `
@@ -28,8 +42,11 @@ class RolfsoundSeekBar extends RolfsoundControl {
         <span class="time-total">0:00</span>
       </div>
       <div class="bar">
-        <div class="track">
-          <div class="fill"></div>
+        <div class="track-outer">
+          <div class="track">
+            <div class="fill"></div>
+          </div>
+          <div class="thumb"></div>
         </div>
       </div>
     `;
@@ -37,6 +54,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._elCurrent = this.shadowRoot.querySelector('.time-current');
     this._elTotal   = this.shadowRoot.querySelector('.time-total');
     this._elFill    = this.shadowRoot.querySelector('.fill');
+    this._elThumb   = this.shadowRoot.querySelector('.thumb');
     this._elBar     = this.shadowRoot.querySelector('.bar');
 
     this._elBar.addEventListener('pointerdown', e => this._onPointerDown(e));
@@ -54,10 +72,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._stopRaf();
-    this._unbindDrag();
   }
-
-  // ── State application ──────────────────────────────────────────────────
 
   _applySnapshot(s) {
     if (Date.now() < this._guardUntilMs) return;
@@ -76,14 +91,11 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._anchorMs = p.position_updated_at ?? Date.now();
   }
 
-  // ── Dead-reckoning ─────────────────────────────────────────────────────
-
   _deadReckoned() {
     if (!this._anchorMs || !this._duration) return this._pos;
-    return Math.min(this._pos + (Date.now() - this._anchorMs) / 1000, this._duration);
+    const diff = (Date.now() - this._anchorMs) / 1000;
+    return Math.min(this._pos + diff, this._duration);
   }
-
-  // ── RAF ────────────────────────────────────────────────────────────────
 
   _startRaf() {
     if (this._rafId) return;
@@ -99,13 +111,14 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._rafId = null;
   }
 
-  // ── Rendering ──────────────────────────────────────────────────────────
-
   _renderProgress(pos, duration) {
     const pct = duration > 0 ? Math.max(0, Math.min(pos / duration, 1)) : 0;
-    if (this._elFill)    this._elFill.style.transform    = `scaleX(${pct})`;
-    if (this._elCurrent) this._elCurrent.textContent     = this._fmt(pos);
-    if (this._elTotal)   this._elTotal.textContent       = this._fmt(duration);
+    const pctStr = `${(pct * 100).toFixed(2)}%`;
+    
+    if (this._elFill)  this._elFill.style.width = pctStr;
+    if (this._elThumb) this._elThumb.style.left = pctStr;
+    if (this._elCurrent) this._elCurrent.textContent = this._fmt(pos);
+    if (this._elTotal)   this._elTotal.textContent   = this._fmt(duration);
   }
 
   _fmt(s) {
@@ -113,45 +126,42 @@ class RolfsoundSeekBar extends RolfsoundControl {
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   }
 
-  // ── Input handling ─────────────────────────────────────────────────────
-
   _onPointerDown(e) {
     if (!this._duration) return;
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
     this._dragging = true;
+    this._elBar.classList.add('dragging');
+    this._elBar.setPointerCapture(e.pointerId);
 
-    // Kill CSS transition so fill is glued to the finger — zero lag during drag.
     if (this._elFill) this._elFill.style.transition = 'none';
+    if (this._elThumb) this._elThumb.style.transition = 'none';
 
-    this._dragMoveFn = (mv) => {
-      const pct = this._pctFromEvent(mv);
-      const pos = pct * this._duration;
-      if (this._elFill)    this._elFill.style.transform = `scaleX(${pct})`;
-      if (this._elCurrent) this._elCurrent.textContent  = this._fmt(pos);
-    };
+    this._applyDrag(e);
 
-    this._dragUpFn = (up) => {
+    const onMove = (ev) => { if (this._dragging) this._applyDrag(ev); };
+    const onUp = (ev) => {
       this._dragging = false;
-      const position = this._pctFromEvent(up) * this._duration;
-      this._unbindDrag();
+      this._elBar.classList.remove('dragging');
+      this._elBar.removeEventListener('pointermove', onMove);
+      this._elBar.removeEventListener('pointerup',   onUp);
 
-      // Re-enable transition after two frames so the final snap doesn't animate.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
+      const position = this._pctFromEvent(ev) * this._duration;
+      this._seekTo(position, false); // Envio final exato
+
+      requestAnimationFrame(() => {
         if (this._elFill) this._elFill.style.transition = '';
-      }));
-
-      this._seekTo(position);
+        if (this._elThumb) this._elThumb.style.transition = '';
+      });
     };
 
-    document.addEventListener('mousemove', this._dragMoveFn);
-    document.addEventListener('mouseup',   this._dragUpFn, { once: true });
+    this._elBar.addEventListener('pointermove', onMove);
+    this._elBar.addEventListener('pointerup',   onUp);
   }
 
-  _unbindDrag() {
-    if (this._dragMoveFn) document.removeEventListener('mousemove', this._dragMoveFn);
-    this._dragMoveFn = null;
-    this._dragUpFn   = null;
+  _applyDrag(e) {
+    const pct = this._pctFromEvent(e);
+    const pos = pct * this._duration;
+    this._renderProgress(pos, this._duration);
   }
 
   _pctFromEvent(e) {
@@ -159,15 +169,13 @@ class RolfsoundSeekBar extends RolfsoundControl {
     return Math.max(0, Math.min((e.clientX - rect.left) / rect.width, 1));
   }
 
-  _seekTo(position) {
+  _seekTo(position, isThrottled) {
     this._pos          = position;
     this._anchorMs     = this._playing ? Date.now() : 0;
-    // Guard covers the window between sending the seek and the server's first
-    // tick arriving with the new anchor. 800ms is enough for: core processes
-    // seek + emits playback_tick (1Hz) + broadcaster forwards it.
-    this._guardUntilMs = Date.now() + 800;
-    this._renderProgress(position, this._duration);
-    this.send('intent.seek', { position });
+    this._guardUntilMs = Date.now() + 1000; 
+    
+    if (isThrottled) this._sendThrottledSeek(position);
+    else this.send('intent.seek', { position });
   }
 }
 
