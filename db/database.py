@@ -1,6 +1,7 @@
 # db/database.py
 import sqlite3
 import logging
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -14,12 +15,7 @@ def init(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with _connect() as conn:
         _create_tables(conn)
-        # ---> NOVO: Migração segura para bases de dados existentes
-        try:
-            conn.execute("ALTER TABLE tracks ADD COLUMN bpm INTEGER")
-        except sqlite3.OperationalError:
-            pass # A coluna já existe
-    logger.info(f"Database initialized at {db_path}")
+    logger.info(f"Database initialized at {db_path} with MAM architecture")
 
 
 @contextmanager
@@ -48,17 +44,16 @@ def get_connection():
 
 def _create_tables(conn):
     conn.executescript("""
+        -- 1. A NOVA TABELA TRACKS (Apenas Conceito / Metadados)
         CREATE TABLE IF NOT EXISTS tracks (
             id              TEXT PRIMARY KEY,
             title           TEXT,
             artist          TEXT,
             duration        INTEGER,
             thumbnail       TEXT,
-            file_path       TEXT,
             date_added      INTEGER,
             published_date  INTEGER,
             streams         INTEGER DEFAULT 0,
-            source          TEXT,
             status          TEXT DEFAULT 'unidentified',
             mb_recording_id TEXT,
             discogs_id      TEXT,
@@ -68,9 +63,33 @@ def _create_tables(conn):
             fingerprint     TEXT
         );
 
+        -- 2. A NOVA TABELA ASSETS (Arquivos Físicos)
+        CREATE TABLE IF NOT EXISTS assets (
+            id              TEXT PRIMARY KEY,
+            track_id        TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            asset_type      TEXT NOT NULL DEFAULT 'ORIGINAL_MIX',
+            source          TEXT,
+            file_format     TEXT,
+            file_path       TEXT NOT NULL UNIQUE
+        );
+
+        -- 3. TABELAS DE TAGS (Preparação para o futuro)
+        CREATE TABLE IF NOT EXISTS tags (
+            id              TEXT PRIMARY KEY,
+            category        TEXT NOT NULL,
+            name            TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS track_tags (
+            track_id        TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            tag_id          TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            PRIMARY KEY (track_id, tag_id)
+        );
+
+        -- (O RESTO DAS TABELAS PERMANECE INTOCADO E SEGURO)
         CREATE TABLE IF NOT EXISTS history (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            track_id        TEXT,
+            track_id        TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
             played_at       INTEGER,
             duration_played INTEGER,
             skipped         INTEGER NOT NULL DEFAULT 0
@@ -140,37 +159,68 @@ def _create_tables(conn):
 # ── Tracks ────────────────────────────────────────────────────────────────────
 
 def get_track(conn, track_id):
-    row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return dict(row) if row else None
+    # 1. Pega os metadados da música
+    track_row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
+    if not track_row:
+        return None
+        
+    track = dict(track_row)
+    
+    # 2. Pega todos os arquivos físicos (assets) associados a ela
+    assets_rows = conn.execute("SELECT * FROM assets WHERE track_id = ?", (track_id,)).fetchall()
+    track["assets"] = [dict(a) for a in assets_rows]
+    
+    # 3. Facilita a vida do Frontend enviando a versão principal direto na raiz
+    original = next((a for a in track["assets"] if a["asset_type"] == 'ORIGINAL_MIX'), None)
+    if original:
+        track["file_path"] = original["file_path"]
+        track["source"] = original["source"]
+        
+    return track
 
 
 def insert_track(conn, track):
+    # 1. Salva a Entidade Conceitual (Track)
     conn.execute("""
         INSERT OR REPLACE INTO tracks
-            (id, title, artist, duration, thumbnail, file_path,
-             date_added, published_date, streams, source,
-             status, mb_recording_id, discogs_id, label, year)
+            (id, title, artist, duration, thumbnail,
+             date_added, published_date, streams, status,
+             mb_recording_id, discogs_id, label, year)
         VALUES
-            (:id, :title, :artist, :duration, :thumbnail, :file_path,
-             :date_added, :published_date, :streams, :source,
-             :status, :mb_recording_id, :discogs_id, :label, :year)
+            (:id, :title, :artist, :duration, :thumbnail,
+             :date_added, :published_date, :streams, :status,
+             :mb_recording_id, :discogs_id, :label, :year)
     """, {
         "id":             track.get("id"),
         "title":          track.get("title"),
         "artist":         track.get("artist"),
         "duration":       track.get("duration"),
         "thumbnail":      track.get("thumbnail"),
-        "file_path":      track.get("file_path"),
         "date_added":     track.get("date_added"),
         "published_date": track.get("published_date"),
         "streams":        track.get("streams", 0),
-        "source":         track.get("source"),
         "status":         track.get("status", "unidentified"),
-        "mb_recording_id": track.get("mb_recording_id"),
+        "mb_recording_id":track.get("mb_recording_id"),
         "discogs_id":     track.get("discogs_id"),
         "label":          track.get("label"),
         "year":           track.get("year"),
     })
+
+    # 2. Salva o Arquivo Físico (Asset) associado a esta música
+    if track.get("file_path"):
+        from pathlib import Path
+        file_format = Path(track["file_path"]).suffix.replace(".", "").upper() or "UNKNOWN"
+        
+        conn.execute("""
+            INSERT OR IGNORE INTO assets (id, track_id, asset_type, source, file_format, file_path)
+            VALUES (?, ?, 'ORIGINAL_MIX', ?, ?, ?)
+        """, (
+            str(uuid.uuid4()), 
+            track.get("id"), 
+            track.get("source", "UNKNOWN"), 
+            file_format, 
+            track.get("file_path")
+        ))
 
 
 def get_all_track_ids(conn):
@@ -179,7 +229,13 @@ def get_all_track_ids(conn):
 
 
 def list_tracks(conn):
-    rows = conn.execute("SELECT * FROM tracks ORDER BY date_added DESC").fetchall()
+    # Traz as tracks embutindo o file_path original para a UI não quebrar
+    rows = conn.execute("""
+        SELECT t.*, a.file_path, a.source 
+        FROM tracks t
+        LEFT JOIN assets a ON t.id = a.track_id AND a.asset_type = 'ORIGINAL_MIX'
+        ORDER BY t.date_added DESC
+    """).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -208,34 +264,46 @@ def update_track_metadata(conn, track_id: str, data: dict) -> None:
 def scan_and_reconcile(conn, music_dir):
     import time as _time
     from youtube.ytdlp import AUDIO_EXTENSIONS
+    
     music_path = Path(music_dir)
     if not music_path.exists():
         return 0
+        
     added = 0
     for f in music_path.iterdir():
         if f.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
+            
         track_id = f.stem
-        existing = conn.execute(
-            "SELECT id FROM tracks WHERE id = ? OR file_path = ?", (track_id, str(f))
-        ).fetchone()
-        if existing:
+        existing_track = conn.execute("SELECT id FROM tracks WHERE id = ?", (track_id,)).fetchone()
+        existing_asset = conn.execute("SELECT id FROM assets WHERE file_path = ?", (str(f),)).fetchone()
+        
+        if existing_asset:
             continue
+            
         thumb = None
         for ext in (".jpg", ".jpeg", ".png"):
             candidate = music_path / f"{f.stem}{ext}"
             if candidate.exists():
                 thumb = str(candidate)
                 break
+
+        if not existing_track:
+            conn.execute("""
+                INSERT INTO tracks
+                    (id, title, artist, duration, thumbnail, date_added, streams, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (track_id, f.stem, "", None, thumb, int(_time.time()), 0, "unidentified"))
+            
+        file_format = f.suffix.replace(".", "").upper()
         conn.execute("""
-            INSERT OR IGNORE INTO tracks
-                (id, title, artist, duration, thumbnail, file_path,
-                 date_added, published_date, streams, source, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (track_id, f.stem, "", None, thumb, str(f),
-              int(_time.time()), None, 0, "local", "unidentified"))
+            INSERT INTO assets (id, track_id, asset_type, source, file_format, file_path)
+            VALUES (?, ?, 'ORIGINAL_MIX', 'LOCAL_SCAN', ?, ?)
+        """, (str(uuid.uuid4()), track_id, file_format, str(f)))
+
         added += 1
-        logger.info(f"Library scan: added {f.name}")
+        logger.info(f"Library scan: added {f.name} as Asset to Track {track_id}")
+        
     if added:
         conn.commit()
     return added
@@ -244,9 +312,11 @@ def scan_and_reconcile(conn, music_dir):
 def search_tracks(conn, query, limit=50):
     pattern = f"%{query}%"
     rows = conn.execute("""
-        SELECT * FROM tracks
-        WHERE title LIKE ? OR artist LIKE ?
-        ORDER BY streams DESC, date_added DESC
+        SELECT t.*, a.file_path, a.source
+        FROM tracks t
+        LEFT JOIN assets a ON t.id = a.track_id AND a.asset_type = 'ORIGINAL_MIX'
+        WHERE t.title LIKE ? OR t.artist LIKE ?
+        ORDER BY t.streams DESC, t.date_added DESC
         LIMIT ?
     """, (pattern, pattern, limit)).fetchall()
     return [dict(r) for r in rows]
@@ -257,6 +327,7 @@ def increment_streams(conn, track_id):
 
 
 def delete_track(conn, track_id):
+    # A constraint ON DELETE CASCADE em assets, history e playlists apagará as referências automaticamente
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
 
@@ -311,7 +382,10 @@ def cleanup_unused_tracks(conn, min_streams, days):
     import time
     cutoff = int(time.time()) - (days * 86400)
     rows = conn.execute("""
-        SELECT * FROM tracks WHERE streams < ? AND date_added < ?
+        SELECT t.*, a.file_path 
+        FROM tracks t
+        LEFT JOIN assets a ON t.id = a.track_id
+        WHERE t.streams < ? AND t.date_added < ?
     """, (min_streams, cutoff)).fetchall()
     return [dict(r) for r in rows]
 
@@ -430,12 +504,13 @@ def get_playlist_tracks(conn, playlist_id: int, sort_by: str = "position",
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     sql_col = f"t.{col}" if col not in ("position", "added_at") else f"pt.{col}"
     rows = conn.execute(f"""
-        SELECT t.*, pt.position, pt.added_at,
+        SELECT t.*, pt.position, pt.added_at, a.file_path, a.source,
                (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id) AS play_count,
                (SELECT MAX(played_at) FROM history h WHERE h.track_id = t.id) AS last_played,
                (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id AND h.skipped = 1) AS skip_count
         FROM playlist_tracks pt
         JOIN tracks t ON t.id = pt.track_id
+        LEFT JOIN assets a ON t.id = a.track_id AND a.asset_type = 'ORIGINAL_MIX'
         WHERE pt.playlist_id = ?
         ORDER BY {sql_col} {order}, pt.added_at ASC
     """, (playlist_id,)).fetchall()
@@ -507,7 +582,6 @@ def get_track_stats(conn, track_id: str) -> dict:
 
 
 def mark_last_history_skipped(conn, track_id: str) -> None:
-    """Mark the most recent history entry for a track as skipped."""
     row = conn.execute(
         "SELECT id FROM history WHERE track_id = ? ORDER BY played_at DESC LIMIT 1",
         (track_id,)
@@ -520,7 +594,6 @@ def mark_last_history_skipped(conn, track_id: str) -> None:
 # ── Duplicate DNA (fingerprint) ───────────────────────────────────────────────
 
 def find_duplicate_fingerprints(conn) -> list[list[dict]]:
-    """Return groups of tracks that share the same Chromaprint fingerprint."""
     rows = conn.execute("""
         SELECT t.*,
                (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id) AS play_count

@@ -5,31 +5,76 @@ import logging
 import subprocess
 import json
 import httpx
+import os
+import sys
+import time
 from pathlib import Path
+from tinytag import TinyTag
+
+from utils import config as cfg
+from db import database
 
 logger = logging.getLogger(__name__)
 
 ACOUSTID_KEY = "inv3qSYC56"
 
 # fpcalc binary — resolves from project root on all platforms.
-# On Windows: fpcalc.exe; on Linux/Mac: fpcalc (no extension).
 _ROOT   = Path(__file__).parent.parent.parent
-_FPCALC = str(_ROOT / ("fpcalc.exe" if __import__("sys").platform == "win32" else "fpcalc"))
+_FPCALC = str(_ROOT / ("fpcalc.exe" if sys.platform == "win32" else "fpcalc"))
 
 _USER_AGENT = "Rolfsound/1.0"
-
-# shazamio_core (Rust) segfaults on Python 3.14 — isolate the Shazam call
-# in a subprocess so a crash kills only that worker, not the web process.
 _SHAZAM_WORKER = str(Path(__file__).parent / "_shazam_worker.py")
 _SHAZAM_TIMEOUT = 30  # seconds
 
+# Semáforo para proteger o Raspberry Pi: Limita a 2 o número de instâncias do FFMPEG a correr em simultâneo
+BPM_SEMAPHORE = asyncio.Semaphore(2)
+
+
+# ── FASE 1: LEITURA DE METADADOS LOCAIS ──────────────────────────────────────
+
+def extract_local_tags(file_path: str, track_id: str) -> dict:
+    """Lê as tags ID3/FLAC locais e extrai a capa embutida se existir."""
+    result = {
+        "title": None,
+        "artist": None,
+        "album": None,
+        "year": None,
+        "duration": None,
+        "thumbnail": None
+    }
+    
+    try:
+        tag = TinyTag.get(file_path, image=True)
+        
+        result["title"] = tag.title
+        result["artist"] = tag.artist or tag.albumartist
+        result["album"] = tag.album
+        result["year"] = int(tag.year[:4]) if tag.year else None
+        result["duration"] = tag.duration
+        
+        image_data = tag.get_image()
+        if image_data:
+            music_dir = Path(cfg.get("music_directory", "./music"))
+            cover_path = music_dir / track_id / "cover.jpg"
+            cover_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(cover_path, "wb") as f:
+                f.write(image_data)
+                
+            result["thumbnail"] = str(cover_path)
+            logger.info(f"Capa local extraída com sucesso para {track_id}")
+            
+    except Exception as e:
+        logger.warning(f"Não foi possível ler as tags locais de {file_path}: {e}")
+        
+    return result
+
+
+# ── FASE 2: MÉTODOS DE IDENTIFICAÇÃO (INTERNET) ──────────────────────────────
 
 def _discogs_auth_header() -> str | None:
-    """Retorna o header Authorization OAuth do usuário conectado, ou None."""
-    import urllib.parse, uuid, time as _time
-    from db import database
-    from utils import config as cfg
-
+    """Retorna o header Authorization OAuth do utilizador conectado, ou None."""
+    import urllib.parse, uuid
     conn = database.get_connection()
     try:
         account = database.get_discogs_account(conn)
@@ -37,7 +82,7 @@ def _discogs_auth_header() -> str | None:
         conn.close()
 
     if not account:
-        return None  # no OAuth account — caller falls back to key/secret or unauthenticated
+        return None 
 
     ck = cfg.get("discogs_consumer_key", "")
     cs = cfg.get("discogs_consumer_secret", "")
@@ -48,7 +93,7 @@ def _discogs_auth_header() -> str | None:
         "oauth_consumer_key":     ck,
         "oauth_nonce":            uuid.uuid4().hex,
         "oauth_signature_method": "PLAINTEXT",
-        "oauth_timestamp":        str(int(_time.time())),
+        "oauth_timestamp":        str(int(time.time())),
         "oauth_token":            at,
         "oauth_version":          "1.0",
         "oauth_signature":        f"{urllib.parse.quote(cs, safe='')}&{urllib.parse.quote(as_, safe='')}",
@@ -58,24 +103,15 @@ def _discogs_auth_header() -> str | None:
 
 
 async def fingerprint(path: str) -> dict | None:
-    """Returns {duration, fingerprint} or None.
-
-    Primary path: pyacoustid + PyAV — no binary needed.
-      Requires libchromaprint to be available:
-        - Raspberry Pi: apt install libchromaprint1
-        - Windows dev: install chromaprint.dll manually (or use fpcalc fallback)
-
-    Fallback path: fpcalc subprocess (fpcalc / fpcalc.exe on PATH or project root).
-    """
-    # --- Primary: pyacoustid + PyAV ---
+    """Gera impressão digital digital (Chromaprint)."""
     try:
         import acoustid
         import av
         import numpy as np
 
-        TARGET_SR  = 44100   # Chromaprint works best at 44100 Hz
-        N_CHANNELS = 2       # stereo matches fpcalc default
-        MAX_SECONDS = 120    # Chromaprint fingerprints only the first 120s
+        TARGET_SR  = 44100 
+        N_CHANNELS = 2     
+        MAX_SECONDS = 120  
 
         frames: list[np.ndarray] = []
         collected = 0
@@ -83,11 +119,9 @@ async def fingerprint(path: str) -> dict | None:
 
         with av.open(path) as container:
             if container.duration:
-                duration = container.duration / 1_000_000  # µs → s
+                duration = container.duration / 1_000_000 
 
-            resampler = av.audio.resampler.AudioResampler(
-                format="s16", layout="stereo", rate=TARGET_SR
-            )
+            resampler = av.audio.resampler.AudioResampler(format="s16", layout="stereo", rate=TARGET_SR)
             max_samples = TARGET_SR * N_CHANNELS * MAX_SECONDS
 
             for packet in container.demux(audio=0):
@@ -112,7 +146,6 @@ async def fingerprint(path: str) -> dict | None:
         pcm = np.concatenate(frames).astype(np.int16).tobytes()
         fp_str = acoustid.fingerprint(TARGET_SR, N_CHANNELS, [pcm])
 
-        logger.debug(f"fingerprint (pyacoustid): duration={duration:.1f}s")
         return {"duration": duration, "fingerprint": fp_str}
 
     except ImportError:
@@ -120,13 +153,8 @@ async def fingerprint(path: str) -> dict | None:
     except Exception as e:
         logger.debug(f"pyacoustid fingerprint failed ({e}), falling back to fpcalc")
 
-    # --- Fallback: fpcalc subprocess ---
-    result = subprocess.run(
-        [_FPCALC, "-json", path],
-        capture_output=True, text=True
-    )
+    result = subprocess.run([_FPCALC, "-json", path], capture_output=True, text=True)
     if result.returncode != 0:
-        logger.warning(f"fpcalc failed (returncode={result.returncode}): {result.stderr.strip()}")
         return None
     try:
         return json.loads(result.stdout)
@@ -135,6 +163,7 @@ async def fingerprint(path: str) -> dict | None:
 
 
 async def lookup_acoustid(fp: dict) -> dict | None:
+    """Procura metadados no AcoustID baseados na impressão digital."""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.get(
             "https://api.acoustid.org/v2/lookup",
@@ -148,29 +177,19 @@ async def lookup_acoustid(fp: dict) -> dict | None:
     data = r.json()
     results = data.get("results", [])
     if not results:
-        logger.debug(f"acoustid: no results (status={data.get('status')})")
         return None
 
     best = max(results, key=lambda x: x.get("score", 0))
-    logger.debug(f"acoustid: best score={best.get('score')} recordings={len(best.get('recordings', []))}")
     if best.get("score", 0) < 0.8:
-        logger.debug(f"acoustid: score too low ({best.get('score')})")
         return None
 
     recordings = best.get("recordings", [])
-    if not recordings:
-        logger.debug("acoustid: match found but no recordings attached")
     return recordings[0] if recordings else None
 
 
 async def lookup_shazam(file_path: str) -> dict | None:
-    """Identifica a faixa via Shazam. Retorna {artist, title} ou None.
-
-    Converte o áudio para WAV mono 16kHz via PyAV e delega a chamada ao
-    shazamio para um subprocess worker — se ele segfaltar (shazamio_core
-    é instável em Python 3.14), só o worker morre.
-    """
-    import tempfile, os, sys, json
+    """Identifica a faixa via Shazam através de áudio gravado."""
+    import tempfile
     import numpy as np
 
     tmp_wav = None
@@ -180,14 +199,12 @@ async def lookup_shazam(file_path: str) -> dict | None:
         os.close(fd)
 
         TARGET_SR = 16000
-        MAX_SAMPLES = TARGET_SR * 20  # 20 segundos bastam pro Shazam
-
+        MAX_SAMPLES = TARGET_SR * 20  
         frames: list[np.ndarray] = []
         collected = 0
+        
         with av.open(file_path) as container:
-            resampler = av.audio.resampler.AudioResampler(
-                format="s16", layout="mono", rate=TARGET_SR
-            )
+            resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=TARGET_SR)
             for packet in container.demux(audio=0):
                 for frame in packet.decode():
                     resampled = resampler.resample(frame)
@@ -202,7 +219,6 @@ async def lookup_shazam(file_path: str) -> dict | None:
                     break
 
         if not frames:
-            logger.warning("shazam: PyAV não conseguiu decodificar o arquivo")
             return None
 
         pcm = np.concatenate(frames).astype(np.int16).tobytes()
@@ -214,10 +230,6 @@ async def lookup_shazam(file_path: str) -> dict | None:
             wf.setframerate(TARGET_SR)
             wf.writeframes(pcm)
 
-        if not os.path.exists(tmp_wav) or os.path.getsize(tmp_wav) == 0:
-            logger.warning("shazam: WAV vazio após conversão")
-            return None
-
         proc = await asyncio.create_subprocess_exec(
             sys.executable, _SHAZAM_WORKER, tmp_wav,
             stdout=asyncio.subprocess.PIPE,
@@ -228,12 +240,9 @@ async def lookup_shazam(file_path: str) -> dict | None:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            logger.warning("shazam: worker timeout")
             return None
 
         if proc.returncode != 0:
-            err = (stderr or b"").decode("utf-8", errors="replace").strip()
-            logger.warning(f"shazam: worker exit={proc.returncode} stderr={err[:200]}")
             return None
 
         line = (stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
@@ -241,16 +250,13 @@ async def lookup_shazam(file_path: str) -> dict | None:
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
-            logger.warning(f"shazam: bad worker output {payload[:100]!r}")
             return None
 
         if not data:
-            logger.debug("shazam: sem resultado")
             return None
-        logger.debug(f"shazam: {data.get('artist')} - {data.get('title')}")
+            
         return {"artist": data.get("artist", ""), "title": data.get("title", "")}
-    except Exception as e:
-        logger.warning(f"shazam error: {e}")
+    except Exception:
         return None
     finally:
         if tmp_wav and os.path.exists(tmp_wav):
@@ -258,14 +264,10 @@ async def lookup_shazam(file_path: str) -> dict | None:
 
 
 async def lookup_discogs(artist: str, title: str) -> dict | None:
-    from utils import config as cfg
-
+    """Busca dados de lançamento, capas em alta definição e editora."""
     headers = {"User-Agent": _USER_AGENT}
     base_params: dict = {"q": f"{artist} {title}".strip()}
 
-    # Prefer full OAuth when the user has a connected Discogs account.
-    # Fall back to consumer key/secret (app-level auth, no user needed).
-    # Fall back to unauthenticated public API (25 req/min, sufficient for indexing).
     auth = _discogs_auth_header()
     if auth:
         headers["Authorization"] = auth
@@ -275,11 +277,8 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
         if ck and cs:
             base_params["key"]    = ck
             base_params["secret"] = cs
-        # else: unauthenticated — Discogs still allows up to 25 req/min
 
     async with httpx.AsyncClient(timeout=10) as client:
-
-        # 1. Busca masters diretamente — a cover_image já é a artwork canônica, sem fotos de vinil
         r = await client.get(
             "https://api.discogs.com/database/search",
             params={**base_params, "type": "master"},
@@ -291,24 +290,18 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
             mid = master.get("id")
             if mid:
                 try:
-                    mr = await client.get(
-                        f"https://api.discogs.com/masters/{mid}",
-                        headers=headers,
-                    )
+                    mr = await client.get(f"https://api.discogs.com/masters/{mid}", headers=headers)
                     if mr.status_code == 200:
                         full = mr.json()
                         images = full.get("images", [])
-                        # primary é a capa principal, secondary são fotos do vinil físico
                         primary = next((i for i in images if i.get("type") == "primary"), None)
                         best = primary or (images[0] if images else None)
                         if best:
                             master["cover_image"] = best["uri"]
-                            logger.debug(f"discogs: capa master {mid} ({'primary' if primary else 'fallback'}) ok")
-                except Exception as e:
-                    logger.debug(f"discogs: falha ao buscar master {mid}: {e}")
+                except Exception:
+                    pass
             return master
 
-        # 2. Fallback: busca em releases individuais, evitando capas de vinil físico
         r = await client.get(
             "https://api.discogs.com/database/search",
             params={**base_params, "type": "release"},
@@ -318,19 +311,14 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
         if not results:
             return None
 
-        # Prefere releases com master_id (capa canônica) e não-vinyl (sem foto de disco físico)
         with_master = [x for x in results if x.get("master_id")]
         non_vinyl   = [x for x in results if "Vinyl" not in x.get("format", [])]
         release = (with_master or non_vinyl or results)[0]
 
-        # Tenta substituir pela imagem primary da master release
         master_id = release.get("master_id")
         if master_id:
             try:
-                mr = await client.get(
-                    f"https://api.discogs.com/masters/{master_id}",
-                    headers=headers,
-                )
+                mr = await client.get(f"https://api.discogs.com/masters/{master_id}", headers=headers)
                 if mr.status_code == 200:
                     master_data = mr.json()
                     images = master_data.get("images", [])
@@ -338,69 +326,99 @@ async def lookup_discogs(artist: str, title: str) -> dict | None:
                     best = primary or (images[0] if images else None)
                     if best:
                         release["cover_image"] = best["uri"]
-                        logger.debug(f"discogs: capa master {master_id} (via release fallback, {'primary' if primary else 'fallback'}) ok")
-            except Exception as e:
-                logger.debug(f"discogs: falha ao buscar master {master_id}: {e}")
+            except Exception:
+                pass
 
     return release
 
 
-async def identify_track(file_path: str, fallback_title: str = "") -> dict:
+# ── FASE 3: PROTEÇÃO DO FFMPEG (SEMAPHORE) ───────────────────────────────────
+
+async def detect_bpm(file_path: str) -> int | None:
+    """Usa o filtro nativo do FFMPEG com limite de instâncias concorrentes."""
+    import re
+    # Bloqueia a execução se já existirem 2 FFMPEGs a correr
+    async with BPM_SEMAPHORE:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-i", file_path, "-af", "bpm", "-f", "null", "-",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=45.0)
+            output = stderr.decode("utf-8", errors="ignore")
+            
+            match = re.search(r"BPM:\s*([\d\.]+)", output)
+            if match:
+                bpm_float = float(match.group(1))
+                return int(round(bpm_float))
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.warning(f"Timeout na deteção de BPM para {file_path}")
+        except Exception as e:
+            logger.warning(f"Falha na deteção de BPM para {file_path}: {e}")
+            
+    return None
+
+
+# ── FASE 4: O NOVO FLUXO INTELIGENTE DE IDENTIFICAÇÃO ────────────────────────
+
+async def identify_track(file_path: str, track_id: str, fallback_title: str = "") -> dict:
     """
-    Retorna dict com metadados identificados, ou {"status": "unidentified"}.
-    Fluxo: Chromaprint → AcoustID → Shazam → fallback_title → Discogs.
+    O Fluxo de Prioridades:
+    1. Tags Locais -> 2. Fingerprint (AcoustID) -> 3. Áudio (Shazam) -> 4. Enriquecimento (Discogs)
     """
-    fp = await fingerprint(file_path)
-    if not fp:
-        return {"status": "unidentified", "reason": "fingerprint_failed"}
-    logger.debug(f"fingerprint ok: duration={fp.get('duration')}")
+    
+    local_tags = await asyncio.to_thread(extract_local_tags, file_path, track_id)
+    
+    artist = local_tags.get("artist")
+    title  = local_tags.get("title")
+    thumbnail = local_tags.get("thumbnail")
+    year = local_tags.get("year")
+    duration = local_tags.get("duration")
+    mb_id = None
+    raw_fp = None
 
-    artist = None
-    title  = None
-    mb_id  = None
+    # Recorre à identificação web apenas se os metadados locais faltarem
+    if not title or not artist:
+        logger.info(f"Indexer [{track_id}]: Metadados incompletos, a iniciar Fingerprint...")
+        fp = await fingerprint(file_path)
+        
+        if fp:
+            duration = duration or fp["duration"]
+            raw_fp = fp["fingerprint"]
+            
+            recording = await lookup_acoustid(fp)
+            if recording:
+                artist = recording["artists"][0]["name"] if recording.get("artists") else None
+                title  = recording.get("title")
+                mb_id  = recording.get("id")
 
-    recording = await lookup_acoustid(fp)
-    if recording:
-        logger.debug(f"acoustid match: {recording.get('id')}")
-        artist = recording["artists"][0]["name"] if recording.get("artists") else None
-        title  = recording.get("title")
-        mb_id  = recording.get("id")
+            if not title:
+                shazam = await lookup_shazam(file_path)
+                if shazam:
+                    artist = shazam["artist"]
+                    title  = shazam["title"]
 
-    # Shazam: quando AcoustID não tem recordings, tenta reconhecer pelo áudio
-    if not title:
-        shazam = await lookup_shazam(file_path)
-        if shazam:
-            artist = shazam["artist"]
-            title  = shazam["title"]
-
-    # Fallback final: usar título do YouTube (limpa ruído comum antes de buscar no Discogs)
+    # Fallback: limpar o nome do ficheiro para não apresentar "[OFFICIAL VIDEO]"
     if not title and fallback_title:
         import re
-        cleaned = re.sub(
-            r"\s*[\(\[]"
-            r"(?:official\s+(?:music\s+)?(?:video|audio|lyric|visualizer)|"
-            r"lyrics?|hd|4k|hq|remaster(?:ed)?|ft\.?|feat\.?|"
-            r"full\s+(?:album|song)|audio|video|clip|premiere|"
-            r"prod\.?\s+\w+|\d{4}\s+remaster)[^\)\]]*[\)\]]"
-            r"|\s+-\s+(?:official\s+(?:music\s+)?(?:video|audio)|lyric\s+video)"
-            r"|\s+\|\s+.*$",
-            "", fallback_title, flags=re.IGNORECASE,
-        ).strip(" -")
-        logger.debug(f"usando fallback_title={cleaned!r} (original={fallback_title!r})")
-        title = cleaned or fallback_title
+        title = re.sub(
+            r"\s*[\(\[].*[\)\]]|\s+-\s+(?:official.*|lyric.*)|\s+\|\s+.*$",
+            "", fallback_title, flags=re.IGNORECASE
+        ).strip(" -") or fallback_title
 
-    # Sem title nenhuma fonte identificou — retorna unidentified.
     if not title:
-        return {"status": "unidentified", "reason": "no_match"}
+        return {"status": "unidentified", "reason": "no_match", "raw_fp": raw_fp}
 
+    # Enriquecimento com Discogs (Busca capas HQ se a tag local não tiver)
     discogs = None
-    if title:
+    if title and (not thumbnail or not year):
+        logger.info(f"Indexer [{track_id}]: A buscar enriquecimento visual no Discogs...")
         discogs = await lookup_discogs(artist or "", title)
 
-    # Se achou no Discogs, extrai artist do release caso não tenha vindo do MusicBrainz
     if discogs and not artist:
         raw_artists = discogs.get("title", "")
-        # título do Discogs vem no formato "Artist - Title"
         if " - " in raw_artists:
             artist, title = raw_artists.split(" - ", 1)
 
@@ -408,43 +426,23 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
         "status":          "identified",
         "title":           title,
         "artist":          artist,
-        "duration":        fp["duration"],
+        "duration":        duration,
         "mb_recording_id": mb_id,
-        "discogs_id":      discogs.get("id")                  if discogs else None,
-        "thumbnail":       discogs.get("cover_image") or None if discogs else None,
-        "label":           discogs.get("label", [None])[0]    if discogs else None,
-        "year":            discogs.get("year")                if discogs else None,
+        "discogs_id":      discogs.get("id") if discogs else None,
+        "thumbnail":       thumbnail or (discogs.get("cover_image") if discogs else None),
+        "label":           discogs.get("label", [None])[0] if discogs else None,
+        "year":            year or (discogs.get("year") if discogs else None),
+        "raw_fp":          raw_fp
     }
 
-async def detect_bpm(file_path: str) -> int | None:
-    """Usa o filtro nativo do FFMPEG para detetar o BPM sem bibliotecas pesadas."""
-    import re
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-i", file_path, "-af", "bpm", "-f", "null", "-",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=45.0)
-        output = stderr.decode("utf-8", errors="ignore")
-        
-        # O FFMPEG devolve algo como: "[Parsed_bpm_0 @ 0x...] BPM: 124.5"
-        match = re.search(r"BPM:\s*([\d\.]+)", output)
-        if match:
-            bpm_float = float(match.group(1))
-            return int(round(bpm_float))
-    except Exception as e:
-        logger.warning(f"Falha na deteção de BPM para {file_path}: {e}")
-    return None
+
+# ── FASE 5: O ORQUESTRADOR FINAL E BROADCASTER ────────────────────────────────
 
 async def index_file(track_id: str, file_path: str) -> dict:
-    """
-    Identifica a faixa via AcoustID + Discogs e persiste os metadados no DB.
-    Retorna o dict de metadados (com chave 'status').
-    """
-    from db import database
-
-    # Pega título atual do DB como fallback para a busca no Discogs
+    """Avalia a faixa e notifica a UI instantaneamente via WebSocket."""
+    # Importado localmente para evitar circular imports
+    from api.ws.endpoint import get_manager as get_ws_manager 
+    
     fallback_title = ""
     conn = database.get_connection()
     try:
@@ -454,11 +452,10 @@ async def index_file(track_id: str, file_path: str) -> dict:
     finally:
         conn.close()
 
-    # Run fpcalc separately to capture the raw fingerprint string for dedup.
-    raw_fp = await fingerprint(file_path)
-
-    meta = await identify_track(file_path, fallback_title=fallback_title)
-    logger.info(f"index_file {track_id}: status={meta['status']} reason={meta.get('reason')}")
+    # Passamos o track_id para ele saber onde guardar as capas extraídas
+    meta = await identify_track(file_path, track_id, fallback_title=fallback_title)
+    
+    logger.info(f"index_file {track_id}: status={meta['status']}")
 
     update: dict = {"status": meta["status"]}
     if meta["status"] == "identified":
@@ -471,25 +468,39 @@ async def index_file(track_id: str, file_path: str) -> dict:
             "label":           meta.get("label"),
             "year":            meta.get("year"),
         })
-        # Só sobrescreve thumbnail se o Discogs devolveu uma
         if meta.get("thumbnail"):
             update["thumbnail"] = meta["thumbnail"]
 
-    # ---> NOVO: Detetar BPM via FFMPEG e adicionar ao update
-    logger.debug(f"A iniciar cálculo de BPM para {track_id}...")
+    logger.debug(f"A iniciar cálculo de BPM protegido para {track_id}...")
     bpm = await detect_bpm(file_path)
     if bpm:
         update["bpm"] = bpm
         logger.debug(f"BPM detetado para {track_id}: {bpm}")
 
-    # Always store the Chromaprint fingerprint for duplicate detection.
-    if raw_fp and raw_fp.get("fingerprint"):
-        update["fingerprint"] = raw_fp["fingerprint"]
+    if meta.get("raw_fp"):
+        update["fingerprint"] = meta["raw_fp"]
 
+    # 1. Guarda tudo na Base de Dados
     conn = database.get_connection()
     try:
         database.update_track_metadata(conn, track_id, update)
         conn.commit()
+        
+        # 2. BROADCAST (Latência Zero de UI)
+        ws_manager = get_ws_manager()
+        if ws_manager:
+            # Pega o registo completo e atualizado para a UI receber a verdade absoluta
+            full_track = database.get_track(conn, track_id)
+            if full_track:
+                await ws_manager.broadcast({
+                    "type": "event.track_updated",
+                    "payload": full_track,
+                    "ts": int(time.time() * 1000)
+                })
+                logger.info(f"UI notificada via WebSocket para a Track {track_id}")
+                
+    except Exception as e:
+        logger.error(f"Erro ao atualizar DB ou disparar broadcast em {track_id}: {e}")
     finally:
         conn.close()
 
