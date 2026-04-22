@@ -443,6 +443,34 @@ export default class PlayerShell {
     </div>`;
   }
 
+  // Adicione este método dentro da classe PlayerShell
+  updateTrackVisuals(updatedTrack) {
+    const m = this._m;
+    const currentTrack = m.state.currentTrack;
+
+    // Verifica se a atualização é para a música que está a tocar agora
+    const incomingId = updatedTrack.id || updatedTrack.track_id;
+    const playingId  = currentTrack?.id || currentTrack?.track_id || m.state.currentId;
+
+    if (playingId && incomingId && playingId === incomingId) {
+      console.log("💿 [PlayerShell] Match de ID! Atualizando interface...", updatedTrack.title);
+
+      // 1. Injeta os dados no State para o Core não apagar a info no próximo segundo
+      Object.assign(m.state.currentTrack, updatedTrack);
+
+      // 2. Atualiza os textos do DOM (usando o cache que fizeste no cacheDomElements)
+      if (m.dom.title)  m.dom.title.textContent = updatedTrack.title || incomingId;
+      if (m.dom.artist) m.dom.artist.textContent = updatedTrack.artist || '—';
+
+      // 3. Dispara o Crossfader para a nova imagem
+      if (m._crossfader) {
+        m._crossfader.update(); 
+      }
+    }
+
+    if (m.isQueueOpen) this.renderQueuePanel();
+  }
+
   // ─────────────────────────────────────────────────────────────
   // DOM MANAGEMENT
   // ─────────────────────────────────────────────────────────────

@@ -58,6 +58,15 @@ const BRIDGE_PINCH_W  = 14;
 export default class MitosisStateMachine {
   constructor(manager) {
     this._m = manager;
+
+    if (window.rolfsoundChannel) {
+      window.rolfsoundChannel.on('event.track_updated', (data) => {
+        if (this._m._shell) {
+          this._m._shell.updateTrackVisuals(data.payload);
+        }
+        window.dispatchEvent(new CustomEvent('rolfsound-library-updated'));
+      });
+    }
   }
 
   registerAnimations() {

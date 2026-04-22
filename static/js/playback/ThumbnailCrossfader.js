@@ -12,7 +12,16 @@ export default class ThumbnailCrossfader {
   thumbSrc(thumbnail) {
     if (!thumbnail) return null;
     if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
-    return '/thumbs/' + thumbnail.split(/[\\/]/).pop();
+    
+    let path = thumbnail.replace(/\\/g, '/');
+    if (path.startsWith('music/')) {
+        return '/' + path.replace('music/', 'thumbs/');
+    }
+    if (path.startsWith('./music/')) {
+        return path.replace('./music/', '/thumbs/');
+    }
+    
+    return '/thumbs/' + path.split('/').pop();
   }
 
   getThumbnailCandidates(thumbnail, trackId = '') {

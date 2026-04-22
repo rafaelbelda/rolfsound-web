@@ -46,16 +46,21 @@ def enrich_status(raw: dict) -> dict:
             try:
                 conn = database.get_connection()
                 try:
-                    row = conn.execute(
-                        "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
-                        (current_filepath,)
-                    ).fetchone()
+                    # --- CORREÇÃO APLICADA AQUI: JOIN e adição do BPM no SELECT ---
+                    row = conn.execute("""
+                        SELECT t.id, t.title, t.artist, t.thumbnail, t.bpm 
+                        FROM tracks t
+                        JOIN assets a ON t.id = a.track_id
+                        WHERE a.file_path = ?
+                    """, (current_filepath,)).fetchone()
+                    
                     if row:
-                        track_id  = row["id"]       or track_id
+                        track_id  = row["id"]        or track_id
                         title     = row["title"]     or title
                         artist    = row["artist"]    or ""
                         thumbnail = row["thumbnail"] or ""
                         bpm       = row["bpm"]
+                        
                     _track_cache["path"] = current_filepath
                     _track_cache["data"] = {
                         "track_id": track_id, "title": title,
@@ -95,7 +100,6 @@ def enrich_status(raw: dict) -> dict:
     raw["bpm"]                  = bpm
     raw["position"]             = pb.get("position_s",          0)
     raw["duration"]             = pb.get("duration_s",          0)
-    # Unix ms — consistent with ws_protocol.json contract and seek-bar._anchorMs
     raw["position_updated_at"]  = int(pb.get("position_updated_at", time.time()) * 1000)
     raw["volume"]               = pb.get("volume",              1.0)
     raw["queue"]                = queue_tracks
