@@ -54,6 +54,7 @@
     import SearchLayoutCoordinator from '/static/js/SearchLayoutCoordinator.js';
     import ContextMenuController from '/static/js/ContextMenuController.js';
     import PlaylistController from '/static/js/PlaylistController.js';
+    import UploadController from '/static/js/UploadController.js';
 
     const meuCursor = new Cursor();
     window.meuCursor = meuCursor;
@@ -297,6 +298,9 @@
     });
 
     window.playlistController = new PlaylistController();
+
+    window.uploadController = new UploadController();
+    document.body.appendChild(window.uploadController);
 
     // Sistema de tema reativo — ambient lighting com as cores do álbum em reprodução
     import('/static/js/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {

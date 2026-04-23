@@ -477,10 +477,13 @@ export default class PlayerShell {
 
   cacheDomElements() {
     const m = this._m;
-    const $ = (id) => document.getElementById(id);
-    m.dom.title     = $('playback-title');
-    m.dom.artist    = $('playback-artist');
-    m.dom.thumbnail = $('playback-thumbnail');
+    
+    const container = m.playerContainer || document;
+    
+    m.dom.title     = container.querySelector('#playback-title');
+    m.dom.artist    = container.querySelector('#playback-artist');
+    m.dom.thumbnail = container.querySelector('#playback-thumbnail');
+    
     this.attachControlListeners();
   }
 

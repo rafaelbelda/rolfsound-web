@@ -570,52 +570,20 @@
   let pickerTrackId = '';
   let folderState = null;
 
-  function thumbSrc(t) {
-    if (!t) return null;
-    if (t.startsWith('http') || t.startsWith('/thumbs/')) return t;
-    return '/thumbs/' + t.split(/[\\/]/).pop();
-  }
-
-  function getThumbnailCandidates(track) {
-    const normalized = thumbSrc(track?.thumbnail || '');
-    const trackId = getTrackId(track);
-    const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
-    const isDiscogs = normalized && normalized.includes('discogs.com');
-
-    const discogsCandidates = [];
-    const youtubeCandidates = [];
-
-    // Discogs tem prioridade — sobrescreve inconsistências do YouTube
-    if (normalized && !normalized.includes('i.ytimg.com/vi/')) {
-      discogsCandidates.push(normalized);
+  // 1. O Novo Motor de Thumbnails (MAM Compatible)
+  function thumbSrc(thumbnail) {
+    if (!thumbnail) return null;
+    if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
+    
+    // Normaliza para o padrão Web e aponta para a rota estática do FastAPI
+    let path = thumbnail.replace(/\\/g, '/');
+    if (path.startsWith('music/')) {
+        return '/' + path.replace('music/', 'thumbs/');
     }
-
-    // YouTube como fallback
-    if (isYouTubeId && !isDiscogs) {
-      youtubeCandidates.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
-      youtubeCandidates.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
+    if (path.startsWith('./music/')) {
+        return path.replace('./music/', '/thumbs/');
     }
-
-    if (normalized && normalized.includes('i.ytimg.com/vi/')) {
-      youtubeCandidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
-      youtubeCandidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
-      youtubeCandidates.push(normalized);
-    }
-
-    return [...new Set([...discogsCandidates, ...youtubeCandidates].filter(Boolean))];
-  }
-
-  function cascadeImage(img, candidates) {
-    if (!img || !Array.isArray(candidates) || !candidates.length) return;
-    let idx = 0;
-    img.onerror = () => {
-      idx += 1;
-      if (idx >= candidates.length) {
-        img.onerror = null;
-        return;
-      }
-      img.src = candidates[idx];
-    };
+    return '/thumbs/' + path.split('/').pop();
   }
 
   function escapeHtml(value) {
@@ -626,10 +594,6 @@
 
   function getTrackId(track) {
     return track?.id || track?.track_id || '';
-  }
-
-  function getTrackPath(track) {
-    return track?.file_path || track?.filepath || '';
   }
 
   function getCurrentSearchQuery() {
@@ -755,14 +719,13 @@
       const trackId = getTrackId(track);
       const title = escapeHtml(track.title || 'Unknown');
       const artist = escapeHtml(track.artist || 'Unknown Artist');
-      const thumbnailCandidates = getThumbnailCandidates(track);
-      const primaryThumbnail = thumbnailCandidates[0] || null;
+      const imgSrc = thumbSrc(track.thumbnail);
 
       return `
         <div class="track-card" data-track-id="${escapeHtml(trackId)}">
           <div class="track-thumbnail">
-            ${primaryThumbnail ? `
-              <img src="${escapeHtml(primaryThumbnail)}" data-track-id="${escapeHtml(trackId)}" alt="${title}" loading="lazy" />
+            ${imgSrc ? `
+              <img src="${escapeHtml(imgSrc)}" data-track-id="${escapeHtml(trackId)}" alt="${title}" loading="lazy" onerror="this.outerHTML='<div class=\\'track-thumbnail-fallback\\'>♫</div>'" />
             ` : `
               <div class="track-thumbnail-fallback">♫</div>
             `}
@@ -783,20 +746,7 @@
     }).join('');
 
     grid.innerHTML = playlistCards + trackCards;
-
-    hydrateTrackThumbnails(visibleTracks);
     hydratePlaylistCovers(visiblePlaylists);
-  }
-
-  function hydrateTrackThumbnails(tracks) {
-    const images = grid.querySelectorAll('.track-thumbnail img[data-track-id]');
-
-    images.forEach((img, index) => {
-      const track = tracks[index];
-      const candidates = getThumbnailCandidates(track);
-      if (!candidates.length) return;
-      cascadeImage(img, candidates);
-    });
   }
 
   async function hydratePlaylistCovers(playlists) {
@@ -810,20 +760,19 @@
         const data = await res.json();
         const tracks = Array.isArray(data.tracks) ? data.tracks.slice(0, 4) : [];
         const slots = grid.querySelectorAll(`.playlist-cover[data-playlist-id="${playlistId}"]`);
+        
         slots.forEach((slot, slotIndex) => {
           const track = tracks[slotIndex];
           if (!track) {
             slot.textContent = '♫';
             return;
           }
-          const candidates = getThumbnailCandidates(track);
-          if (!candidates.length) {
+          const imgSrc = thumbSrc(track.thumbnail);
+          if (!imgSrc) {
             slot.textContent = '♫';
             return;
           }
-          slot.innerHTML = `<img src="${escapeHtml(candidates[0])}" loading="lazy" alt="cover" />`;
-          const img = slot.querySelector('img');
-          cascadeImage(img, candidates);
+          slot.innerHTML = `<img src="${escapeHtml(imgSrc)}" loading="lazy" alt="cover" onerror="this.outerHTML='♫'" />`;
         });
       } catch (error) {
         console.debug('playlist cover hydrate failed', error);
@@ -915,21 +864,27 @@
     }
   }
 
-  async function playTrack(track) {
+  // Adicionamos specificAssetId com valor padrão null
+  async function playTrack(track, specificAssetId = null) {
     const trackId = getTrackId(track);
     if (!trackId) {
       notify('Invalid track');
       return;
     }
 
+    // Criamos o payload dinamicamente
+    const payload = { track_id: trackId };
+    
+    // Se o utilizador pediu uma versão específica (FLAC, Remix, etc.), adicionamos ao envio
+    if (specificAssetId) {
+        payload.asset_id = specificAssetId;
+    }
+
     try {
       const response = await fetch('/api/play', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_id: trackId,
-          filepath: getTrackPath(track)
-        })
+        body: JSON.stringify(payload) // Enviamos o objeto que criámos
       });
 
       if (!response.ok) throw new Error(`Play failed (${response.status})`);
@@ -942,23 +897,31 @@
     }
   }
 
-  async function queueTrack(track) {
+  // Adicionamos specificAssetId
+  async function queueTrack(track, specificAssetId = null) {
     const trackId = getTrackId(track);
     if (!trackId) {
       notify('Invalid track');
       return;
     }
 
+    // Montamos o Payload
+    const payload = {
+        track_id: trackId,
+        title: track.title || '',
+        thumbnail: track.thumbnail || ''
+    };
+
+    // Injetamos o ID da versão física, se existir
+    if (specificAssetId) {
+        payload.asset_id = specificAssetId;
+    }
+
     try {
       const response = await fetch('/api/queue/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_id: trackId,
-          filepath: getTrackPath(track),
-          title: track.title || '',
-          thumbnail: track.thumbnail || ''
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) throw new Error(`Queue failed (${response.status})`);
@@ -1020,8 +983,7 @@
     const trackId = getTrackId(track);
     const title   = escapeHtml(track.title  || 'Unknown');
     const artist  = escapeHtml(track.artist || '');
-    const candidates = getThumbnailCandidates(track);
-    const thumbnail  = candidates[0] || null;
+    const imgSrc  = thumbSrc(track.thumbnail);
 
     const playCount  = track.play_count  || 0;
     const skipRate   = track.skip_rate   != null ? Math.round(track.skip_rate * 100) : null;
@@ -1036,7 +998,7 @@
     return `
       <div class="playlist-folder-track" data-track-id="${escapeHtml(trackId)}" data-playlist-id="${playlistId || ''}">
         <div class="playlist-folder-track-thumb">
-          ${thumbnail ? `<img src="${escapeHtml(thumbnail)}" loading="lazy" alt="${title}" />` : '♫'}
+          ${imgSrc ? `<img src="${escapeHtml(imgSrc)}" loading="lazy" alt="${title}" onerror="this.outerHTML='♫'" />` : '♫'}
         </div>
         <div class="playlist-folder-track-info">
           <div class="playlist-folder-track-title">${title}</div>
@@ -1081,13 +1043,13 @@
           });
           if (!r.ok) throw new Error('Remove failed');
           btn.closest('.playlist-folder-track')?.remove();
-          // Refresh playlist card track count
           const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
           if (card) {
-            const countEl = card.querySelector('.track-count, .playlist-track-count');
+            const countEl = card.querySelector('.track-count, .playlist-meta');
             if (countEl) {
-              const cur = parseInt(countEl.textContent) || 0;
-              if (cur > 0) countEl.textContent = String(cur - 1);
+              const text = countEl.textContent;
+              const cur = parseInt(text) || 0;
+              if (cur > 0) countEl.textContent = `${cur - 1} tracks`;
             }
           }
         } catch(err) { console.error('Remove track from playlist error:', err); }
@@ -1160,12 +1122,6 @@
 
     document.body.appendChild(panel);
 
-    const folderImages = panel.querySelectorAll('.playlist-folder-track-thumb img');
-    folderImages.forEach((img, i) => {
-      const candidates = getThumbnailCandidates(tracks[i]);
-      cascadeImage(img, candidates);
-    });
-
     requestAnimationFrame(() => {
       backdrop.classList.add('active');
       panel.style.opacity = '1';
@@ -1175,7 +1131,6 @@
     panel.querySelector('.folder-close-btn')?.addEventListener('click', closeFolder);
     backdrop.addEventListener('click', closeFolder);
 
-    // Sort dropdown
     panel.querySelector('.folder-sort-select')?.addEventListener('change', async (e) => {
       const val = e.target.value;
       let sortField = val, sortOrder = 'asc';
@@ -1186,14 +1141,12 @@
         const data = await res.json();
         const sortedTracks = Array.isArray(data.tracks) ? data.tracks : [];
         panel.querySelector('.playlist-folder-tracks').innerHTML = renderFolderTracks(sortedTracks);
-        // Re-bind remove buttons after re-render
         bindFolderRemoveButtons(panel, playlistId);
       } catch(err) { console.error('Sort error:', err); }
     });
 
-    // Play track on click
     panel.querySelector('.playlist-folder-tracks')?.addEventListener('click', async (event) => {
-      if (event.target.closest('.folder-track-remove')) return;  // ignore remove btn clicks
+      if (event.target.closest('.folder-track-remove')) return; 
       const trackCard = event.target.closest('.playlist-folder-track');
       if (!trackCard) return;
       const track = findTrackById(trackCard.dataset.trackId || '');
@@ -1205,7 +1158,6 @@
     });
 
     bindFolderRemoveButtons(panel, playlistId);
-
     folderState = { backdrop, panel };
   }
 
@@ -1330,8 +1282,14 @@
     }
   });
 
+  // 3. A LIGAÇÃO REATIVA COM O UPLOAD E O WEBSOCKET
+  window.addEventListener('rolfsound-library-updated', () => {
+    if (libraryMode === 'digital') {
+      loadData(); // Recarrega a grelha silenciosamente quando uma música é indexada!
+    }
+  });
+
   window.addEventListener('rolfsound-search', (e) => {
-    // Se o painel de resultados estiver aberto, ele é a fonte única — não filtrar a grid
     if (document.body.dataset.searchPanel === 'open') return;
     const query = (e.detail.query || '').toLowerCase();
     if (libraryMode === 'digital') {
@@ -1340,14 +1298,12 @@
   });
 
   window.addEventListener('rolfsound-search-results', (e) => {
-    // Se o painel de resultados estiver aberto, a grid da library não deve filtrar
     if (document.body.dataset.searchPanel === 'open') return;
     if (libraryMode !== 'digital') return;
     if (e.detail?.tab && e.detail.tab !== 'digital' && e.detail.tab !== 'library') return;
     renderLibrary(getCurrentSearchQuery());
   });
 
-  // Quando o painel de search fecha, restaurar a grid completa
   window.addEventListener('rolfsound-search-close', () => {
     if (libraryMode === 'digital') {
       renderLibrary('');
@@ -1373,16 +1329,13 @@
   window.addEventListener('rolfsound-playlist-renamed', async (e) => {
     const { playlistId, name } = e.detail || {};
     if (!playlistId || !name) return;
-    // Update in-memory list
     const p = allPlaylists.find(p => Number(p.id) === Number(playlistId));
     if (p) p.name = name;
-    // Update card title if rendered
     const card = document.querySelector(`.playlist-card[data-playlist-id="${playlistId}"]`);
     if (card) {
-      const titleEl = card.querySelector('.track-title, .playlist-name');
+      const titleEl = card.querySelector('.playlist-title');
       if (titleEl) titleEl.textContent = name;
     }
-    // Update open folder modal title if it's this playlist
     if (folderState) {
       const titleEl = folderState.panel.querySelector('.folder-title');
       if (titleEl) titleEl.textContent = name;

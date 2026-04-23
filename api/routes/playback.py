@@ -4,12 +4,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from utils.core import core
+from db import database  # <-- Adicionada a importação da DB
 
 router = APIRouter()
 
 
 class PlayRequest(BaseModel):
     track_id: str = ""
+    asset_id: str | None = None  # <-- NOVO: Permite escolher a versão (1:N)
     filepath: str = ""
 
 
@@ -21,6 +23,30 @@ class SeekRequest(BaseModel):
 async def play(req: PlayRequest = None):
     filepath = req.filepath if req else ""
     track_id = req.track_id if req else ""
+    asset_id = req.asset_id if req else None
+
+    # --- INÍCIO DA INTELIGÊNCIA MAM ---
+    # Se recebemos um track_id mas o Frontend não enviou o ficheiro físico,
+    # vamos à tabela 'assets' descobrir qual versão carregar.
+    if track_id and not filepath:
+        conn = database.get_connection()
+        try:
+            if asset_id:
+                # O utilizador clicou numa versão específica (ex: FLAC ou Remix)
+                row = conn.execute("SELECT file_path FROM assets WHERE id = ?", (asset_id,)).fetchone()
+            else:
+                # O utilizador só deu "Play" genérico; tocamos a versão padrão
+                row = conn.execute("SELECT file_path FROM assets WHERE track_id = ?", (track_id,)).fetchone()
+            
+            if row:
+                filepath = row["file_path"]
+        finally:
+            conn.close()
+            
+        # Se pedimos uma música nova, mas ela não tem ficheiro físico registado
+        if not filepath:
+            raise HTTPException(status_code=404, detail="Ficheiro físico não encontrado para esta versão.")
+    # --- FIM DA INTELIGÊNCIA MAM ---
 
     # Resolve to absolute path before sending to core.
     # Core runs in a different working directory — relative paths like

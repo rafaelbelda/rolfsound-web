@@ -4,12 +4,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
 from utils.core import core
+from db import database
 
 router = APIRouter()
 
 
 class AddRequest(BaseModel):
     track_id: str
+    asset_id: str | None = None
     filepath: str = ""
     title: str = ""
     thumbnail: str = ""
@@ -69,24 +71,36 @@ async def get_queue():
 
 @router.post("/queue/add")
 async def add_to_queue(req: AddRequest):
-    # Resolve filepath and thumbnail from library if not provided
     artist = ""
-    if req.track_id and (not req.filepath or not req.thumbnail):
-        from db import database
+    
+    # Lógica MAM: Precisamos do caminho do ficheiro físico (Asset) e dos metadados (Track)
+    if req.track_id and not req.filepath:
         conn = database.get_connection()
         try:
-            track = database.get_track(conn, req.track_id)
-            if track:
-                if not req.filepath:
-                    req.filepath  = track.get("file_path", "")
-                if not req.title:
-                    req.title     = track.get("title", "")
-                # Fix: forward thumbnail so queue renders album art
-                if not req.thumbnail:
-                    req.thumbnail = track.get("thumbnail", "")
-                artist = track.get("artist", "")
+            # 1. Puxa os Metadados (O conceito da música)
+            track_meta = database.get_track(conn, req.track_id)
+            if track_meta:
+                if not req.title: req.title = track_meta.get("title", "")
+                if not req.thumbnail: req.thumbnail = track_meta.get("thumbnail", "")
+                artist = track_meta.get("artist", "")
+
+            # 2. Puxa o Ficheiro Físico (A versão da música)
+            if req.asset_id:
+                # O utilizador exigiu uma versão específica (ex: FLAC)
+                row = conn.execute("SELECT file_path FROM assets WHERE id = ?", (req.asset_id,)).fetchone()
+            else:
+                # Fallback: Toca a versão padrão / primeira que encontrar
+                row = conn.execute("SELECT file_path FROM assets WHERE track_id = ?", (req.track_id,)).fetchone()
+            
+            if row:
+                req.filepath = row["file_path"]
+
         finally:
             conn.close()
+
+    # Se mesmo após a procura não houver ficheiro físico, aborta.
+    if not req.filepath:
+        raise HTTPException(status_code=404, detail="Ficheiro de áudio físico não encontrado.")
 
     result = await core.queue_add(
         req.track_id, req.filepath, req.title,

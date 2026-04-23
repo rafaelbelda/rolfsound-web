@@ -219,6 +219,9 @@ export default class MitosisStateMachine {
     m.playerContainer = child;
     m._crossfader.prefill(child);
 
+    m._shell.cacheDomElements();
+    m.render(); 
+
     const islandStyle = getComputedStyle(islandBar);
 
     Promise.resolve(AnimationEngine.mitosisFull(m.island, {
