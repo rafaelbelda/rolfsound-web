@@ -1,4 +1,3 @@
-# utils/http_client.py
 import logging
 import httpx
 from utils.config import get
@@ -12,19 +11,16 @@ class CoreHttpClient:
         self.base_url = get("core_url", "http://localhost:8765").rstrip("/")
 
     def init_client(self) -> None:
-        """Create the shared AsyncClient. Call once from FastAPI lifespan startup."""
         self._client = httpx.AsyncClient(timeout=TIMEOUT)
         logger.info("CoreHttpClient: persistent AsyncClient created")
 
     async def close_client(self) -> None:
-        """Close the shared AsyncClient. Call from FastAPI lifespan shutdown."""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
             logger.info("CoreHttpClient: AsyncClient closed")
 
     def _get_client(self) -> httpx.AsyncClient:
-        """Return the shared client, creating a fallback if init_client() was not called."""
         if self._client is None or self._client.is_closed:
             logger.warning("CoreHttpClient: client not initialised — creating on demand")
             self._client = httpx.AsyncClient(timeout=TIMEOUT)

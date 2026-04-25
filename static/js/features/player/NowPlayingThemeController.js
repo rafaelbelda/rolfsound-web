@@ -15,9 +15,10 @@
 //   - CORS fallback: tenta URL de /thumbs/ local se o servidor remoto rejeitar
 //   - idle/stop → chama applyNeutral() com fade lento
 
-import ColorPaletteExtractor from '/static/js/ColorPaletteExtractor.js';
-import PaletteNormalizer     from '/static/js/PaletteNormalizer.js';
-import ReactiveBackdropController from '/static/js/ReactiveBackdropController.js';
+import ColorPaletteExtractor from '/static/js/features/animations/ColorPaletteExtractor.js';
+import PaletteNormalizer     from '/static/js/features/animations/PaletteNormalizer.js';
+import ReactiveBackdropController from '/static/js/features/player/ReactiveBackdropController.js';
+import { getThumbnailCandidates } from '/static/js/utils/thumbnails.js';
 
 export default class NowPlayingThemeController {
   /**
@@ -139,6 +140,8 @@ export default class NowPlayingThemeController {
   // então a maioria funciona. O fallback local é para tracks offline.
 
   static _resolveCoverUrls(trackId, thumbnail, source) {
+    return getThumbnailCandidates({ thumbnail, id: trackId, track_id: trackId, source });
+
     const urls = [];
     const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
 

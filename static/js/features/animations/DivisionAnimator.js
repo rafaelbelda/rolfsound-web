@@ -8,8 +8,8 @@
 // Layout-bound phases keep using CSS transitions so the membrane can read
 // live DOM rects every frame. Snap and split are spring-driven via WAAPI.
 
-import { Animator } from '/static/js/Animator.js';
-import { AnimationEngine } from '/static/js/AnimationEngine.js';
+import { Animator } from '/static/js/features/animations/Animator.js';
+import { AnimationEngine } from '/static/js/features/animations/AnimationEngine.js';
 
 class SpringSim {
   constructor({ k = 180, d = 24 } = {}) {

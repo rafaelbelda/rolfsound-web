@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from downloads.manager import get_manager
-from db import database
+from core.ingestors.download_manager import get_manager
+from core.database import database
 
 router = APIRouter()
 

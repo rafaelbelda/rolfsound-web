@@ -1,4 +1,3 @@
-# library/cleanup.py
 """
 Automatic library cleanup.
 Removes tracks that have low stream counts and are old.
@@ -15,11 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_cleanup(conn) -> int:
-    """
-    Delete tracks with streams < cleanup_min_streams and older than cleanup_days.
-    Returns number of tracks deleted.
-    """
-    from db import database
+    from core.database import database
 
     if not get("cleanup_enabled", False):
         return 0
@@ -49,11 +44,9 @@ def run_cleanup(conn) -> int:
 
 
 def start_cleanup_scheduler(db_conn_factory) -> None:
-    """Start a background thread that runs cleanup daily."""
-
     def _loop():
         while True:
-            time.sleep(86400)  # 24 hours
+            time.sleep(86400)
             try:
                 conn = db_conn_factory()
                 count = run_cleanup(conn)

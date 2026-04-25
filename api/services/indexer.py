@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from tinytag import TinyTag
 
-from db import database
+from core.database import database
 from utils import config as cfg
 
 logger = logging.getLogger(__name__)
@@ -422,6 +422,7 @@ async def identify_track(file_path: str, track_id: str, fallback_title: str = ""
 
 async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> dict:
     from api.ws.endpoint import get_manager as get_ws_manager
+    from api.services.status_enricher import clear_track_cache
 
     conn = database.get_connection()
     try:
@@ -503,6 +504,12 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         conn.close()
 
     ws_manager = get_ws_manager()
+    if full_track:
+        clear_track_cache(
+            track_id=resolved_track_id,
+            filepath=full_track.get("file_path") or full_track.get("filepath"),
+        )
+
     if ws_manager and full_track:
         await ws_manager.broadcast({
             "type": "event.track_updated",

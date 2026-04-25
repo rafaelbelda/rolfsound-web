@@ -1,8 +1,8 @@
 // static/js/playback-mitosis.js
 // Lean coordinator — delegates to MitosisStateMachine, ThumbnailCrossfader, PlayerShell.
-import AnimationEngine   from '/static/js/AnimationEngine.js';
-import Animator          from '/static/js/Animator.js';
-import MiniMorphAnimator from '/static/js/MiniMorphAnimator.js';
+import AnimationEngine   from '/static/js/features/animations/AnimationEngine.js';
+import Animator          from '/static/js/features/animations/Animator.js';
+import MiniMorphAnimator from '/static/js/features/island/MiniMorphAnimator.js';
 import MitosisStateMachine from '/static/js/playback/MitosisStateMachine.js';
 import ThumbnailCrossfader from '/static/js/playback/ThumbnailCrossfader.js';
 import PlayerShell         from '/static/js/playback/PlayerShell.js';
@@ -179,7 +179,7 @@ class PlaybackMitosisManager {
       this.island.setNowPlayingState(this.state.playState === 'playing');
     }
 
-    const themeKey = `${this.state.playState}|${this.state.currentId}`;
+    const themeKey = this._themeKey();
     if (themeKey !== this._lastThemeKey) this._dispatchThemeEvent();
   }
 
@@ -188,7 +188,7 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
 
   _dispatchThemeEvent() {
-    this._lastThemeKey = `${this.state.playState}|${this.state.currentId}`;
+    this._lastThemeKey = this._themeKey();
 
     const nextQueueIdx = this.state.currentQueueIdx + 1;
     const nextTrack    = (nextQueueIdx >= 0 && nextQueueIdx < this.state.queue.length)
@@ -208,6 +208,45 @@ class PlaybackMitosisManager {
   // ─────────────────────────────────────────────────────────────
   // DEAD RECKONING
   // ─────────────────────────────────────────────────────────────
+
+  _themeKey() {
+    return `${this.state.playState}|${this.state.currentId}|${this.state.currentTrack.thumbnail || ''}`;
+  }
+
+  applyTrackUpdate(updatedTrack) {
+    const track = updatedTrack?.payload ?? updatedTrack;
+    if (!track) return;
+
+    const incomingId = track.id || track.track_id;
+    const playingId  = this.state.currentId;
+    let queueChanged = false;
+    this.state.queue = (this.state.queue || []).map((item) => {
+      const itemId = item.id || item.track_id;
+      if (!incomingId || itemId !== incomingId) return item;
+      queueChanged = true;
+      return { ...item, ...track };
+    });
+
+    if (!incomingId || !playingId || incomingId !== playingId) {
+      if (this.isQueueOpen) this.renderQueuePanel();
+      if (queueChanged) window.playbackStore?.sync(this.state);
+      return;
+    }
+
+    const previousThemeKey = this._themeKey();
+    this.state.currentTrack = {
+      ...this.state.currentTrack,
+      ...track,
+      title:     track.title     || this.state.currentTrack.title     || '',
+      artist:    track.artist    || this.state.currentTrack.artist    || '',
+      thumbnail: track.thumbnail || this.state.currentTrack.thumbnail || ''
+    };
+
+    this.render();
+    window.playbackStore?.sync(this.state);
+
+    if (this._themeKey() !== previousThemeKey) this._dispatchThemeEvent();
+  }
 
   getDeadReckonedPos() {
     if (this.state.sliderAnchorMs === 0 || this.state.duration === 0) return this.state.sliderPos;

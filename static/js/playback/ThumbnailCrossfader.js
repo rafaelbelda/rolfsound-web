@@ -1,6 +1,7 @@
 // static/js/playback/ThumbnailCrossfader.js
 // Thumbnail crossfade loader for the playback player cover.
-import AnimationEngine from '/static/js/AnimationEngine.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+import { thumbSrc, getThumbnailCandidates } from '/static/js/utils/thumbnails.js';
 
 export default class ThumbnailCrossfader {
   constructor(manager) {
@@ -10,40 +11,11 @@ export default class ThumbnailCrossfader {
   }
 
   thumbSrc(thumbnail) {
-    if (!thumbnail) return null;
-    if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
-    
-    let path = thumbnail.replace(/\\/g, '/');
-    if (path.startsWith('music/')) {
-        return '/' + path.replace('music/', 'thumbs/');
-    }
-    if (path.startsWith('./music/')) {
-        return path.replace('./music/', '/thumbs/');
-    }
-    
-    return '/thumbs/' + path.split('/').pop();
+    return thumbSrc(thumbnail);
   }
 
   getThumbnailCandidates(thumbnail, trackId = '') {
-    const normalized = this.thumbSrc(thumbnail);
-    const candidates = [];
-    const youtubeId  = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId)
-      ? trackId : '';
-
-    if (normalized) {
-      if (normalized.includes('i.ytimg.com/vi/')) {
-        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/maxresdefault.jpg'));
-        candidates.push(normalized.replace(/\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp).*$/i, '/hqdefault.jpg'));
-      }
-      candidates.push(normalized);
-    }
-
-    if (youtubeId && !normalized) {
-      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`);
-      candidates.push(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
-    }
-
-    return [...new Set(candidates.filter(Boolean))];
+    return getThumbnailCandidates({ thumbnail, id: trackId, track_id: trackId });
   }
 
   update() {

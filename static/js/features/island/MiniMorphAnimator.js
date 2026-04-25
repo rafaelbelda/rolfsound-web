@@ -7,7 +7,7 @@
 // Não usa mitose — é um FLIP direto: o player container se reposiciona e
 // redimensiona de um estado para o outro via WAAPI.
 
-import AnimationEngine from '/static/js/AnimationEngine.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 
 // Dimensões do full player (mirrored de playback-mitosis.js)
 const PLAYER_W   = 340;

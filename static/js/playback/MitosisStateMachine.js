@@ -1,7 +1,7 @@
 // static/js/playback/MitosisStateMachine.js
 // Morph/unmorph animation lifecycle for PlaybackMitosisManager.
-import AnimationEngine from '/static/js/AnimationEngine.js';
-import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+import { measureIslandBarMitosis } from '/static/js/features/island/MitosisMetrics.js';
 
 // ── Layout geometry (exported so PlayerShell can import them) ──
 export const PLAYER_W     = 340;
@@ -61,9 +61,7 @@ export default class MitosisStateMachine {
 
     if (window.rolfsoundChannel) {
       window.rolfsoundChannel.on('event.track_updated', (data) => {
-        if (this._m._shell) {
-          this._m._shell.updateTrackVisuals(data.payload);
-        }
+        this._m.applyTrackUpdate?.(data?.payload ?? data);
         window.dispatchEvent(new CustomEvent('rolfsound-library-updated'));
       });
     }

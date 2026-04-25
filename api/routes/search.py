@@ -50,8 +50,8 @@ import logging
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 
-from db import database
-from youtube import search as yt_search
+from core.database import database
+from core.ingestors.youtube import search as yt_search
 from utils.config import get
 
 router = APIRouter()

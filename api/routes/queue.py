@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from pathlib import Path
 from typing import Literal
 from utils.core import core
-from db import database
+from core.database import database
 
 router = APIRouter()
 
@@ -74,7 +75,7 @@ async def add_to_queue(req: AddRequest):
     artist = ""
     
     # Lógica MAM: Precisamos do caminho do ficheiro físico (Asset) e dos metadados (Track)
-    if req.track_id and not req.filepath:
+    if req.track_id:
         conn = database.get_connection()
         try:
             # 1. Puxa os Metadados (O conceito da música)
@@ -85,15 +86,16 @@ async def add_to_queue(req: AddRequest):
                 artist = track_meta.get("artist", "")
 
             # 2. Puxa o Ficheiro Físico (A versão da música)
-            if req.asset_id:
+            if not req.filepath:
+                if req.asset_id:
                 # O utilizador exigiu uma versão específica (ex: FLAC)
-                row = database.get_asset(conn, req.asset_id)
-            else:
+                    row = database.get_asset(conn, req.asset_id)
+                else:
                 # Fallback: Toca a versão padrão / primeira que encontrar
-                row = database.get_fast_play_asset(conn, req.track_id)
+                    row = database.get_fast_play_asset(conn, req.track_id)
             
-            if row:
-                req.filepath = row["file_path"]
+                if row:
+                    req.filepath = row["file_path"]
 
         finally:
             conn.close()
@@ -101,6 +103,8 @@ async def add_to_queue(req: AddRequest):
     # Se mesmo após a procura não houver ficheiro físico, aborta.
     if not req.filepath:
         raise HTTPException(status_code=404, detail="Ficheiro de áudio físico não encontrado.")
+
+    req.filepath = str(Path(req.filepath).resolve())
 
     result = await core.queue_add(
         req.track_id, req.filepath, req.title,
@@ -163,7 +167,7 @@ async def set_shuffle(req: ShuffleRequest):
 
 @router.post("/queue/save-as-playlist")
 async def save_queue_as_playlist(req: SaveAsPlaylistRequest):
-    from db import database
+    from core.database import database
     queue_data = await core.get_queue()
     if queue_data is None:
         raise HTTPException(status_code=503, detail="Core unavailable")

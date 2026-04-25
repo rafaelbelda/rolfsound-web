@@ -1,7 +1,7 @@
 # api/routes/history.py
 
 from fastapi import APIRouter, Query
-from db import database
+from core.database import database
 
 router = APIRouter()
 

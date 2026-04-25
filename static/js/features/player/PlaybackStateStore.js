@@ -30,6 +30,7 @@ class PlaybackStateStore extends EventTarget {
     // Sentinelas para detecção de mudanças
     this._lastPlayState = 'idle';
     this._lastTrackId   = null;
+    this._lastTrackMetaKey = '';
     this._lastQueueLen  = 0;
 
     // RAF para progresso independente (usado pelo miniplayer)
@@ -74,10 +75,25 @@ class PlaybackStateStore extends EventTarget {
       }
     }
 
+    const trackMetaKey = this._trackMetaKey(this._state);
     if (this._state.currentId !== this._lastTrackId) {
       this._lastTrackId = this._state.currentId;
+      this._lastTrackMetaKey = trackMetaKey;
       this.dispatchEvent(new CustomEvent('track-change', { detail }));
+    } else if (this._state.currentId && trackMetaKey !== this._lastTrackMetaKey) {
+      this._lastTrackMetaKey = trackMetaKey;
+      this.dispatchEvent(new CustomEvent('metadata-change', { detail }));
     }
+  }
+
+  _trackMetaKey(state) {
+    const track = state.currentTrack || {};
+    return [
+      state.currentId || '',
+      track.title || '',
+      track.artist || '',
+      track.thumbnail || ''
+    ].join('\u0001');
   }
 
   // ─── RAF de progresso ───────────────────────────────────────────────────────

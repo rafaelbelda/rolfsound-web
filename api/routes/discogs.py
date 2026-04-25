@@ -12,7 +12,7 @@ import os
 import asyncio
 from pathlib import Path
 
-from db import database
+from core.database import database
 from utils import config as cfg
 from utils.image_processor import process_release_cover
 from fastapi import APIRouter, Request, Query, BackgroundTasks

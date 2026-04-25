@@ -1,6 +1,6 @@
 // static/js/playback/PlayerShell.js
 // HTML building, DOM caching, queue panel, and outside-click for PlaybackMitosisManager.
-import AnimationEngine from '/static/js/AnimationEngine.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 import { PLAYER_W, SQUARE_H, CONTROLS_H, GAP, TOTAL_H, computeLayout } from './MitosisStateMachine.js';
 
 export default class PlayerShell {

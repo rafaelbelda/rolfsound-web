@@ -76,14 +76,13 @@ async def _handle_event(event: dict) -> None:
         })
         return
 
-    # 2. Tratamento Especial: Mudança de Estado (Cura o Bumerangue)
+    # 2. Tratamento Especial: Mudança de Estado
+    # O payload bruto do core não tem title/artist/thumbnail/queue — sem enrich o
+    # player limpa os metadados. Fazemos um snapshot enriquecido (único broadcast,
+    # sem boomerang) para entregar estado completo ao cliente.
     if event_type == "playback_state_changed":
-        await _manager.broadcast({
-            "type": "state.playback",
-            "payload": data,
-            "ts": int(time.time() * 1000),
-        })
-        return # <--- ESSENCIAL: impede que o código abaixo peça um snapshot via HTTP!
+        await _broadcast_snapshot()
+        return
 
     # 3. Outros eventos autossuficientes
     if event_type == "playback_tick":
@@ -157,7 +156,7 @@ async def _periodic_refresh() -> None:
 
 
 async def _broadcast_snapshot() -> None:
-    from api.status_enricher import enrich_status
+    from api.services.status_enricher import enrich_status
     raw = await core.get_status()
     if raw is None:
         return
@@ -182,7 +181,7 @@ async def _broadcast_snapshot() -> None:
 
 async def send_initial_snapshot(ws_queue: asyncio.Queue) -> None:
     """Push a fresh state.playback + state.remix snapshot into a freshly connected client queue."""
-    from api.status_enricher import enrich_status
+    from api.services.status_enricher import enrich_status
     raw = await core.get_status()
     if raw is None:
         return

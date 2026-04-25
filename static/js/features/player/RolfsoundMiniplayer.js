@@ -14,6 +14,8 @@
 //   'rolfsound-miniplayer-expand' → PlaybackMitosisManager abre o full player
 //   'rolfsound-miniplayer-visibility-change' → ilha / animadores reagem
 
+import { getThumbnailCandidates } from '/static/js/utils/thumbnails.js';
+
 class RolfsoundMiniplayer extends HTMLElement {
   static observedAttributes = ['visible'];
 
@@ -43,6 +45,7 @@ class RolfsoundMiniplayer extends HTMLElement {
     // Handlers de store (armazenados pra cleanup)
     this._onStateChange   = null;
     this._onTrackChange   = null;
+    this._onMetadataChange = null;
     this._onQueueChange   = null;
     this._onProgress      = null;
     this._onThemeChange   = null;
@@ -61,6 +64,7 @@ class RolfsoundMiniplayer extends HTMLElement {
     if (store) {
       store.removeEventListener('state-change',  this._onStateChange);
       store.removeEventListener('track-change',  this._onTrackChange);
+      store.removeEventListener('metadata-change', this._onMetadataChange);
       store.removeEventListener('queue-change',  this._onQueueChange);
       store.removeEventListener('progress',      this._onProgress);
     }
@@ -387,11 +391,13 @@ class RolfsoundMiniplayer extends HTMLElement {
 
     this._onStateChange = (e) => this._handleStateChange(e.detail);
     this._onTrackChange = (e) => this._handleTrackChange(e.detail);
+    this._onMetadataChange = (e) => this._handleTrackChange(e.detail);
     this._onQueueChange = (e) => this._handleQueueChange(e.detail);
     this._onProgress    = (e) => this._handleProgress(e.detail);
 
     store.addEventListener('state-change',  this._onStateChange);
     store.addEventListener('track-change',  this._onTrackChange);
+    store.addEventListener('metadata-change', this._onMetadataChange);
     store.addEventListener('queue-change',  this._onQueueChange);
     store.addEventListener('progress',      this._onProgress);
 
@@ -490,8 +496,8 @@ class RolfsoundMiniplayer extends HTMLElement {
     if (key === this._thumbKey) return;
     this._thumbKey = key;
 
-    const src = this._resolveSrc(thumbnail, trackId);
-    if (!src) {
+    const candidates = getThumbnailCandidates({ thumbnail, id: trackId, track_id: trackId });
+    if (!candidates.length) {
       this._thumbAEl.style.opacity = '0';
       this._thumbBEl.style.opacity = '0';
       return;
@@ -506,16 +512,17 @@ class RolfsoundMiniplayer extends HTMLElement {
       incoming.style.opacity = '1';
       outgoing.style.opacity = '0';
     };
+    let candidateIndex = 0;
     incoming.onerror = () => {
-      // Tenta fallback hqdefault para YouTube
-      if (src.includes('maxresdefault')) {
-        incoming.src = src.replace('maxresdefault', 'hqdefault');
-      }
+      candidateIndex += 1;
+      if (candidateIndex < candidates.length) incoming.src = candidates[candidateIndex];
     };
-    incoming.src = src;
+    incoming.src = candidates[candidateIndex];
   }
 
   _resolveSrc(thumbnail, trackId) {
+    return getThumbnailCandidates({ thumbnail, id: trackId, track_id: trackId })[0] || null;
+
     // Prioridade: thumbnail indexado (Discogs/etc) > fallback YouTube
     if (thumbnail) {
       if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;

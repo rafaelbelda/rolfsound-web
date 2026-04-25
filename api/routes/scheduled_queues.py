@@ -6,7 +6,7 @@ Endpoints for scheduling queue playback at a specific time.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from db import database
+from core.database import database
 
 router = APIRouter()
 

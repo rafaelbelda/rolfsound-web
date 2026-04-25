@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_asset
 
-from db import database
+from core.database import database
+from utils.core import core
 
 router = APIRouter()
 
@@ -209,10 +210,27 @@ async def delete_track(track_id: str):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
-        for asset in track.get("assets", []):
-            filepath = asset.get("file_path")
-            if filepath and os.path.exists(filepath):
+        files_to_delete = [
+            a.get("file_path") for a in track.get("assets", [])
+            if a.get("file_path") and os.path.exists(a.get("file_path"))
+        ]
+
+        if files_to_delete:
+            status = await core.get_status()
+            if status and status.get("track_id") == track_id:
+                await core.pause()
+                await core.skip()
+                await asyncio.sleep(0.25)
+
+        for filepath in files_to_delete:
+            try:
                 os.remove(filepath)
+            except PermissionError:
+                await asyncio.sleep(0.5)
+                try:
+                    os.remove(filepath)
+                except PermissionError:
+                    raise HTTPException(status_code=409, detail="File in use — stop playback and try again")
 
         # Delete local thumbnail if it's a local path (not a URL)
         thumb = track.get("thumbnail", "")

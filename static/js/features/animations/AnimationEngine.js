@@ -1,7 +1,7 @@
 // static/js/AnimationEngine.js
 // Motor genérico de animações (Mitosis + Morph) reutilizável
 
-import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
+import { measureIslandBarMitosis } from '/static/js/features/island/MitosisMetrics.js';
 
 export class AnimationEngine {
   static _mitosisStrategies = new Map();
@@ -1089,7 +1089,7 @@ async function resolveDivisionAnimatorClass(options = {}) {
   }
 
   if (!divisionAnimatorModulePromise) {
-    divisionAnimatorModulePromise = import('/static/js/DivisionAnimator.js');
+    divisionAnimatorModulePromise = import('/static/js/features/animations/DivisionAnimator.js');
   }
 
   const mod = await divisionAnimatorModulePromise;

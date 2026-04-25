@@ -12,7 +12,7 @@ from typing import Callable
 from api.services.pipeline import LibraryManager
 from utils.config import get
 from utils.path_utils import sanitize_path
-from youtube import ytdlp
+from core.ingestors.youtube import ytdlp
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class DownloadManager:
         target_track_id: str | None = None,
         asset_type: str = "ORIGINAL_MIX",
     ) -> bool:
-        from db import database
+        from core.database import database
 
         conn = self._db_factory()
         try:
@@ -92,7 +92,7 @@ class DownloadManager:
         return True
 
     def get_status(self, source_ref: str) -> dict | None:
-        from db import database
+        from core.database import database
 
         conn = database.get_connection()
         try:
@@ -101,7 +101,7 @@ class DownloadManager:
             conn.close()
 
     def list_all(self) -> list[dict]:
-        from db import database
+        from core.database import database
 
         conn = database.get_connection()
         try:
@@ -122,7 +122,7 @@ class DownloadManager:
                 time.sleep(1.0)
 
     def _run_download(self, job: dict) -> None:
-        from db import database
+        from core.database import database
 
         source_ref = job["source_ref"]
         title = job.get("title", "")

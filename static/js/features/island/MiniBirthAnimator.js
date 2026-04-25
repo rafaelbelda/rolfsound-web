@@ -9,7 +9,7 @@
 // A ilha recebe um impacto visual simultâneo (como se tivesse "expelido" o mini).
 // Simples, bonito, e não quebra com viewports de qualquer altura.
 
-import AnimationEngine from '/static/js/AnimationEngine.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 
 // Parâmetros de animação
 const BIRTH_DURATION   = 540;   // ms — slide-up spring

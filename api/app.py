@@ -17,14 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from utils import config as cfg
-from db import database
-from downloads.manager import init_manager, get_manager
-from utils.event_stream_client import get_client as get_event_stream_client
-from library.cleanup import start_cleanup_scheduler
-from youtube.ytdlp import cleanup_temp_files
-from youtube.search import close_client as close_search_client
+from core.database import database
+from core.ingestors.download_manager import init_manager, get_manager
+from utils.bridge.event_stream_client import get_client as get_event_stream_client
+from core.library.cleanup import start_cleanup_scheduler
+from core.ingestors.youtube.ytdlp import cleanup_temp_files
+from core.ingestors.youtube.search import close_client as close_search_client
 from utils.core import core, http_client
-from api.status_enricher import enrich_status
+from api.services.status_enricher import enrich_status
 from api.ws.endpoint import get_manager as get_ws_manager, ws_endpoint
 from api.ws import state_broadcaster
 
@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI):
     await _restore_queue_state()
 
     # ── Start scheduled queue daemon ──────────────────────────────────
-    from library.scheduled_queue import start_scheduler as start_sq_scheduler
+    from core.library.scheduled_queue import start_scheduler as start_sq_scheduler
     start_sq_scheduler(database.get_connection)
 
     yield
@@ -200,7 +200,7 @@ async def _save_queue_state() -> None:
 
 
 def _register_event_handlers(source, loop=None):
-    from db import database as db
+    from core.database import database as db
 
     # Track the last played track_id and when it started, for skip detection.
     _last_play: dict = {"track_id": None, "started_at": 0.0, "duration": 0}

@@ -1,4 +1,3 @@
-# library/scheduled_queue.py
 """
 Scheduled queue daemon.
 Checks every 30 seconds for pending scheduled queues whose fire time has passed,
@@ -39,7 +38,7 @@ def _run() -> None:
 
 
 def _check_and_fire() -> None:
-    from db import database
+    from core.database import database
     from utils.core import core
 
     conn = _db_conn_factory()

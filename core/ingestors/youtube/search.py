@@ -1,4 +1,3 @@
-# youtube/search.py
 """
 Unified YouTube search — YouTube Data API v3 (primary) with yt-dlp fallback.
 
@@ -74,8 +73,8 @@ except ImportError:
     _cache = {}
     _MANUAL_TTL = 300
 
-PREFIX_WALK_STEPS = 5   # max chars to strip when looking for prefix hit
-PREFIX_MIN_LENGTH = 3   # never match queries shorter than this
+PREFIX_WALK_STEPS = 5
+PREFIX_MIN_LENGTH = 3
 
 
 def _cache_get(key: str) -> list | None:
@@ -99,20 +98,6 @@ def _cache_set(key: str, results: list) -> None:
 
 
 def _prefix_cache_lookup(query: str, max_results: int, prefix: str) -> list | None:
-    """
-    Find a cached result set for a longer query that starts with our query.
-
-    Direction: current query is a PREFIX of something already cached.
-      "drak" is a prefix of cached "drake" -> match, filter, return.
-
-    We scan all cache keys for entries where the stored query starts with
-    the current query and the length difference is within PREFIX_WALK_STEPS.
-    This catches the common incremental-typing case without false positives
-    from very short or unrelated queries.
-
-    The filter is intentionally loose (case-insensitive substring) — we
-    want to show something immediately; a fresh full search corrects it.
-    """
     q = query.lower().strip()
     if len(q) < PREFIX_MIN_LENGTH:
         return None
@@ -121,19 +106,17 @@ def _prefix_cache_lookup(query: str, max_results: int, prefix: str) -> list | No
     best_diff = PREFIX_WALK_STEPS + 1
 
     for key in list(_cache.keys()):
-        # Key format: "{prefix}:{stored_query}:{max_results}"
         parts = key.split(":", 2)
         if len(parts) != 3:
             continue
         k_prefix, k_query, k_max = parts
         if k_prefix != prefix or k_max != str(max_results):
             continue
-        # Stored query must start with our query and not be too different
         if not k_query.startswith(q):
             continue
         length_diff = len(k_query) - len(q)
         if length_diff == 0 or length_diff > PREFIX_WALK_STEPS:
-            continue  # exact match handled by _cache_get; too different = skip
+            continue
         cached = _cache_get(key)
         if cached is None:
             continue
@@ -144,7 +127,6 @@ def _prefix_cache_lookup(query: str, max_results: int, prefix: str) -> list | No
         ]
         if not filtered:
             continue
-        # Prefer the closest match (smallest length difference)
         if length_diff < best_diff:
             best = filtered
             best_diff = length_diff
@@ -159,15 +141,10 @@ def _prefix_cache_lookup(query: str, max_results: int, prefix: str) -> list | No
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _thumb(video_id: str) -> str:
-    """hqdefault — 480x360, sharper than mqdefault and broadly available."""
     return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
 
 def _parse_iso_duration(iso: str) -> int | None:
-    """
-    ISO 8601 duration (YouTube Data API) to seconds.
-    "PT4M33S" -> 273  |  "PT1H3M22S" -> 3802  |  "P0D"/live -> None
-    """
     if not iso:
         return None
     m = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', iso)
@@ -182,7 +159,6 @@ def _parse_iso_duration(iso: str) -> int | None:
 
 
 def _parse_hms_duration(text: str | None) -> int | None:
-    """yt-dlp HH:MM:SS / MM:SS to seconds."""
     if not text:
         return None
     try:
@@ -210,7 +186,6 @@ def _get_client() -> httpx.AsyncClient:
 
 
 async def close_client() -> None:
-    """Close the shared HTTP client. Call from FastAPI lifespan shutdown."""
     global _http_client
     if _http_client and not _http_client.is_closed:
         await _http_client.aclose()
@@ -225,21 +200,9 @@ _API_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] | None:
-    """
-    Parallel two-request YouTube Data API v3 search.
-
-    The search endpoint doesn't include durations. Getting them requires
-    a second request to the videos endpoint with the IDs from request 1.
-    We fire request 2 as soon as IDs are parsed from request 1 — the
-    two network round trips overlap as much as possible.
-
-    If the duration request fails, results are still returned with
-    duration=None — non-fatal degradation.
-    """
     client = _get_client()
 
     try:
-        # Request 1: search — IDs, titles, channels
         search_resp = await client.get(_API_SEARCH_URL, params={
             "part":       "snippet",
             "type":       "video",
@@ -254,7 +217,6 @@ async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] 
             logger.warning(f"YouTube API: no results for {query!r}")
             return []
 
-        # Parse IDs and build result list in one pass
         results:  list[dict]     = []
         id_index: dict[str, int] = {}
 
@@ -275,8 +237,6 @@ async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] 
         if not results:
             return []
 
-        # Request 2: durations — fires immediately after IDs are known.
-        # Network I/O is the bottleneck; parsing above is microseconds.
         try:
             dur_resp = await client.get(_API_VIDEOS_URL, params={
                 "part": "contentDetails",
@@ -309,17 +269,13 @@ async def _search_api(query: str, max_results: int, api_key: str) -> list[dict] 
             logger.error(f"YouTube API: 400 Bad Request — {e.response.text[:200]}")
         else:
             logger.error(f"YouTube API: HTTP {status} for {query!r}")
-        # return none = yt-dlp fallback
         return None
     except httpx.TimeoutException:
         logger.warning(f"YouTube API: timeout for {query!r} — falling back to yt-dlp")
         return None
-
     except httpx.NetworkError as e:
-        # Covers ConnectError, DNS issues, no internet, etc.
         logger.error(f"YouTube API: network error for {query!r}: {e}")
         return None
-    
     except Exception as e:
         logger.error(f"YouTube API: unexpected error for {query!r}: {e}", exc_info=True)
         return None
@@ -368,10 +324,6 @@ def _parse_ytdlp_line(line: str) -> dict | None:
 
 
 async def _search_ytdlp(query: str, max_results: int) -> list[dict]:
-    """
-    yt-dlp fallback search. Process-level timeout only — no per-line timeout.
-    Returns partial results if timeout fires.
-    """
     collected: list[dict] = []
     proc = None
     try:
@@ -421,7 +373,6 @@ async def _search_ytdlp(query: str, max_results: int) -> list[dict]:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def _normalize_query(query: str) -> str:
-    """Strip symbols that don't contribute to search meaning."""
     return re.sub(r'[^\w\s\-.,&\'():]', '', query).lower().strip()
 
 def make_cache_key(query: str, max_results: int, api_key: str) -> str:
@@ -429,39 +380,27 @@ def make_cache_key(query: str, max_results: int, api_key: str) -> str:
     return f"{prefix}:{_normalize_query(query)}:{max_results}"
 
 async def search(query: str, max_results: int = 10) -> list[dict]:
-    """
-    Search YouTube. API v3 if key configured, yt-dlp otherwise.
-    Checks exact cache then prefix cache before hitting the network.
-    """
     query = _normalize_query(query)
 
     api_key   = cfg("youtube_api_key", "").strip()
     prefix    = "api" if api_key else "ytdlp"
     cache_key = make_cache_key(query, max_results, api_key)
 
-    # Exact hit
     cached = _cache_get(cache_key)
     if cached is not None:
         logger.info(f"Search complete (CACHE hit {prefix}): {len(cached)} results for {query!r}")
         return cached
 
-    # Prefix hit — longer query already cached, filter it down
     prefix_hit = _prefix_cache_lookup(query, max_results, prefix)
     if prefix_hit is not None:
         logger.info(f"Search complete (used PREFIX CACHE {prefix}): {len(prefix_hit)} results for {query!r}")
         return prefix_hit
 
-    # Miss — run the search
     if api_key:
         results = await _search_api(query, max_results, api_key)
-
-        # None means infrastructure failure (timeout, quota, bad key, network).
-        # [] means the API worked but found nothing — that's a real empty result,
-        # don't fallback (yt-dlp wouldn't find anything different).
         if results is None:
             logger.info(f"API unavailable for {query!r} — falling back to yt-dlp")
             results = await _search_ytdlp(query, max_results)
-            # Cache under ytdlp prefix so it doesn't poison the api: namespace
             if results:
                 _cache_set(make_cache_key(query, max_results, ""), results)
             return results

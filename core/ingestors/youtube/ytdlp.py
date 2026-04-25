@@ -1,8 +1,7 @@
-# youtube/ytdlp.py
 """
 yt-dlp wrapper — downloads only.
 
-Search has moved to youtube/search.py.
+Search has moved to core/ingestors/youtube/search.py.
 
 AUDIO FORMAT
 ────────────
@@ -52,7 +51,6 @@ def _best_thumbnail(data: dict) -> str:
                 width = int(t.get("width") or 0)
                 height = int(t.get("height") or 0)
                 area = width * height
-                # Prefer real high-res artwork first, then fall back by size.
                 is_maxres = 1 if "maxres" in url else 0
                 is_hq_or_sd = 1 if ("hqdefault" in url or "sddefault" in url) else 0
                 return (is_maxres, is_hq_or_sd, area, height, width)
@@ -106,11 +104,6 @@ def download(
     Download audio at maximum quality. Default is native WebM/Opus stream.
     Atomic: downloads to temp path, renames to final on success.
     Returns final file path (absolute) or None on failure.
-
-    Paths are always resolved to absolute so that:
-    - yt-dlp receives an unambiguous output template
-    - The returned path has no backslash escape sequences (Windows safety)
-    - os.path.exists / av.open work identically on all platforms
     """
     is_native = audio_format in _NATIVE_FORMATS
 
@@ -119,8 +112,6 @@ def download(
         _download_lock.acquire()
 
     try:
-        # Fix: resolve() converts to absolute path, eliminating Windows
-        # backslash + escape-char issues in relative paths like "music\bID.webm"
         output_path = Path(output_dir).resolve()
         temp_path   = Path(temp_dir).resolve()
         output_path.mkdir(parents=True, exist_ok=True)
@@ -189,7 +180,6 @@ def download(
 
         temp_file  = candidates[0]
         actual_ext = temp_file.suffix.lstrip(".")
-        # Fix: final_path is absolute — no relative backslash separator issues
         final_file = output_path / f"{track_id}.{actual_ext}"
         final_path = str(final_file)
 
@@ -214,7 +204,6 @@ def download(
 
 
 def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -> str | None:
-    # Fix: resolve() for same reason — avoid Windows backslash escape issues
     thumb_path = Path(thumbnails_dir).resolve()
     thumb_path.mkdir(parents=True, exist_ok=True)
     dest = str(thumb_path / f"{track_id}.jpg")

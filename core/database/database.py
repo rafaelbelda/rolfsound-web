@@ -439,8 +439,10 @@ def get_all_track_ids(conn):
 
 def list_tracks(conn):
     rows = conn.execute("""
-        SELECT * FROM tracks
-        ORDER BY date_added DESC
+        SELECT t.*,
+            (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id) AS play_count
+        FROM tracks t
+        ORDER BY t.date_added DESC
     """).fetchall()
     return [_attach_fast_asset(conn, dict(r)) for r in rows]
 
@@ -578,7 +580,7 @@ def delete_track(conn, track_id):
 
 
 def scan_and_reconcile(conn, music_dir, return_asset_ids: bool = False):
-    from youtube.ytdlp import AUDIO_EXTENSIONS
+    from core.ingestors.youtube.ytdlp import AUDIO_EXTENSIONS
 
     music_path = Path(music_dir)
     if not music_path.exists():

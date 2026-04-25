@@ -7,9 +7,27 @@
  * @returns {string|null}
  */
 export function thumbSrc(t) {
-    if (!t) return null;
-    if (t.startsWith('http') || t.startsWith('/thumbs/')) return t;
-    return '/thumbs/' + t.split(/[\\/]/).pop();
+    const raw = String(t || '').trim();
+    if (!raw) return null;
+    if (/^(https?:|data:|blob:)/i.test(raw) || raw.startsWith('/thumbs/')) return raw;
+
+    let path = raw.replace(/\\/g, '/').replace(/^\.\/+/, '');
+    const lower = path.toLowerCase();
+
+    if (lower.startsWith('/music/')) {
+        return '/thumbs/' + path.slice('/music/'.length);
+    }
+    if (lower.startsWith('music/')) {
+        return '/thumbs/' + path.slice('music/'.length);
+    }
+
+    const musicIdx = lower.lastIndexOf('/music/');
+    if (musicIdx >= 0) {
+        return '/thumbs/' + path.slice(musicIdx + '/music/'.length);
+    }
+
+    const filename = path.split('/').filter(Boolean).pop();
+    return filename ? '/thumbs/' + filename : null;
 }
 
 /**

@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from utils.core import core
-from db import database  # <-- Adicionada a importação da DB
+from core.database import database
 
 router = APIRouter()
 

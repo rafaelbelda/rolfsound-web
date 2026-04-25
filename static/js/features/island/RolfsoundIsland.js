@@ -1,9 +1,9 @@
 // static/js/RolfsoundIsland.js
 
-import AnimationEngine from '/static/js/AnimationEngine.js';
-import { measureIslandBarMitosis } from '/static/js/MitosisMetrics.js';
-import { playElasticImpact } from '/static/js/IslandImpactEngine.js';
-import MiniBirthAnimator from '/static/js/MiniBirthAnimator.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+import { measureIslandBarMitosis } from '/static/js/features/island/MitosisMetrics.js';
+import { playElasticImpact } from '/static/js/features/island/IslandImpactEngine.js';
+import MiniBirthAnimator from '/static/js/features/island/MiniBirthAnimator.js';
 import channel from '/static/js/channel/RolfsoundChannel.js';
 
 class RolfsoundIsland extends HTMLElement {

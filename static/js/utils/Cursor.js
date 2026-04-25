@@ -1,5 +1,5 @@
 // static/js/Cursor.js
-import AnimationEngine from '/static/js/AnimationEngine.js';
+import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 
 export default class Cursor {
   constructor() {

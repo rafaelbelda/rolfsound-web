@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/css/global.css">
   
   <script type="module">
-    import AnimationEngine from '/static/js/AnimationEngine.js';
+    import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
     window.AnimationEngine = AnimationEngine;
   </script>
   <script type="module" src="/static/js/channel/RolfsoundChannel.js"></script>
@@ -23,10 +23,10 @@
   <script type="module" src="/static/js/components/remix-panel/remix-panel.js"></script>
   <script type="module" src="/static/js/components/track-row/track-row.js"></script>
   <script type="module" src="/static/js/components/search-results/search-results.js"></script>
-  <script type="module" src="/static/js/PlaybackStateStore.js"></script>
-  <script type="module" src="/static/js/RolfsoundIsland.js"></script>
-  <script type="module" src="/static/js/RolfsoundMiniplayer.js"></script>
-  <script type="module" src="/static/js/playback-mitosis.js"></script>
+  <script type="module" src="/static/js/features/player/PlaybackStateStore.js"></script>
+  <script type="module" src="/static/js/features/island/RolfsoundIsland.js"></script>
+  <script type="module" src="/static/js/features/player/RolfsoundMiniplayer.js"></script>
+  <script type="module" src="/static/js/features/island/playback-mitosis.js"></script>
 </head>
 <body>
 
@@ -49,12 +49,12 @@
   </section>
 
   <script type="module">
-    import Cursor from '/static/js/Cursor.js';
-    import SearchController from '/static/js/SearchController.js';
-    import SearchLayoutCoordinator from '/static/js/SearchLayoutCoordinator.js';
-    import ContextMenuController from '/static/js/ContextMenuController.js';
-    import PlaylistController from '/static/js/PlaylistController.js';
-    import UploadController from '/static/js/UploadController.js';
+    import Cursor from '/static/js/utils/Cursor.js';
+    import SearchController from '/static/js/features/search/SearchController.js';
+    import SearchLayoutCoordinator from '/static/js/features/search/SearchLayoutCoordinator.js';
+    import ContextMenuController from '/static/js/features/search/ContextMenuController.js';
+    import PlaylistController from '/static/js/features/library/PlaylistController.js';
+    import UploadController from '/static/js/features/library/UploadController.js';
 
     const meuCursor = new Cursor();
     window.meuCursor = meuCursor;
@@ -305,7 +305,7 @@
     document.body.appendChild(window.uploadController);
 
     // Sistema de tema reativo — ambient lighting com as cores do álbum em reprodução
-    import('/static/js/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {
+    import('/static/js/features/player/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {
       window.nowPlayingThemeController = new NowPlayingThemeController();
     });
 
