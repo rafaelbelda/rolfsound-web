@@ -33,10 +33,10 @@ async def play(req: PlayRequest = None):
         try:
             if asset_id:
                 # O utilizador clicou numa versão específica (ex: FLAC ou Remix)
-                row = conn.execute("SELECT file_path FROM assets WHERE id = ?", (asset_id,)).fetchone()
+                row = database.get_asset(conn, asset_id)
             else:
                 # O utilizador só deu "Play" genérico; tocamos a versão padrão
-                row = conn.execute("SELECT file_path FROM assets WHERE track_id = ?", (track_id,)).fetchone()
+                row = database.get_fast_play_asset(conn, track_id)
             
             if row:
                 filepath = row["file_path"]

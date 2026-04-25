@@ -12,16 +12,20 @@ class DownloadRequest(BaseModel):
     track_id: str
     title: str = ""
     thumbnail: str = ""
+    target_track_id: str | None = None
+    asset_type: str = "ORIGINAL_MIX"
 
 
 @router.post("/downloads")
 async def start_download(req: DownloadRequest):
-    # Check if already in library
+    # req.track_id is the YouTube video id. In MAM terms it is source_ref,
+    # not the logical Rolfsound track id.
     conn = database.get_connection()
     try:
-        existing = database.get_track(conn, req.track_id)
-        if existing:
-            return {"ok": True, "status": "exists", "track": existing}
+        existing_asset = database.get_asset_by_source_ref(conn, "YOUTUBE", req.track_id)
+        if existing_asset:
+            track = database.get_track(conn, existing_asset["track_id"])
+            return {"ok": True, "status": "exists", "track": track, "asset": existing_asset}
     finally:
         conn.close()
 
@@ -29,7 +33,13 @@ async def start_download(req: DownloadRequest):
     if manager is None:
         raise HTTPException(status_code=503, detail="Download manager not ready")
 
-    queued = manager.enqueue(req.track_id, req.title, req.thumbnail)
+    queued = manager.enqueue(
+        req.track_id,
+        req.title,
+        req.thumbnail,
+        target_track_id=req.target_track_id,
+        asset_type=req.asset_type,
+    )
     return {"ok": True, "status": "queued" if queued else "already_queued"}
 
 

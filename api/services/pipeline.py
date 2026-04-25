@@ -1,55 +1,68 @@
-# api/services/pipeline.py
-import os
-import uuid
-import time
 import asyncio
 import logging
+import os
+import re
 import shutil
-from pathlib import Path
+import time
+import uuid
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from db import database
-# Importamos o indexer para disparar a tarefa em background
-from api.services.indexer import index_file 
 
 logger = logging.getLogger(__name__)
 
-# ── 1. AS ESTRATÉGIAS DE INGESTÃO (SOURCES) ──────────────────────────────────
 
 class MusicIngestor(ABC):
-    """Classe base para qualquer fonte que traga música para o Rolfsound."""
-    
+    """Base class for sources that bring audio into Rolfsound."""
+
     @abstractmethod
     async def fetch_media(self, source_data: Any, temp_dir: str) -> Dict[str, Any]:
-        """
-        Deve retornar:
-        - temp_path: Caminho do ficheiro descarregado/recebido no cache
-        - filename: Nome original do ficheiro (usado como título provisório)
-        - source: String da origem (YOUTUBE, UPLOAD, VINYL_RIP)
-        """
         pass
+
+    def extract_metadata(self, source_data: dict) -> Dict[str, Any]:
+        return {
+            "target_track_id": _blank_to_none(source_data.get("target_track_id")),
+            "asset_type": source_data.get("asset_type") or "ORIGINAL_MIX",
+            "source_ref": _blank_to_none(source_data.get("source_ref")),
+            "title": _blank_to_none(source_data.get("title")),
+            "artist": _blank_to_none(source_data.get("artist")),
+            "thumbnail": _blank_to_none(source_data.get("thumbnail")),
+            "duration": source_data.get("duration"),
+            "published_date": source_data.get("published_date"),
+        }
 
 
 class UploadIngestor(MusicIngestor):
     async def fetch_media(self, source_data: dict, temp_dir: str) -> Dict[str, Any]:
         file_content = source_data["content"]
         original_filename = source_data["filename"]
-        
-        # Guarda o buffer recebido da web numa pasta temporária de forma segura
+
         ext = Path(original_filename).suffix.lower()
         temp_file = os.path.join(temp_dir, f"upload_{uuid.uuid4().hex}{ext}")
-        
+
         with open(temp_file, "wb") as f:
             f.write(file_content)
-            
+
         return {
             "temp_path": temp_file,
-            "filename": Path(original_filename).stem, # Tira a extensão (ex: "Bitch_master_v2")
-            "source": "UPLOAD"
+            "filename": Path(original_filename).stem,
+            "source": "UPLOAD",
         }
 
-# ── 2. O GESTOR DA BIBLIOTECA (MAM PIPELINE) ────────────────────────────────
+
+class ExistingFileIngestor(MusicIngestor):
+    async def fetch_media(self, source_data: dict, temp_dir: str) -> Dict[str, Any]:
+        path = source_data.get("temp_path") or source_data.get("file_path")
+        if not path:
+            raise ValueError("ExistingFileIngestor requires temp_path or file_path")
+        return {
+            "temp_path": path,
+            "filename": source_data.get("filename") or Path(path).stem,
+            "source": source_data.get("source") or "LOCAL_FILE",
+        }
+
 
 class LibraryManager:
     def __init__(self, music_dir: str = "./music", temp_dir: str = "./cache/.tmp"):
@@ -57,76 +70,154 @@ class LibraryManager:
         self.temp_dir = Path(temp_dir)
         self.music_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        
+
     async def process_new_track(self, ingestor: MusicIngestor, source_data: Any) -> Optional[str]:
-        """
-        O fluxo mestre (Latência Zero para o Frontend):
-        1. Ingestão -> 2. Bundle Creation -> 3. DB Insert -> 4. Async Indexing
-        """
-        
-        # 1. INGESTÃO: Traz o ficheiro para o ecossistema (/cache)
+        """Backwards-compatible name: ingest an asset and return its logical track id."""
+        result = await self.process_new_asset(ingestor, source_data)
+        return result.get("track_id") if result else None
+
+    async def process_new_asset(self, ingestor: MusicIngestor, source_data: Any) -> Optional[dict]:
         media_info = await ingestor.fetch_media(source_data, str(self.temp_dir))
-        temp_path = media_info["temp_path"]
-        
-        if not os.path.exists(temp_path):
-            logger.error("Pipeline: Ingestor falhou em disponibilizar o ficheiro temporário.")
+        metadata = ingestor.extract_metadata(source_data if isinstance(source_data, dict) else {})
+        return self.ingest_existing_file({**metadata, **media_info}, schedule_index=True)
+
+    def ingest_existing_file(self, source_data: dict, schedule_index: bool = True) -> Optional[dict]:
+        """
+        Register a file that already exists on disk.
+
+        The file is normally moved into a MAM bundle. Set move_file=False for
+        scans that should register files in place.
+        """
+        temp_path = Path(source_data["temp_path"])
+        if not temp_path.exists():
+            logger.error(f"Pipeline: missing ingest file {temp_path}")
             return None
-            
-        file_format = Path(temp_path).suffix.replace(".", "").upper()
-        track_id = str(uuid.uuid4())
-        
-        logger.info(f"Pipeline: A iniciar MAM Bundle para Track ID {track_id}")
 
-        # 2. ARMAZENAMENTO FÍSICO (O Padrão Bundle)
-        # Cria a pasta isolada para a música: /music/1234-abcd/
-        track_bundle_dir = self.music_dir / track_id
-        track_bundle_dir.mkdir(parents=True, exist_ok=True)
-        
-        final_file_name = f"original_mix.{file_format.lower()}"
-        final_dest_path = track_bundle_dir / final_file_name
-        
-        # Move do cache para a library permanente
-        shutil.move(temp_path, final_dest_path)
+        target_track_id = _blank_to_none(source_data.get("target_track_id"))
+        asset_type = _normal_asset_type(source_data.get("asset_type"))
+        source = (source_data.get("source") or "UNKNOWN").upper()
+        source_ref = _blank_to_none(source_data.get("source_ref"))
+        title = _blank_to_none(source_data.get("title")) or source_data.get("filename") or temp_path.stem
+        artist = _blank_to_none(source_data.get("artist")) or ""
+        thumbnail = _blank_to_none(source_data.get("thumbnail"))
+        duration = source_data.get("duration")
+        published_date = source_data.get("published_date")
+        move_file = source_data.get("move_file", True)
 
-        # 3. BASE DE DADOS (Criação do Placeholder)
-        track_data = {
-            "id": track_id,
-            "title": media_info["filename"], # Título provisório (o nome do ficheiro)
-            "artist": "",                    # Desconhecido até o Indexer avaliar
-            "date_added": int(time.time()),
-            "status": "unidentified",        # Estado fundamental!
-            "file_path": str(final_dest_path), 
-            "source": media_info["source"]
-        }
-        
         conn = database.get_connection()
         try:
-            # O seu database.py atualizado vai criar a entrada em 'tracks' e em 'assets'
-            database.insert_track(conn, track_data)
+            created_track = False
+            if target_track_id:
+                if not database.get_track_row(conn, target_track_id):
+                    raise ValueError(f"Target track not found: {target_track_id}")
+                track_id = target_track_id
+            else:
+                track_id = str(uuid.uuid4())
+                database.add_track(conn, {
+                    "id": track_id,
+                    "title": title,
+                    "artist": artist,
+                    "duration": duration,
+                    "thumbnail": thumbnail,
+                    "published_date": published_date,
+                    "date_added": int(time.time()),
+                    "status": "pending_identity",
+                })
+                created_track = True
+
+            final_path = self._place_file(temp_path, track_id, asset_type, move_file=move_file)
+            asset_id = database.add_asset(
+                conn,
+                track_id=track_id,
+                file_path=str(final_path),
+                asset_type=asset_type,
+                source=source,
+                source_ref=source_ref,
+                file_format=final_path.suffix.replace(".", "").upper() or "UNKNOWN",
+                duration=duration,
+                analysis_status="pending",
+            )
             conn.commit()
-            logger.info(f"Pipeline: Ficheiro guardado e placeholder criado com sucesso.")
+
+            logger.info(
+                "Pipeline: registered asset %s (%s) on track %s from %s",
+                asset_id,
+                asset_type,
+                track_id,
+                source,
+            )
+
         except Exception as e:
-            logger.error(f"Pipeline: Erro a guardar na DB: {e}")
+            conn.rollback()
+            logger.error(f"Pipeline: failed to register asset: {e}")
             return None
         finally:
             conn.close()
 
-        # 4. O SEGREDO DA LATÊNCIA ZERO: Handoff Assíncrono
-        # Disparamos o Indexer em background. O FastAPI não vai ficar à espera que 
-        # o Shazam ou o FFMPEG terminem para devolver o Track ID ao utilizador.
-        asyncio.create_task(self._trigger_indexer(track_id, str(final_dest_path)))
-            
-        # 5. Retorna imediatamente para a UI poder mostrar o Toast de "Sucesso"
-        return track_id
+        allow_identity_resolution = created_track and not target_track_id
+        if schedule_index:
+            self._schedule_indexer(asset_id, allow_identity_resolution)
 
-    async def _trigger_indexer(self, track_id: str, file_path: str):
-        """Wrapper isolado para garantir que falhas no Indexer não quebram o processo."""
+        return {
+            "track_id": track_id,
+            "asset_id": asset_id,
+            "file_path": str(final_path),
+            "created_track": created_track,
+            "allow_identity_resolution": allow_identity_resolution,
+        }
+
+    def _place_file(
+        self,
+        source_path: Path,
+        track_id: str,
+        asset_type: str,
+        move_file: bool = True,
+    ) -> Path:
+        if not move_file:
+            return source_path
+
+        bundle_dir = self.music_dir / track_id
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = _safe_filename(asset_type.lower())
+        ext = source_path.suffix.lower()
+        final_path = bundle_dir / f"{stem}{ext}"
+        while final_path.exists():
+            final_path = bundle_dir / f"{stem}_{uuid.uuid4().hex[:8]}{ext}"
+
+        shutil.move(str(source_path), str(final_path))
+        return final_path
+
+    def _schedule_indexer(self, asset_id: str, allow_identity_resolution: bool) -> None:
         try:
-            logger.info(f"Pipeline: A delegar Track ID {track_id} para o Indexer em background...")
-            # Chama a função que já existe no seu indexer.py atual
-            await index_file(track_id, file_path)
-            
-            # (O Indexer cuidará de fazer o UPDATE na base de dados 
-            # e disparar o WebSocket via state_broadcaster para a UI)
-        except Exception as e:
-            logger.error(f"Pipeline: O Indexer falhou no processamento de {track_id}: {e}")
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("Pipeline: no running loop; indexer scheduling skipped")
+            return
+
+        async def _run():
+            try:
+                from api.services.indexer import index_asset
+                await index_asset(asset_id, allow_identity_resolution=allow_identity_resolution)
+            except Exception as e:
+                logger.error(f"Pipeline: indexer failed for asset {asset_id}: {e}")
+
+        loop.create_task(_run())
+
+
+def _blank_to_none(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _normal_asset_type(value: str | None) -> str:
+    cleaned = (value or "ORIGINAL_MIX").strip().upper().replace("-", "_").replace(" ", "_")
+    return cleaned or "ORIGINAL_MIX"
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_")
+    return cleaned or "asset"

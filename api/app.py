@@ -4,6 +4,7 @@ FastAPI application for rolfsound-control.
 Mounts all API routes and serves the dashboard.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -44,25 +45,36 @@ async def lifespan(app: FastAPI):
     database.init(cfg.get("database_path", "./db/library.db"))
 
     music_dir = cfg.get("music_directory", "./music")
+    scanned_asset_ids = []
     conn = database.get_connection()
     try:
-        added = database.scan_and_reconcile(conn, music_dir)
-        if added:
-            logger.info(f"Library scan: added {added} previously untracked files")
+        scanned_asset_ids = database.scan_and_reconcile(conn, music_dir, return_asset_ids=True)
+        if scanned_asset_ids:
+            logger.info(f"Library scan: added {len(scanned_asset_ids)} previously untracked files")
     finally:
         conn.close()
+
+    if scanned_asset_ids:
+        from api.services.indexer import index_asset
+        for asset_id in scanned_asset_ids:
+            asyncio.create_task(index_asset(asset_id, allow_identity_resolution=True))
 
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
     manager = init_manager(database.get_connection)
 
-    import asyncio
     _loop = asyncio.get_event_loop()
 
-    def _on_download_complete(track_id: str, filepath: str, meta: dict):
-        from api.services.indexer import index_file
-        asyncio.run_coroutine_threadsafe(index_file(track_id, filepath), _loop)
-        logger.info(f"Indexer scheduled for {track_id}")
+    def _on_download_complete(source_ref: str, ingest_result: dict, meta: dict):
+        from api.services.indexer import index_asset
+        asyncio.run_coroutine_threadsafe(
+            index_asset(
+                ingest_result["asset_id"],
+                allow_identity_resolution=ingest_result.get("allow_identity_resolution", True),
+            ),
+            _loop,
+        )
+        logger.info(f"Indexer scheduled for YouTube source {source_ref}")
 
     manager.on_complete(_on_download_complete)
 
@@ -70,10 +82,20 @@ async def lifespan(app: FastAPI):
     # Runs from the download worker thread — bridge back via run_coroutine_threadsafe.
     def _on_download_progress(track_id: str, pct: int, status: str):
         ws_manager = get_ws_manager()
+        payload = {"track_id": track_id, "source_ref": track_id, "percent": pct, "status": status}
+        if status == "complete":
+            conn = database.get_connection()
+            try:
+                download = database.get_download(conn, track_id)
+                if download:
+                    payload["resolved_track_id"] = download.get("resolved_track_id")
+                    payload["asset_id"] = download.get("asset_id")
+            finally:
+                conn.close()
         asyncio.run_coroutine_threadsafe(
             ws_manager.broadcast({
                 "type":    "event.download_progress",
-                "payload": {"track_id": track_id, "percent": pct, "status": status},
+                "payload": payload,
                 "ts":      int(time.time() * 1000),
             }),
             _loop,
@@ -85,7 +107,7 @@ async def lifespan(app: FastAPI):
     event_source = get_event_stream_client()
     logger.info("Core event transport: SSE (push)")
 
-    _register_event_handlers(event_source)
+    _register_event_handlers(event_source, _loop)
 
     ws_manager = get_ws_manager()
     state_broadcaster.init(ws_manager, asyncio.get_event_loop(), event_source)
@@ -177,7 +199,7 @@ async def _save_queue_state() -> None:
         logger.error(f"Failed to save queue state: {e}")
 
 
-def _register_event_handlers(source):
+def _register_event_handlers(source, loop=None):
     from db import database as db
 
     # Track the last played track_id and when it started, for skip detection.
@@ -217,23 +239,34 @@ def _register_event_handlers(source):
         conn = db.get_connection()
         try:
             existing = db.get_track(conn, track_id)
-            if not existing and os.path.exists(filepath):
-                db.insert_track(conn, {
-                    "id":             track_id,
-                    "title":          os.path.basename(filepath),
-                    "artist":         "",
-                    "duration":       None,
-                    "thumbnail":      None,
-                    "file_path":      filepath,
-                    "date_added":     int(time.time()),
-                    "published_date": None,
-                    "streams":        0,
-                    "source":         "recording",
-                })
-                conn.commit()
-                logger.info(f"Auto-inserted recording into library: {track_id}")
+            already_registered = db.get_asset_by_path(conn, filepath)
+            if not existing and not already_registered and os.path.exists(filepath):
+                from api.services.indexer import index_asset
+                from api.services.pipeline import LibraryManager
+
+                manager = LibraryManager(
+                    music_dir=cfg.get("music_directory", "./music"),
+                    temp_dir=cfg.get("download_temp_directory", "./cache"),
+                )
+                ingest_result = manager.ingest_existing_file({
+                    "temp_path": filepath,
+                    "filename": os.path.basename(filepath),
+                    "source": "RECORDING",
+                    "source_ref": track_id,
+                    "asset_type": "RECORDING",
+                    "title": os.path.basename(filepath),
+                }, schedule_index=False)
+                if ingest_result and loop:
+                    asyncio.run_coroutine_threadsafe(
+                        index_asset(
+                            ingest_result["asset_id"],
+                            allow_identity_resolution=ingest_result.get("allow_identity_resolution", True),
+                        ),
+                        loop,
+                    )
+                    logger.info(f"Auto-ingested recording into library: {ingest_result['track_id']}")
         except Exception as e:
-            logger.error(f"on_track_finished insert error: {e}")
+            logger.error(f"on_track_finished ingest error: {e}")
         finally:
             conn.close()
 

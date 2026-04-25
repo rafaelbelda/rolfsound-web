@@ -273,6 +273,7 @@ class RolfsoundSearchResults extends HTMLElement {
 
         // Determine which IDs are in library, queued, or playing
         const libraryIds = new Set((this._library || []).map(t => t.id || t.track_id).filter(Boolean));
+        const librarySourceRefs = new Set((this._library || []).map(t => t.source_ref).filter(Boolean));
         const queuedIds  = new Set((window.playbackMitosisManager?.state.queue || []).map(t => t.id || t.track_id).filter(Boolean));
         const playingId  = window.playbackMitosisManager?.state.currentId || null;
 
@@ -286,7 +287,7 @@ class RolfsoundSearchResults extends HTMLElement {
             let state = 'idle';
             if (tid && tid === playingId)          state = 'playing';
             else if (tid && queuedIds.has(tid))    state = 'queued';
-            else if (source === 'youtube' && tid && libraryIds.has(tid)) state = 'in-library';
+            else if (source === 'youtube' && tid && (libraryIds.has(tid) || librarySourceRefs.has(tid))) state = 'in-library';
 
             row.setAttribute('state', state);
             row.track = track;

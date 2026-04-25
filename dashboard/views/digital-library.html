@@ -175,6 +175,20 @@
     transform: scale(1.12);
   }
 
+  @media (hover: none) {
+    .track-actions {
+      opacity: 1;
+      align-items: flex-end;
+      justify-content: flex-end;
+      padding: 8px;
+      background: linear-gradient(to bottom, transparent 35%, rgba(0, 0, 0, 0.62));
+    }
+
+    .track-action-btn {
+      transform: scale(1);
+    }
+  }
+
   .track-info,
   .playlist-info {
     flex: 1;
@@ -209,6 +223,42 @@
     -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .track-version-meta {
+    margin-top: 6px;
+    min-height: 18px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .track-version-chip {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border-subtle);
+    background: var(--color-surface-interactive);
+    color: var(--color-text-soft);
+    font-size: var(--fs-2xs, 8px);
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .track-version-chip.hifi {
+    color: var(--color-text-primary);
+    border-color: rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .track-version-chip.stream {
+    color: var(--color-text-secondary);
   }
 
   #digital-library-empty {
@@ -428,6 +478,358 @@
   }
   .folder-sort-select:hover { border-color: var(--color-border-focus); }
 
+  .version-panel-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 410;
+    background: rgba(0, 0, 0, 0);
+    opacity: 0;
+    transition: opacity 0.24s var(--ease-standard), background-color 0.24s var(--ease-standard);
+  }
+
+  .version-panel-backdrop.active {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.58);
+  }
+
+  .version-panel {
+    position: fixed;
+    z-index: 411;
+    top: 84px;
+    right: 20px;
+    width: min(430px, calc(100vw - 40px));
+    max-height: calc(100vh - 108px);
+    border-radius: var(--radius-dynamic-island-expanded);
+    border: 1px solid var(--color-border-strong);
+    background: rgba(9, 9, 9, 0.94);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow: var(--shadow-overlay);
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(28px) scale(0.98);
+    transform-origin: 100% 24px;
+    transition:
+      opacity 0.22s ease,
+      transform 0.42s var(--ease-spring);
+  }
+
+  .version-panel.active {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  .version-panel.closing {
+    opacity: 0;
+    transform: translateX(18px) scale(0.98);
+    transition:
+      opacity 0.18s ease,
+      transform 0.2s var(--ease-exit);
+  }
+
+  .version-panel-inner {
+    display: flex;
+    flex-direction: column;
+    max-height: inherit;
+  }
+
+  .version-panel-header {
+    display: grid;
+    grid-template-columns: 46px 1fr 30px;
+    gap: 10px;
+    align-items: center;
+    padding: 14px;
+    border-bottom: 1px solid var(--color-border-soft);
+  }
+
+  .version-panel-cover {
+    width: 46px;
+    height: 46px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--color-library-thumb-fallback-start), var(--color-library-thumb-fallback-end));
+    color: var(--color-led);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .version-panel-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .version-panel-title {
+    min-width: 0;
+  }
+
+  .version-panel-title strong {
+    display: block;
+    color: var(--color-text-primary);
+    font-size: var(--fs-xl, 13px);
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-panel-title span {
+    display: block;
+    margin-top: 3px;
+    color: var(--color-text-muted);
+    font-size: var(--fs-xs, 9px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-panel-close {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-round);
+    background: var(--color-surface-interactive);
+    color: var(--color-text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s var(--ease-spring), background-color 0.14s ease, color 0.14s ease;
+  }
+
+  .version-panel-close:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-interactive-hover);
+    transform: scale(1.08);
+  }
+
+  .version-fast-card {
+    margin: 12px 14px 0;
+    padding: 10px 11px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border-default);
+    background: rgba(255, 255, 255, 0.045);
+    display: grid;
+    gap: 3px;
+  }
+
+  .version-fast-label {
+    color: var(--color-text-disabled);
+    font-size: var(--fs-2xs, 8px);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .version-fast-value {
+    color: var(--color-text-primary);
+    font-size: var(--fs-sm, 10px);
+    font-weight: 700;
+  }
+
+  .version-fast-detail {
+    color: var(--color-text-muted);
+    font-size: var(--fs-xs, 9px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-list {
+    padding: 12px 10px 14px;
+    overflow: auto;
+    display: grid;
+    gap: 8px;
+  }
+
+  .version-list::-webkit-scrollbar { width: 4px; }
+  .version-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: var(--radius-full);
+  }
+
+  .version-row {
+    display: grid;
+    grid-template-columns: 30px 1fr auto;
+    align-items: center;
+    gap: 9px;
+    min-height: 58px;
+    padding: 8px;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-card);
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    animation: version-row-in 0.42s var(--ease-spring) forwards;
+    animation-delay: var(--row-delay, 0ms);
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease,
+      transform 0.18s var(--ease-spring);
+  }
+
+  .version-row:hover {
+    border-color: var(--color-border-stronger);
+    background: var(--color-surface-card-hover);
+    transform: translateY(-1px) scale(1.01);
+  }
+
+  .version-row.is-fast {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.075);
+  }
+
+  .version-play-btn,
+  .version-icon-btn,
+  .version-default-btn {
+    border: 1px solid var(--color-border-interactive);
+    background: var(--color-surface-interactive);
+    color: var(--color-text-control);
+    cursor: pointer;
+    transition:
+      transform 0.2s var(--ease-spring),
+      background-color 0.14s ease,
+      color 0.14s ease,
+      border-color 0.14s ease;
+  }
+
+  .version-play-btn,
+  .version-icon-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-round);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .version-play-btn:hover,
+  .version-icon-btn:hover,
+  .version-default-btn:hover:not(:disabled) {
+    color: var(--color-text-primary);
+    background: var(--color-surface-interactive-strong);
+    border-color: var(--color-border-stronger);
+    transform: scale(1.06);
+  }
+
+  .version-main {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .version-name-line {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .version-name {
+    color: var(--color-text-primary);
+    font-size: var(--fs-sm, 10px);
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-status {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border-subtle);
+    color: var(--color-text-muted);
+    font-size: 7px;
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .version-status.fast {
+    color: var(--color-text-primary);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+
+  .version-status.pending {
+    color: var(--color-accent-warning);
+    border-color: rgba(251, 191, 36, 0.28);
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .version-detail-line {
+    color: var(--color-text-muted);
+    font-size: var(--fs-xs, 9px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .version-default-btn {
+    height: 28px;
+    border-radius: var(--radius-full);
+    padding: 0 9px;
+    font-size: var(--fs-2xs, 8px);
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .version-default-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  @keyframes version-row-in {
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (max-width: 720px) {
+    .version-panel {
+      top: auto;
+      right: 10px;
+      left: 10px;
+      bottom: 10px;
+      width: auto;
+      max-height: min(72vh, 600px);
+      transform: translateY(34px) scale(0.98);
+      transform-origin: 50% 100%;
+    }
+
+    .version-panel.active {
+      transform: translateY(0) scale(1);
+    }
+
+    .version-panel.closing {
+      transform: translateY(24px) scale(0.98);
+    }
+
+    .version-row {
+      grid-template-columns: 30px 1fr;
+    }
+
+    .version-actions {
+      grid-column: 2;
+      justify-content: flex-start;
+    }
+  }
+
   #playlist-picker {
     position: fixed;
     z-index: 390;
@@ -569,6 +971,7 @@
   let activeFilter = 'all';
   let pickerTrackId = '';
   let folderState = null;
+  let versionPanelState = null;
 
   // 1. O Novo Motor de Thumbnails (MAM Compatible)
   function thumbSrc(thumbnail) {
@@ -626,6 +1029,139 @@
 
   function findTrackById(trackId) {
     return allTracks.find(track => getTrackId(track) === trackId) || null;
+  }
+
+  function normalizeAssetType(value) {
+    return String(value || 'ORIGINAL_MIX').trim().toUpperCase().replace(/[-\s]+/g, '_') || 'ORIGINAL_MIX';
+  }
+
+  function humanSource(source) {
+    const normalized = String(source || '').trim().toUpperCase();
+    const labels = {
+      YOUTUBE: 'YouTube',
+      UPLOAD: 'Upload',
+      SCAN: 'Local',
+      RECORDING: 'Recording',
+      UNKNOWN: 'Local'
+    };
+    return labels[normalized] || normalized.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function humanAssetType(assetType) {
+    const type = normalizeAssetType(assetType);
+    const labels = {
+      ORIGINAL_MIX: 'Original Mix',
+      ALT_VERSION: 'Alt Version',
+      RADIO_EDIT: 'Radio Edit',
+      INSTRUMENTAL: 'Instrumental',
+      RECORDING: 'Recording',
+      REMIX: 'Remix',
+      LIVE: 'Live',
+      DEMO: 'Demo',
+      FLAC: 'HiFi'
+    };
+    return labels[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function getFileFormat(asset) {
+    const explicit = String(asset?.file_format || '').trim().toUpperCase();
+    if (explicit) return explicit;
+    const path = String(asset?.file_path || '');
+    const match = path.match(/\.([a-z0-9]+)$/i);
+    return match ? match[1].toUpperCase() : '';
+  }
+
+  function formatSeconds(value) {
+    const seconds = Number(value || 0);
+    if (!Number.isFinite(seconds) || seconds <= 0) return '';
+    const total = Math.round(seconds);
+    const m = Math.floor(total / 60);
+    const s = String(total % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function getAssets(track) {
+    return Array.isArray(track?.assets) ? track.assets.filter(Boolean) : [];
+  }
+
+  function getFastAssetId(track) {
+    return track?.asset_id || track?.preferred_asset_id || '';
+  }
+
+  function getFastAsset(track) {
+    const assets = getAssets(track);
+    const fastId = getFastAssetId(track);
+    return assets.find(asset => asset.id === fastId)
+      || assets.find(asset => Number(asset.is_primary) === 1)
+      || assets[0]
+      || null;
+  }
+
+  function assetDisplay(asset) {
+    const type = normalizeAssetType(asset?.asset_type);
+    const source = String(asset?.source || '').trim().toUpperCase();
+    const format = getFileFormat(asset);
+    let label = humanAssetType(type);
+    let tone = 'standard';
+
+    if (format === 'FLAC' || type === 'FLAC') {
+      label = 'HiFi';
+      tone = 'hifi';
+    } else if (type === 'ORIGINAL_MIX' && source === 'YOUTUBE') {
+      label = 'Stream';
+      tone = 'stream';
+    } else if (type === 'ORIGINAL_MIX') {
+      label = 'Original';
+    } else if (type === 'ALT_VERSION') {
+      label = 'Alt';
+    } else if (type === 'RADIO_EDIT') {
+      label = 'Radio';
+    }
+
+    const detailParts = [
+      humanAssetType(type),
+      format,
+      humanSource(source),
+      formatSeconds(asset?.duration)
+    ].filter(Boolean);
+
+    return {
+      label,
+      tone,
+      detail: detailParts.join(' · '),
+      source: humanSource(source),
+      format
+    };
+  }
+
+  function versionSummary(track) {
+    const assets = getAssets(track);
+    if (!assets.length) return '';
+
+    const fast = getFastAsset(track);
+    const ordered = fast
+      ? [fast, ...assets.filter(asset => asset.id !== fast.id)]
+      : assets;
+    const labels = [];
+    ordered.forEach((asset) => {
+      const label = assetDisplay(asset).label;
+      if (label && !labels.includes(label)) labels.push(label);
+    });
+
+    if (!labels.length) return '';
+    if (assets.length === 1) return labels[0];
+
+    const visible = labels.slice(0, 2);
+    const remaining = Math.max(0, assets.length - visible.length);
+    return remaining > 0 ? `${visible.join(' · ')} +${remaining}` : visible.join(' · ');
+  }
+
+  function updateTrackCache(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) return;
+    const idx = allTracks.findIndex(t => getTrackId(t) === trackId);
+    if (idx >= 0) allTracks[idx] = track;
+    else allTracks.push(track);
   }
 
   async function loadData() {
@@ -720,6 +1256,9 @@
       const title = escapeHtml(track.title || 'Unknown');
       const artist = escapeHtml(track.artist || 'Unknown Artist');
       const imgSrc = thumbSrc(track.thumbnail);
+      const summary = versionSummary(track);
+      const fastAsset = getFastAsset(track);
+      const versionTone = fastAsset ? assetDisplay(fastAsset).tone : 'standard';
 
       return `
         <div class="track-card" data-track-id="${escapeHtml(trackId)}">
@@ -735,11 +1274,22 @@
                   <path d="M8 5v14l11-7z"/>
                 </svg>
               </button>
+              <button class="track-action-btn version-btn" title="Versions" aria-label="Versions">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                  <path d="M12 3 3 8l9 5 9-5-9-5Z"/>
+                  <path d="m3 13 9 5 9-5"/>
+                </svg>
+              </button>
             </div>
           </div>
           <div class="track-info">
             <div class="track-title">${title}</div>
             <div class="track-artist">${artist}</div>
+            ${summary ? `
+              <div class="track-version-meta">
+                <span class="track-version-chip ${escapeHtml(versionTone)}">${escapeHtml(summary)}</span>
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -931,6 +1481,236 @@
     } catch (e) {
       console.error('Queue error:', e);
       notify('Queue failed');
+    }
+  }
+
+  function sortVersionAssets(track) {
+    const fastId = getFastAssetId(track);
+    const priority = {
+      FLAC: 0,
+      ORIGINAL_MIX: 1,
+      ALT_VERSION: 2,
+      REMIX: 3,
+      LIVE: 4,
+      RADIO_EDIT: 5,
+      DEMO: 6,
+      INSTRUMENTAL: 7,
+      RECORDING: 8
+    };
+
+    return [...getAssets(track)].sort((a, b) => {
+      if (a.id === fastId) return -1;
+      if (b.id === fastId) return 1;
+      const ap = Number(a.is_primary) === 1 ? -1 : 0;
+      const bp = Number(b.is_primary) === 1 ? -1 : 0;
+      if (ap !== bp) return ap - bp;
+      const at = normalizeAssetType(a.asset_type);
+      const bt = normalizeAssetType(b.asset_type);
+      const af = getFileFormat(a) === 'FLAC' ? 'FLAC' : at;
+      const bf = getFileFormat(b) === 'FLAC' ? 'FLAC' : bt;
+      const ar = priority[af] ?? 20;
+      const br = priority[bf] ?? 20;
+      if (ar !== br) return ar - br;
+      return Number(a.date_added || 0) - Number(b.date_added || 0);
+    });
+  }
+
+  async function fetchFullTrack(track) {
+    const trackId = getTrackId(track);
+    if (!trackId) return track;
+    try {
+      const response = await fetch(`/api/library/${encodeURIComponent(trackId)}`);
+      if (!response.ok) throw new Error(`Track fetch failed (${response.status})`);
+      const fullTrack = await response.json();
+      updateTrackCache(fullTrack);
+      return fullTrack;
+    } catch (error) {
+      console.error('Track details error:', error);
+      return track;
+    }
+  }
+
+  function renderVersionRows(track) {
+    const assets = sortVersionAssets(track);
+    const fastId = getFastAssetId(track);
+
+    if (!assets.length) {
+      return '<div style="padding:18px;text-align:center;color:var(--color-text-disabled);font-size:var(--fs-sm)">No versions registered</div>';
+    }
+
+    return assets.map((asset, index) => {
+      const display = assetDisplay(asset);
+      const isFast = asset.id === fastId;
+      const isPrimary = Number(asset.is_primary) === 1;
+      const status = [];
+      if (isFast) status.push('<span class="version-status fast">Fast Play</span>');
+      else if (isPrimary) status.push('<span class="version-status">Primary</span>');
+      if (asset.analysis_status && !['identified', 'complete'].includes(String(asset.analysis_status).toLowerCase())) {
+        status.push(`<span class="version-status pending">${escapeHtml(String(asset.analysis_status))}</span>`);
+      }
+      const defaultText = isFast ? 'Fast' : 'Set';
+      const aria = isFast ? 'Current fast play version' : 'Use for fast play';
+
+      return `
+        <div class="version-row ${isFast ? 'is-fast' : ''}" data-asset-id="${escapeHtml(asset.id || '')}" style="--row-delay:${index * 42}ms">
+          <button class="version-play-btn hover-target" type="button" data-action="play-version" title="Play version" aria-label="Play ${escapeHtml(display.label)}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <div class="version-main">
+            <div class="version-name-line">
+              <span class="version-name">${escapeHtml(display.label)}</span>
+              ${status.join('')}
+            </div>
+            <div class="version-detail-line" title="${escapeHtml(asset.file_path || '')}">
+              ${escapeHtml(display.detail || 'Asset')}
+            </div>
+          </div>
+          <div class="version-actions">
+            <button class="version-icon-btn hover-target" type="button" data-action="queue-version" title="Add version to queue" aria-label="Add version to queue">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4 6h11v2H4V6Zm0 5h11v2H4v-2Zm0 5h7v2H4v-2Zm14-5V8h2v3h3v2h-3v3h-2v-3h-3v-2h3Z"/>
+              </svg>
+            </button>
+            <button class="version-default-btn hover-target" type="button" data-action="set-fast-version" ${isFast ? 'disabled' : ''} title="${aria}">
+              ${defaultText}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderVersionPanelContent(panel, track) {
+    const imgSrc = thumbSrc(track.thumbnail);
+    const fastAsset = getFastAsset(track);
+    const fastDisplay = fastAsset ? assetDisplay(fastAsset) : null;
+    const assets = getAssets(track);
+
+    panel.innerHTML = `
+      <div class="version-panel-inner">
+        <div class="version-panel-header">
+          <div class="version-panel-cover">
+            ${imgSrc ? `<img src="${escapeHtml(imgSrc)}" alt="" loading="lazy" onerror="this.outerHTML='Audio'" />` : 'Audio'}
+          </div>
+          <div class="version-panel-title">
+            <strong>${escapeHtml(track.title || 'Unknown')}</strong>
+            <span>${escapeHtml(track.artist || 'Unknown Artist')} · ${assets.length} ${assets.length === 1 ? 'version' : 'versions'}</span>
+          </div>
+          <button class="version-panel-close hover-target" type="button" data-action="close-version-panel" aria-label="Close versions">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="version-fast-card">
+          <div class="version-fast-label">Fast Play</div>
+          <div class="version-fast-value">${escapeHtml(fastDisplay?.label || 'Not set')}</div>
+          <div class="version-fast-detail">${escapeHtml(fastDisplay?.detail || 'No asset available')}</div>
+        </div>
+        <div class="version-list">
+          ${renderVersionRows(track)}
+        </div>
+      </div>
+    `;
+  }
+
+  function closeVersionPanel() {
+    if (!versionPanelState) return;
+
+    const { backdrop, panel } = versionPanelState;
+    panel.classList.add('closing');
+    panel.classList.remove('active');
+    backdrop.classList.remove('active');
+
+    window.setTimeout(() => {
+      panel.remove();
+      backdrop.remove();
+    }, 220);
+
+    versionPanelState = null;
+  }
+
+  async function openVersionPanel(track, anchorEl = null) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      notify('Track unavailable');
+      return;
+    }
+
+    closeVersionPanel();
+    const fullTrack = await fetchFullTrack(track);
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'version-panel-backdrop';
+    document.body.appendChild(backdrop);
+
+    const panel = document.createElement('div');
+    panel.className = 'version-panel';
+    panel.dataset.trackId = trackId;
+
+    renderVersionPanelContent(panel, fullTrack);
+    document.body.appendChild(panel);
+    versionPanelState = { backdrop, panel, trackId };
+
+    requestAnimationFrame(() => {
+      backdrop.classList.add('active');
+      panel.classList.add('active');
+    });
+
+    backdrop.addEventListener('click', closeVersionPanel);
+    panel.addEventListener('click', onVersionPanelClick);
+  }
+
+  async function setFastPlayVersion(trackId, assetId, panel) {
+    try {
+      const response = await fetch(`/api/library/${encodeURIComponent(trackId)}/preferred-asset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset_id: assetId })
+      });
+      if (!response.ok) throw new Error(`Set fast play failed (${response.status})`);
+      const data = await response.json();
+      const updatedTrack = data.track || await fetchFullTrack({ id: trackId });
+      updateTrackCache(updatedTrack);
+      renderVersionPanelContent(panel, updatedTrack);
+      renderLibrary(getCurrentSearchQuery());
+      notify('Fast Play updated');
+    } catch (error) {
+      console.error('Set fast play error:', error);
+      notify('Fast Play update failed');
+    }
+  }
+
+  async function onVersionPanelClick(event) {
+    const actionEl = event.target.closest('[data-action]');
+    if (!actionEl || !versionPanelState) return;
+
+    const action = actionEl.dataset.action;
+    if (action === 'close-version-panel') {
+      closeVersionPanel();
+      return;
+    }
+
+    const row = actionEl.closest('.version-row');
+    const assetId = row?.dataset.assetId || '';
+    const trackId = versionPanelState.trackId;
+    const track = findTrackById(trackId);
+    if (!track || !assetId) return;
+
+    if (action === 'play-version') {
+      await playTrack(track, assetId);
+      return;
+    }
+
+    if (action === 'queue-version') {
+      await queueTrack(track, assetId);
+      return;
+    }
+
+    if (action === 'set-fast-version') {
+      await setFastPlayVersion(trackId, assetId, versionPanelState.panel);
     }
   }
 
@@ -1178,6 +1958,7 @@
 
     const playIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
     const queueIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 9v2h14V9H7z"/></svg>`;
+    const versionIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>`;
     const deleteIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
 
     items.push(
@@ -1192,6 +1973,12 @@
         label: 'Add to Queue',
         icon: queueIcon,
         action: () => queueTrack(track)
+      },
+      {
+        id: `versions-${trackId}`,
+        label: 'Versions',
+        icon: versionIcon,
+        action: () => openVersionPanel(track, card)
       },
       { type: 'separator' },
       {
@@ -1230,6 +2017,20 @@
         return;
       }
       playTrack(track);
+      return;
+    }
+
+    const versionBtn = event.target.closest('.version-btn');
+    if (versionBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      const card = versionBtn.closest('.track-card');
+      const track = findTrackById(card?.dataset.trackId || '');
+      if (!track) {
+        notify('Track unavailable');
+        return;
+      }
+      openVersionPanel(track, card);
       return;
     }
 
@@ -1279,6 +2080,7 @@
     } else {
       closeFolder();
       closePlaylistPicker();
+      closeVersionPanel();
     }
   });
 
@@ -1352,6 +2154,7 @@
     if (e.key === 'Escape') {
       closeFolder();
       closePlaylistPicker();
+      closeVersionPanel();
     }
   });
 

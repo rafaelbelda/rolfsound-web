@@ -88,6 +88,7 @@ async def search(request: Request, q: str = Query(..., min_length=1)):
             conn.close()
 
         lib_ids = {t["id"] for t in library_results}
+        lib_source_refs = {t.get("source_ref") for t in library_results if t.get("source_ref")}
         yield _sse("library", {"tracks": library_results})
 
         # ── 3. Check disconnection before expensive work ──────────────
@@ -101,7 +102,7 @@ async def search(request: Request, q: str = Query(..., min_length=1)):
         if cached is not None:
             logger.debug(f"Search cache hit: {q_clean!r}")
             for track in cached:
-                if track["id"] not in lib_ids:
+                if track["id"] not in lib_ids and track["id"] not in lib_source_refs:
                     yield _sse("result", track)
             yield _sse("done", {})
             return
@@ -112,7 +113,7 @@ async def search(request: Request, q: str = Query(..., min_length=1)):
             try:
                 results = await asyncio.shield(_inflight[cache_key])
                 for track in results:
-                    if track["id"] not in lib_ids:
+                    if track["id"] not in lib_ids and track["id"] not in lib_source_refs:
                         yield _sse("result", track)
             except asyncio.CancelledError:
                 pass
@@ -135,7 +136,7 @@ async def search(request: Request, q: str = Query(..., min_length=1)):
                 yield _sse("error", {"message": "No results found"})
             else:
                 for track in results:
-                    if track["id"] not in lib_ids:
+                    if track["id"] not in lib_ids and track["id"] not in lib_source_refs:
                         yield _sse("result", track)
 
         except Exception as e:

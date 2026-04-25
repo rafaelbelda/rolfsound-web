@@ -1,7 +1,7 @@
 # api/routes/upload.py
 import logging
 from typing import List
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from api.services.pipeline import LibraryManager, UploadIngestor
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,11 @@ router = APIRouter(tags=["upload"])
 library_manager = LibraryManager(music_dir="./music", temp_dir="./cache/.tmp")
 
 @router.post("/upload")
-async def upload_music_file(files: List[UploadFile] = File(...)):
+async def upload_music_file(
+    files: List[UploadFile] = File(...),
+    target_track_id: str | None = Form(None),
+    asset_type: str = Form("ORIGINAL_MIX"),
+):
     """Recebe um ou mais ficheiros de áudio via upload e processa-os na arquitetura MAM"""
     
     allowed_extensions = [".mp3", ".wav", ".flac", ".m4a", ".aiff"]
@@ -36,7 +40,12 @@ async def upload_music_file(files: List[UploadFile] = File(...)):
             # Envia para o Pipeline orquestrar
             track_id = await library_manager.process_new_track(
                 ingestor=ingestor, 
-                source_data={"content": file_content, "filename": file.filename}
+                source_data={
+                    "content": file_content,
+                    "filename": file.filename,
+                    "target_track_id": target_track_id,
+                    "asset_type": asset_type,
+                }
             )
             
             if track_id:

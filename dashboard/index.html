@@ -135,14 +135,15 @@
     }
 
     // Receive download progress via WebSocket — no polling needed.
-    window.rolfsoundChannel.on('event.download_progress', async ({ track_id, percent, status }) => {
+    window.rolfsoundChannel.on('event.download_progress', async ({ track_id, resolved_track_id, asset_id, percent, status }) => {
         if (!_pendingAutoplay.has(track_id)) return;
         if (status === 'complete') {
             _pendingAutoplay.delete(track_id);
+            const playTrackId = resolved_track_id || track_id;
             const pr = await fetch('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ track_id })
+                body: JSON.stringify({ track_id: playTrackId, asset_id })
             });
             if (pr.ok) island?.showNotification?.({ text: 'Now playing', duration: 2200 });
         } else if (status === 'failed') {
@@ -189,10 +190,11 @@
 
                     if (data.status === 'exists') {
                         // Already in library — play right now
+                        const playTrackId = data.track?.id || trackId;
                         const pr = await fetch('/api/play', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ track_id: trackId })
+                            body: JSON.stringify({ track_id: playTrackId, asset_id: data.asset?.id })
                         });
                         if (pr.ok) notify('Playing now');
                         else notify('Play failed');

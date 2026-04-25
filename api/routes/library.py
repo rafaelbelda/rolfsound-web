@@ -1,10 +1,12 @@
 # api/routes/library.py
 
+import asyncio
 import os
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
-from api.services.indexer import index_file
+from pydantic import BaseModel
+from api.services.indexer import index_asset
 
 from db import database
 
@@ -20,6 +22,10 @@ _reindex_state = {
 }
 
 
+class PreferredAssetRequest(BaseModel):
+    asset_id: str | None = None
+
+
 @router.post("/library/scan")
 async def scan_library():
     """
@@ -30,8 +36,10 @@ async def scan_library():
     music_dir = cfg_get("music_directory", "./music")
     conn = database.get_connection()
     try:
-        added = database.scan_and_reconcile(conn, music_dir)
-        return {"ok": True, "added": added}
+        asset_ids = database.scan_and_reconcile(conn, music_dir, return_asset_ids=True)
+        for asset_id in asset_ids:
+            asyncio.create_task(index_asset(asset_id, allow_identity_resolution=True))
+        return {"ok": True, "added": len(asset_ids), "asset_ids": asset_ids}
     finally:
         conn.close()
 
@@ -79,6 +87,21 @@ async def get_track(track_id: str):
         conn.close()
 
 
+@router.post("/library/{track_id}/preferred-asset")
+async def set_preferred_asset(track_id: str, req: PreferredAssetRequest):
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        if not database.set_preferred_asset(conn, track_id, req.asset_id):
+            raise HTTPException(status_code=400, detail="Asset does not belong to this track")
+        conn.commit()
+        return {"ok": True, "track": database.get_track(conn, track_id)}
+    finally:
+        conn.close()
+
+
 @router.post("/library/{track_id}/identify")
 async def identify_track_route(track_id: str):
     """Identifica uma faixa específica via AcoustID + Discogs."""
@@ -87,13 +110,14 @@ async def identify_track_route(track_id: str):
         track = database.get_track(conn, track_id)
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
+        asset_id = track.get("asset_id")
         file_path = track.get("file_path")
-        if not file_path or not os.path.exists(file_path):
+        if not asset_id or not file_path or not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="File not found on disk")
     finally:
         conn.close()
 
-    meta = await index_file(track_id, file_path)
+    meta = await index_asset(asset_id, allow_identity_resolution=False)
     return {"ok": True, "track_id": track_id, **meta}
 
 
@@ -102,17 +126,18 @@ async def identify_all_tracks():
     """Processa todas as faixas com status 'unidentified'."""
     conn = database.get_connection()
     try:
-        pending = database.list_unidentified_tracks(conn)
+        pending = database.list_pending_assets(conn)
     finally:
         conn.close()
 
     results = {"identified": 0, "failed": 0, "skipped": 0}
-    for track in pending:
-        file_path = track.get("file_path")
-        if not file_path or not os.path.exists(file_path):
+    for asset in pending:
+        asset_id = asset.get("id")
+        file_path = asset.get("file_path")
+        if not asset_id or not file_path or not os.path.exists(file_path):
             results["skipped"] += 1
             continue
-        meta = await index_file(track["id"], file_path)
+        meta = await index_asset(asset_id, allow_identity_resolution=True)
         if meta["status"] == "identified":
             results["identified"] += 1
         else:
@@ -121,15 +146,16 @@ async def identify_all_tracks():
     return {"ok": True, "total": len(pending), **results}
 
 
-async def _run_reindex(tracks: list):
+async def _run_reindex(assets: list):
     global _reindex_state
-    for track in tracks:
-        file_path = track.get("file_path")
-        if not file_path or not os.path.exists(file_path):
+    for asset in assets:
+        asset_id = asset.get("id")
+        file_path = asset.get("file_path")
+        if not asset_id or not file_path or not os.path.exists(file_path):
             _reindex_state["skipped"] += 1
             _reindex_state["done"] += 1
             continue
-        meta = await index_file(track["id"], file_path)
+        meta = await index_asset(asset_id, allow_identity_resolution=False)
         if meta["status"] == "identified":
             _reindex_state["identified"] += 1
         else:
@@ -147,16 +173,16 @@ async def reindex_all_tracks(background_tasks: BackgroundTasks):
 
     conn = database.get_connection()
     try:
-        tracks = database.list_tracks(conn)
+        assets = database.list_assets(conn)
     finally:
         conn.close()
 
     _reindex_state.update({
-        "running": True, "total": len(tracks),
+        "running": True, "total": len(assets),
         "done": 0, "identified": 0, "failed": 0, "skipped": 0,
     })
-    background_tasks.add_task(_run_reindex, tracks)
-    return {"ok": True, "total": len(tracks)}
+    background_tasks.add_task(_run_reindex, assets)
+    return {"ok": True, "total": len(assets)}
 
 
 @router.get("/library/reindex-status")
@@ -183,10 +209,10 @@ async def delete_track(track_id: str):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
-        # Delete audio file
-        filepath = track.get("file_path")
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
+        for asset in track.get("assets", []):
+            filepath = asset.get("file_path")
+            if filepath and os.path.exists(filepath):
+                os.remove(filepath)
 
         # Delete local thumbnail if it's a local path (not a URL)
         thumb = track.get("thumbnail", "")

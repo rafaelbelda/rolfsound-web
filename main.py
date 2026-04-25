@@ -18,8 +18,8 @@ def setup_logging() -> None:
     if root.handlers:
         return
     
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    for logger_name in ("httpcore", "httpx", "python_multipart", "multipart", "multipart.multipart"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
     
     root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(

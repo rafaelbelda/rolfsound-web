@@ -1,7 +1,6 @@
-# downloads/manager.py
 """
-Download manager: runs downloads in a background thread,
-updates database progress, and notifies on completion.
+Download manager: runs YouTube downloads in a background thread, then hands
+the resulting file to the universal MAM pipeline.
 """
 
 import logging
@@ -10,9 +9,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from youtube import ytdlp
+from api.services.pipeline import LibraryManager
 from utils.config import get
 from utils.path_utils import sanitize_path
+from youtube import ytdlp
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,9 @@ class DownloadManager:
         self._on_progress_callbacks: list[Callable] = []
 
     def on_complete(self, callback: Callable) -> None:
-        """Register a callback to be called when a download completes."""
         self._on_complete_callbacks.append(callback)
 
     def on_progress(self, callback: Callable) -> None:
-        """Register a callback called on every progress update: cb(track_id, pct, status)."""
         self._on_progress_callbacks.append(callback)
 
     def start(self) -> None:
@@ -49,43 +47,62 @@ class DownloadManager:
     def stop(self) -> None:
         self._stop_event.set()
 
-    def enqueue(self, track_id: str, title: str = "", thumbnail: str = "") -> bool:
-        """Add a track to the download queue. Returns False if already queued/downloading."""
+    def enqueue(
+        self,
+        source_ref: str,
+        title: str = "",
+        thumbnail: str = "",
+        target_track_id: str | None = None,
+        asset_type: str = "ORIGINAL_MIX",
+    ) -> bool:
         from db import database
 
-        with self._db_factory() as conn_ctx:
-            conn = conn_ctx
-            existing = database.get_download(conn, track_id)
-            if existing and existing["status"] in ("queued", "downloading", "complete"):
-                logger.info(f"Track {track_id} already in download queue or library")
+        conn = self._db_factory()
+        try:
+            existing = database.get_download(conn, source_ref)
+            if existing and existing["status"] in ("queued", "downloading", "processing", "complete"):
+                logger.info(f"YouTube source {source_ref} already queued or complete")
                 return False
 
             database.upsert_download(
-                conn, track_id, "queued", 0, int(time.time()), title, thumbnail
+                conn,
+                source_ref,
+                "queued",
+                0,
+                int(time.time()),
+                title,
+                thumbnail,
             )
+            conn.commit()
+        finally:
+            conn.close()
 
         with self._lock:
-            if any(j["track_id"] == track_id for j in self._queue):
+            if any(j["source_ref"] == source_ref for j in self._queue):
                 return False
             self._queue.append({
-                "track_id": track_id,
+                "source_ref": source_ref,
                 "title": title,
                 "thumbnail": thumbnail,
+                "target_track_id": target_track_id,
+                "asset_type": asset_type or "ORIGINAL_MIX",
             })
 
-        logger.info(f"Queued download: {track_id} - {title}")
+        logger.info(f"Queued YouTube download: {source_ref} - {title}")
         return True
 
-    def get_status(self, track_id: str) -> dict | None:
+    def get_status(self, source_ref: str) -> dict | None:
         from db import database
+
         conn = database.get_connection()
         try:
-            return database.get_download(conn, track_id)
+            return database.get_download(conn, source_ref)
         finally:
             conn.close()
 
     def list_all(self) -> list[dict]:
         from db import database
+
         conn = database.get_connection()
         try:
             return database.list_downloads(conn)
@@ -107,94 +124,110 @@ class DownloadManager:
     def _run_download(self, job: dict) -> None:
         from db import database
 
-        track_id  = job["track_id"]
-        title     = job.get("title", "")
+        source_ref = job["source_ref"]
+        title = job.get("title", "")
         thumbnail = job.get("thumbnail", "")
+        target_track_id = job.get("target_track_id")
+        asset_type = job.get("asset_type") or "ORIGINAL_MIX"
 
         self._current = job
-        logger.info(f"Starting download: {track_id}")
+        logger.info(f"Starting YouTube download: {source_ref}")
 
-        output_dir   = get("music_directory", "./music")
-        temp_dir     = get("download_temp_directory", "./cache")
+        music_dir = get("music_directory", "./music")
+        temp_dir = get("download_temp_directory", "./cache")
         audio_format = get("download_audio_format", "opus")
+        download_staging = str(Path(temp_dir).resolve())
 
         def update_progress(pct: int, status: str):
             conn = database.get_connection()
             try:
-                database.update_download_progress(conn, track_id, pct, status)
+                database.update_download_progress(conn, source_ref, pct, status)
                 conn.commit()
             finally:
                 conn.close()
             for cb in self._on_progress_callbacks:
                 try:
-                    cb(track_id, pct, status)
+                    cb(source_ref, pct, status)
                 except Exception as e:
                     logger.error(f"Download progress callback error: {e}")
 
-        update_progress(0, "downloading")
+        def ytdlp_progress(pct: int, status: str):
+            if status == "complete":
+                update_progress(95, "processing")
+            else:
+                update_progress(pct, status)
 
+        update_progress(0, "downloading")
         filepath = ytdlp.download(
-            track_id=track_id,
-            output_dir=output_dir,
-            temp_dir=temp_dir,
+            track_id=source_ref,
+            output_dir=download_staging,
+            temp_dir=download_staging,
             audio_format=audio_format,
-            progress_callback=update_progress,
+            progress_callback=ytdlp_progress,
         )
 
         conn = database.get_connection()
         try:
-            if filepath:
-                # FIX: sanitize the path before it ever touches the DB.
-                # ytdlp.download() returns an absolute path via Path.resolve(),
-                # but on Windows the backslashes in that string can be
-                # misinterpreted as escape sequences (\r, \U, \D, \G …) at
-                # any subsequent string boundary (json, logging, SQLite).
-                # Storing forward slashes eliminates the corruption at source.
-                filepath = sanitize_path(filepath)
-
-                meta         = ytdlp.get_metadata(track_id) or {}
-                remote_thumb = meta.get("thumbnail") or thumbnail
-
-                local_thumb = ytdlp.download_thumbnail(
-                    track_id=track_id,
-                    thumbnails_dir=output_dir,
-                    thumbnail_url=remote_thumb,
-                )
-                # Sanitize thumbnail path for the same reason.
-                if local_thumb:
-                    local_thumb = sanitize_path(local_thumb)
-
-                database.insert_track(conn, {
-                    "id":             track_id,
-                    "title":          meta.get("title") or title,
-                    "artist":         meta.get("artist") or meta.get("channel") or "",
-                    "duration":       meta.get("duration"),
-                    "thumbnail":      local_thumb or remote_thumb,
-                    "file_path":      filepath,
-                    "date_added":     int(time.time()),
-                    "published_date": meta.get("published_date"),
-                    "streams":        0,
-                    "source":         "youtube",
-                })
-                database.update_download_progress(conn, track_id, 100, "complete")
+            if not filepath:
+                database.update_download_progress(conn, source_ref, 0, "failed")
                 conn.commit()
-                logger.info(f"Download complete: {track_id} -> {filepath}")
+                logger.error(f"Download failed: {source_ref}")
+                return
 
-                for cb in self._on_complete_callbacks:
-                    try:
-                        cb(track_id, filepath, meta)
-                    except Exception as e:
-                        logger.error(f"Download complete callback error: {e}")
-            else:
-                database.update_download_progress(conn, track_id, 0, "failed")
+            filepath = sanitize_path(filepath)
+            meta = ytdlp.get_metadata(source_ref) or {}
+            remote_thumb = meta.get("thumbnail") or thumbnail
+            manager = LibraryManager(music_dir=music_dir, temp_dir=temp_dir)
+            ingest_result = manager.ingest_existing_file({
+                "temp_path": filepath,
+                "filename": meta.get("title") or title or source_ref,
+                "source": "YOUTUBE",
+                "source_ref": source_ref,
+                "target_track_id": target_track_id,
+                "asset_type": asset_type,
+                "title": meta.get("title") or title,
+                "artist": meta.get("artist") or meta.get("channel") or "",
+                "thumbnail": remote_thumb,
+                "duration": meta.get("duration"),
+                "published_date": meta.get("published_date"),
+            }, schedule_index=False)
+
+            if not ingest_result:
+                database.update_download_progress(conn, source_ref, 0, "failed")
                 conn.commit()
-                logger.error(f"Download failed: {track_id}")
+                logger.error(f"Pipeline ingest failed for YouTube source {source_ref}")
+                return
+
+            database.update_download_resolution(
+                conn,
+                source_ref,
+                ingest_result["track_id"],
+                ingest_result["asset_id"],
+            )
+            database.update_download_progress(conn, source_ref, 100, "complete")
+            conn.commit()
+            for cb in self._on_progress_callbacks:
+                try:
+                    cb(source_ref, 100, "complete")
+                except Exception as e:
+                    logger.error(f"Download progress callback error: {e}")
+            logger.info(
+                "Download complete: %s -> track %s asset %s",
+                source_ref,
+                ingest_result["track_id"],
+                ingest_result["asset_id"],
+            )
+
+            for cb in self._on_complete_callbacks:
+                try:
+                    cb(source_ref, ingest_result, meta)
+                except Exception as e:
+                    logger.error(f"Download complete callback error: {e}")
         finally:
             conn.close()
             self._current = None
 
 
-# Module-level singleton
 _manager: DownloadManager | None = None
 
 

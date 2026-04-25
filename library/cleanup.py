@@ -31,13 +31,14 @@ def run_cleanup(conn) -> int:
     deleted = 0
 
     for track in candidates:
-        filepath = track.get("file_path")
-        if filepath and os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-                logger.info(f"Cleanup: deleted file {filepath}")
-            except OSError as e:
-                logger.warning(f"Cleanup: could not delete {filepath}: {e}")
+        for asset in track.get("assets", []):
+            filepath = asset.get("file_path")
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    logger.info(f"Cleanup: deleted file {filepath}")
+                except OSError as e:
+                    logger.warning(f"Cleanup: could not delete {filepath}: {e}")
 
         database.delete_track(conn, track["id"])
         deleted += 1

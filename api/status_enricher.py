@@ -48,7 +48,7 @@ def enrich_status(raw: dict) -> dict:
                 try:
                     # --- CORREÇÃO APLICADA AQUI: JOIN e adição do BPM no SELECT ---
                     row = conn.execute("""
-                        SELECT t.id, t.title, t.artist, t.thumbnail, t.bpm 
+                        SELECT t.id, t.title, t.artist, t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
                         FROM tracks t
                         JOIN assets a ON t.id = a.track_id
                         WHERE a.file_path = ?

@@ -87,10 +87,10 @@ async def add_to_queue(req: AddRequest):
             # 2. Puxa o Ficheiro Físico (A versão da música)
             if req.asset_id:
                 # O utilizador exigiu uma versão específica (ex: FLAC)
-                row = conn.execute("SELECT file_path FROM assets WHERE id = ?", (req.asset_id,)).fetchone()
+                row = database.get_asset(conn, req.asset_id)
             else:
                 # Fallback: Toca a versão padrão / primeira que encontrar
-                row = conn.execute("SELECT file_path FROM assets WHERE track_id = ?", (req.track_id,)).fetchone()
+                row = database.get_fast_play_asset(conn, req.track_id)
             
             if row:
                 req.filepath = row["file_path"]
