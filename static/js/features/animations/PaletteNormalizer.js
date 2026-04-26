@@ -1,20 +1,24 @@
 // static/js/PaletteNormalizer.js
-// Domestica cores brutas extraídas da capa — sem isso o UI vira neon ou fica ilegível.
-//
-// Estratégia:
-//   - Converte RGB ↔ HSL para manipulação perceptual
-//   - Garante que base seja escura e com baixa saturação (fundo sóbrio)
-//   - Garante que accent seja vibrante mas não saturado demais
-//   - Garante que contrast seja distinto de base em hue e luminância
-//   - Se a paleta for muito monocromática, deriva as cores em falta
+// Normalizes extracted cover colors for the reactive UI while preserving
+// the actual visual vocabulary of the artwork.
 
 export default class PaletteNormalizer {
   /**
-   * Recebe paleta bruta e devolve paleta normalizada para uso em CSS vars.
-   * @param {{ base: string, accent: string, contrast: string }} raw  — formato '255 255 255'
-   * @returns {{ base: string, accent: string, contrast: string }}
+   * Receives a raw extracted palette and returns CSS-ready channel strings.
+   * @param {{ base: string, accent: string, contrast: string, mode?: string, confidence?: number }} raw
+   * @returns {{ base: string, accent: string, contrast: string, mode?: string, confidence?: number }}
    */
   static normalize(raw) {
+    if (raw?.mode === 'near-black') {
+      return {
+        base: '3 3 3',
+        accent: '72 72 72',
+        contrast: '22 22 22',
+        mode: 'near-black',
+        confidence: raw.confidence
+      };
+    }
+
     const base     = PaletteNormalizer._parseChannelStr(raw.base);
     const accent   = PaletteNormalizer._parseChannelStr(raw.accent);
     const contrast = PaletteNormalizer._parseChannelStr(raw.contrast);
@@ -22,50 +26,172 @@ export default class PaletteNormalizer {
     const hslBase     = PaletteNormalizer._toHSL(base);
     const hslAccent   = PaletteNormalizer._toHSL(accent);
     const hslContrast = PaletteNormalizer._toHSL(contrast);
+    const rawHsl = [hslBase, hslAccent, hslContrast];
 
-    // ── base: domina o fundo — deve ser escuro e dessaturado ───────────────
+    if (PaletteNormalizer._isMonochrome(rawHsl)) {
+      return PaletteNormalizer._normalizeMonochrome(rawHsl);
+    }
+
+    if (PaletteNormalizer._isLimitedPalette(rawHsl)) {
+      return PaletteNormalizer._normalizeLimitedPalette({ hslBase, hslAccent, hslContrast });
+    }
+
     const normalBase = PaletteNormalizer._clampHSL(hslBase, {
-      sMin: 0.05, sMax: 0.55,   // não completamente cinza, não vibrante
-      lMin: 0.04, lMax: 0.22    // escuro — é o fundo
+      sMin: 0.05, sMax: 0.55,
+      lMin: 0.04, lMax: 0.22
     });
 
-    // ── accent: ponto de luz — vibrante e de médio brilho ──────────────────
     const normalAccent = PaletteNormalizer._clampHSL(hslAccent, {
       sMin: 0.40, sMax: 0.90,
       lMin: 0.35, lMax: 0.72
     });
 
-    // ── contrast: segundo polo — complementar ao accent em brilho ──────────
-    let hslContrastFinal = PaletteNormalizer._clampHSL(hslContrast, {
-      sMin: 0.20, sMax: 0.80,
-      lMin: 0.25, lMax: 0.65
-    });
+    const contrastIsNeutral = PaletteNormalizer._isNeutral(hslContrast);
+    let hslContrastFinal = contrastIsNeutral
+      ? { h: 0, s: 0, l: PaletteNormalizer._clamp(hslContrast.l, 0.38, 0.76) }
+      : PaletteNormalizer._clampHSL(hslContrast, {
+        sMin: 0.20, sMax: 0.80,
+        lMin: 0.25, lMax: 0.65
+      });
 
-    // Garante diferença mínima de hue entre accent e contrast (≥ 30°)
-    const hueDiff = Math.abs(normalAccent.h - hslContrastFinal.h);
-    const wrappedDiff = Math.min(hueDiff, 360 - hueDiff);
-    if (wrappedDiff < 30) {
-      // Deriva contrast girando o hue do accent em 120° (split-complementar)
-      hslContrastFinal = { ...normalAccent, h: (normalAccent.h + 120) % 360, l: Math.max(0.30, normalAccent.l - 0.12) };
+    if (!contrastIsNeutral && PaletteNormalizer._hueDistance(normalAccent.h, hslContrastFinal.h) < 30) {
+      hslContrastFinal = PaletteNormalizer._separateLuminance(normalAccent, hslContrastFinal);
     }
 
     return {
       base:     PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(normalBase)),
       accent:   PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(normalAccent)),
-      contrast: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(hslContrastFinal))
+      contrast: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(hslContrastFinal)),
+      mode: 'color'
     };
   }
 
-  // ─── Clamp de propriedades HSL ──────────────────────────────────────────
+  static _normalizeMonochrome(hsls) {
+    const sorted = [...hsls].sort((a, b) => a.l - b.l);
+    const darkest = sorted[0];
+    const middle = sorted[1] ?? sorted[0];
+    const lightest = sorted[2] ?? sorted[sorted.length - 1];
+
+    return {
+      base: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL({
+        h: 0,
+        s: 0,
+        l: PaletteNormalizer._clamp(darkest.l, 0.035, 0.18)
+      })),
+      accent: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL({
+        h: 0,
+        s: 0,
+        l: PaletteNormalizer._clamp(lightest.l, 0.38, 0.76)
+      })),
+      contrast: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL({
+        h: 0,
+        s: 0,
+        l: PaletteNormalizer._clamp(middle.l, 0.20, 0.56)
+      })),
+      mode: 'monochrome'
+    };
+  }
+
+  static _normalizeLimitedPalette({ hslBase, hslAccent, hslContrast }) {
+    const colored = [hslBase, hslAccent, hslContrast].filter(hsl => PaletteNormalizer._isMeaningfulColor(hsl));
+    const anchor = PaletteNormalizer._mostSaturated(colored) ?? hslAccent;
+    const accentSource = PaletteNormalizer._isMeaningfulColor(hslAccent) ? hslAccent : anchor;
+
+    const normalBase = {
+      h: PaletteNormalizer._isMeaningfulColor(hslBase) ? hslBase.h : anchor.h,
+      s: PaletteNormalizer._clamp(PaletteNormalizer._isMeaningfulColor(hslBase) ? hslBase.s : anchor.s * 0.70, 0.16, 0.62),
+      l: PaletteNormalizer._clamp(hslBase.l, 0.045, 0.22)
+    };
+
+    const normalAccent = {
+      h: accentSource.h,
+      s: PaletteNormalizer._clamp(accentSource.s, 0.34, 0.92),
+      l: PaletteNormalizer._clamp(accentSource.l, 0.34, 0.72)
+    };
+
+    let normalContrast;
+    if (PaletteNormalizer._isNeutral(hslContrast)) {
+      normalContrast = {
+        h: 0,
+        s: 0,
+        l: PaletteNormalizer._clamp(hslContrast.l, 0.42, 0.78)
+      };
+    } else {
+      normalContrast = {
+        h: hslContrast.h,
+        s: PaletteNormalizer._clamp(hslContrast.s, 0.24, 0.82),
+        l: PaletteNormalizer._clamp(hslContrast.l, 0.28, 0.70)
+      };
+
+      if (PaletteNormalizer._hueDistance(normalAccent.h, normalContrast.h) < 24) {
+        normalContrast = PaletteNormalizer._separateLuminance(normalAccent, normalContrast);
+      }
+    }
+
+    return {
+      base: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(normalBase)),
+      accent: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(normalAccent)),
+      contrast: PaletteNormalizer._toChannelStr(PaletteNormalizer._fromHSL(normalContrast)),
+      mode: 'limited-palette'
+    };
+  }
+
+  static _isMonochrome(hsls) {
+    return hsls.every(hsl => PaletteNormalizer._isNeutral(hsl));
+  }
+
+  static _isLimitedPalette(hsls) {
+    const colored = hsls.filter(hsl => PaletteNormalizer._isMeaningfulColor(hsl));
+    if (colored.length <= 1) return true;
+
+    for (let i = 0; i < colored.length; i++) {
+      for (let j = i + 1; j < colored.length; j++) {
+        if (PaletteNormalizer._hueDistance(colored[i].h, colored[j].h) > 26) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  static _isNeutral(hsl) {
+    return hsl.s < 0.10 || hsl.l <= 0.035 || hsl.l >= 0.96;
+  }
+
+  static _isMeaningfulColor(hsl) {
+    return hsl.s >= 0.14 && hsl.l > 0.04 && hsl.l < 0.94;
+  }
+
+  static _mostSaturated(hsls) {
+    return hsls.reduce((best, hsl) => (!best || hsl.s > best.s ? hsl : best), null);
+  }
+
+  static _separateLuminance(reference, candidate) {
+    const shouldGoLight = reference.l < 0.50;
+    const targetL = shouldGoLight
+      ? Math.max(candidate.l, reference.l + 0.20, 0.52)
+      : Math.min(candidate.l, reference.l - 0.20, 0.30);
+
+    return {
+      ...candidate,
+      l: PaletteNormalizer._clamp(targetL, 0.25, 0.72)
+    };
+  }
+
+  static _hueDistance(a, b) {
+    const diff = Math.abs(a - b);
+    return Math.min(diff, 360 - diff);
+  }
+
   static _clampHSL(hsl, { sMin, sMax, lMin, lMax }) {
     return {
       h: hsl.h,
-      s: Math.max(sMin, Math.min(sMax, hsl.s)),
-      l: Math.max(lMin, Math.min(lMax, hsl.l))
+      s: PaletteNormalizer._clamp(hsl.s, sMin, sMax),
+      l: PaletteNormalizer._clamp(hsl.l, lMin, lMax)
     };
   }
 
-  // ─── RGB ↔ HSL ──────────────────────────────────────────────────────────
   static _toHSL([r, g, b]) {
     r /= 255; g /= 255; b /= 255;
     const max = Math.max(r, g, b);
@@ -107,7 +233,6 @@ export default class PaletteNormalizer {
     ];
   }
 
-  // ─── Parsing / serialização ─────────────────────────────────────────────
   static _parseChannelStr(str = '') {
     const parts = str.trim().split(/\s+/).map(Number);
     return parts.length === 3 ? parts : [20, 20, 30];
@@ -115,5 +240,9 @@ export default class PaletteNormalizer {
 
   static _toChannelStr([r, g, b]) {
     return `${Math.round(r)} ${Math.round(g)} ${Math.round(b)}`;
+  }
+
+  static _clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 }

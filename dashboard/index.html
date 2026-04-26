@@ -305,7 +305,7 @@
     document.body.appendChild(window.uploadController);
 
     // Sistema de tema reativo — ambient lighting com as cores do álbum em reprodução
-    import('/static/js/features/player/NowPlayingThemeController.js').then(({ default: NowPlayingThemeController }) => {
+    import('/static/js/features/player/NowPlayingThemeController.js?v=theme-fidelity-20260426').then(({ default: NowPlayingThemeController }) => {
       window.nowPlayingThemeController = new NowPlayingThemeController();
     });
 

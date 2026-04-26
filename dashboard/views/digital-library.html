@@ -636,7 +636,11 @@
   // 1. O Novo Motor de Thumbnails (MAM Compatible)
   function thumbSrc(thumbnail) {
     if (!thumbnail) return null;
-    if (thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')) return thumbnail;
+    if (
+      thumbnail.startsWith('http') ||
+      thumbnail.startsWith('/thumbs/') ||
+      thumbnail.startsWith('/static/')
+    ) return thumbnail;
     
     // Normaliza para o padrão Web e aponta para a rota estática do FastAPI
     let path = thumbnail.replace(/\\/g, '/');

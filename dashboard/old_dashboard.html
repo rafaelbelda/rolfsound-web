@@ -1841,7 +1841,7 @@ async function saveSettings() {
 ================================================================ */
 function thumbSrc(t) {
   if (!t) return null;
-  if (t.startsWith('http')) return t;
+  if (t.startsWith('http') || t.startsWith('/thumbs/') || t.startsWith('/static/')) return t;
   return '/thumbs/' + t.split(/[\\/]/).pop();
 }
 

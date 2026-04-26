@@ -1,24 +1,15 @@
-// static/js/NowPlayingThemeController.js
-// Orquestrador do sistema de tema reativo.
-// É o único módulo que conhece todos os outros — os outros não se conhecem.
-//
-// Fluxo:
-//   1. escuta `rolfsound-now-playing-changed` (evento emitido por playback-mitosis.js)
-//   2. resolve a melhor URL de capa disponível
-//   3. pede extração via ColorPaletteExtractor (com cache automático)
-//   4. normaliza via PaletteNormalizer
-//   5. publica a paleta em ReactiveBackdropController
-//   6. emite `rolfsound-theme-change` para qualquer módulo que queira reagir
-//
-// Regras:
-//   - deduplicação estrita por trackKey (mesma faixa tocando = zero trabalho)
-//   - CORS fallback: tenta URL de /thumbs/ local se o servidor remoto rejeitar
-//   - idle/stop → chama applyNeutral() com fade lento
+// static/js/features/player/NowPlayingThemeController.js
+// Orchestrates the reactive now-playing theme:
+// 1. listen for rolfsound-now-playing-changed from playback-mitosis.js
+// 2. resolve the best cover URL candidates
+// 3. extract and normalize a palette
+// 4. publish it to the global reactive backdrop
+// 5. emit rolfsound-theme-change for surfaces that inherit the theme
 
-import ColorPaletteExtractor from '/static/js/features/animations/ColorPaletteExtractor.js';
-import PaletteNormalizer     from '/static/js/features/animations/PaletteNormalizer.js';
-import ReactiveBackdropController from '/static/js/features/player/ReactiveBackdropController.js';
-import { getThumbnailCandidates } from '/static/js/utils/thumbnails.js';
+import ColorPaletteExtractor from '/static/js/features/animations/ColorPaletteExtractor.js?v=theme-fidelity-20260426';
+import PaletteNormalizer from '/static/js/features/animations/PaletteNormalizer.js?v=theme-fidelity-20260426';
+import ReactiveBackdropController from '/static/js/features/player/ReactiveBackdropController.js?v=theme-fidelity-20260426';
+import { getThumbnailCandidates } from '/static/js/utils/thumbnails.js?v=theme-fidelity-20260426';
 
 export default class NowPlayingThemeController {
   /**
@@ -31,15 +22,15 @@ export default class NowPlayingThemeController {
     this._backdrop = new ReactiveBackdropController({
       transitionMs:   options.transitionMs   ?? 2400,
       intensityOnMs:  options.intensityOnMs  ?? 900,
-      intensityOffMs: options.intensityOffMs ?? 1600
+      intensityOffMs: options.intensityOffMs ?? 1600,
     });
 
-    this._currentKey  = null;   // trackKey atualmente renderizado
-    this._pendingKey  = null;   // trackKey sendo extraído (evita corrida)
+    this._currentKey = null;
+    this._pendingKey = null;
 
-    // Pré-extração da próxima faixa da queue — acelera o início da transição
-    this._preextractedKey     = null;   // key da paleta pré-extraída
-    this._preextractedPalette = null;   // paleta normalizada pronta para uso imediato
+    this._preextractedKey = null;
+    this._preextractedPalette = null;
+    this._preextractingKey = null;
 
     this._onNowPlaying = this._handleNowPlaying.bind(this);
     window.addEventListener('rolfsound-now-playing-changed', this._onNowPlaying);
@@ -50,82 +41,67 @@ export default class NowPlayingThemeController {
     this._backdrop.destroy();
     this._currentKey = null;
     this._pendingKey = null;
+    this._preextractedKey = null;
+    this._preextractedPalette = null;
+    this._preextractingKey = null;
   }
-
-  // ─── Handler principal ───────────────────────────────────────────────────
 
   async _handleNowPlaying(event) {
     const { trackId, thumbnail, source, state, nextTrack } = event.detail ?? {};
 
-    // Só aplica cores quando explicitamente playing — qualquer outro estado vai a neutro.
-    // Isso cobre 'paused', 'idle', 'stopped', e qualquer estado inesperado do servidor.
     if (!trackId || state !== 'playing') {
       this._currentKey = null;
       this._pendingKey = null;
+      this._preextractedKey = null;
+      this._preextractedPalette = null;
+      this._preextractingKey = null;
       this._backdrop.applyNeutral();
       return;
     }
 
     const trackKey = `${trackId}|${thumbnail ?? ''}`;
-
-    // Já renderizado → nada a fazer
     if (trackKey === this._currentKey) return;
-
-    // Já está sendo processado → não duplicar
     if (trackKey === this._pendingKey) return;
 
     this._pendingKey = trackKey;
 
-    // ─ Verifica se a próxima faixa foi pré-extraída enquanto a atual tocava ─
     let normalized = null;
     if (this._preextractedKey === trackKey && this._preextractedPalette) {
       normalized = this._preextractedPalette;
-      this._preextractedKey     = null;
+      this._preextractedKey = null;
       this._preextractedPalette = null;
     } else {
       const urls = NowPlayingThemeController._resolveCoverUrls(trackId, thumbnail, source);
-      if (!urls.length) {
-        this._backdrop.applyNeutral();
-        this._pendingKey = null;
-        return;
-      }
-
       const raw = await this._extractWithFallback(urls, trackKey);
-
-      // Verifica se outra faixa não ganhou a corrida durante o await
       if (this._pendingKey !== trackKey) return;
 
       if (!raw) {
-        // Extracção falhou totalmente → mantém estado atual sem piscar
         this._pendingKey = null;
+        this._currentKey = null;
+        this._backdrop.applyNeutral();
         return;
       }
 
       normalized = PaletteNormalizer.normalize(raw);
     }
 
-    // Verifica novamente após qualquer await
     if (this._pendingKey !== trackKey) return;
     this._pendingKey = null;
-
     this._currentKey = trackKey;
+
     this._backdrop.applyPalette(normalized, trackKey);
 
     window.dispatchEvent(new CustomEvent('rolfsound-theme-change', {
-      detail: { palette: normalized, trackKey }
+      detail: { palette: normalized, trackKey },
     }));
 
-    // Pré-extrai cores da próxima faixa da queue enquanto a atual está tocando
-    if (nextTrack) {
-      this._preextractTrack(nextTrack);
-    }
+    if (nextTrack) this._preextractTrack(nextTrack);
   }
 
-  // ─── Extração com fallback entre candidatos ──────────────────────────────
-
   async _extractWithFallback(urls, trackKey) {
+    if (!urls?.length) return null;
+
     for (const url of urls) {
-      // Se o trackKey mudou (faixa trocada durante await), aborta
       if (this._pendingKey !== trackKey) return null;
 
       const palette = await ColorPaletteExtractor.extract(url, trackKey);
@@ -134,32 +110,41 @@ export default class NowPlayingThemeController {
     return null;
   }
 
-  // ─── Resolução da melhor URL de capa ────────────────────────────────────
-  // Prioridade: maxresdefault → hqdefault → local /thumbs/
-  // As URLs YouTube têm CORS headers ( Access-Control-Allow-Origin: * ),
-  // então a maioria funciona. O fallback local é para tracks offline.
+  async _preextractTrack(track) {
+    const trackId = track?.id || track?.track_id;
+    if (!trackId) return;
+
+    const thumbnail = track.thumbnail || '';
+    const source = track.source || (String(trackId).length === 11 ? 'youtube' : 'local');
+    const trackKey = `${trackId}|${thumbnail}`;
+
+    if (trackKey === this._currentKey) return;
+    if (trackKey === this._pendingKey) return;
+    if (trackKey === this._preextractedKey) return;
+    if (trackKey === this._preextractingKey) return;
+
+    const urls = NowPlayingThemeController._resolveCoverUrls(trackId, thumbnail, source);
+    if (!urls.length) return;
+
+    this._preextractingKey = trackKey;
+
+    for (const url of urls) {
+      if (this._preextractingKey !== trackKey) return;
+
+      const raw = await ColorPaletteExtractor.extract(url, trackKey);
+      if (!raw) continue;
+
+      if (this._preextractingKey !== trackKey) return;
+      this._preextractedKey = trackKey;
+      this._preextractedPalette = PaletteNormalizer.normalize(raw);
+      this._preextractingKey = null;
+      return;
+    }
+
+    if (this._preextractingKey === trackKey) this._preextractingKey = null;
+  }
 
   static _resolveCoverUrls(trackId, thumbnail, source) {
     return getThumbnailCandidates({ thumbnail, id: trackId, track_id: trackId, source });
-
-    const urls = [];
-    const isYouTubeId = typeof trackId === 'string' && /^[A-Za-z0-9_-]{11}$/.test(trackId);
-
-    // Prioridade: thumbnail indexado (Discogs/etc) primeiro, YouTube como fallback
-    if (thumbnail) {
-      const normalized = thumbnail.startsWith('http') || thumbnail.startsWith('/thumbs/')
-        ? thumbnail
-        : `/thumbs/${thumbnail.split(/[\\/]/).pop()}`;
-
-      if (normalized) urls.push(normalized);
-    }
-
-    // Fallback YouTube: só entra se não houver thumbnail indexado
-    if (isYouTubeId && !thumbnail) {
-      urls.push(`https://i.ytimg.com/vi/${trackId}/maxresdefault.jpg`);
-      urls.push(`https://i.ytimg.com/vi/${trackId}/hqdefault.jpg`);
-    }
-
-    return urls;
   }
 }

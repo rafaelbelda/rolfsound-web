@@ -233,6 +233,12 @@ class RolfsoundMiniplayer extends HTMLElement {
           flex-shrink: 0;
         }
 
+        .mini-btn:hover {
+          background: var(--rs-theme-hover-bg, rgba(255,255,255,0.07));
+          box-shadow: 0 0 14px var(--rs-theme-glow, transparent);
+          color: var(--color-text-control-strong, rgba(255,255,255,0.96));
+        }
+
         .mini-btn:active { transform: scale(0.90); }
 
         .mini-btn svg {
@@ -289,7 +295,13 @@ class RolfsoundMiniplayer extends HTMLElement {
           width: 100%;
           transform: scaleX(0);
           transform-origin: left center;
-          background: var(--color-progress-fill, rgba(255,255,255,0.9));
+          background:
+            linear-gradient(
+              90deg,
+              rgba(255,255,255,0.92),
+              rgb(var(--rs-theme-accent-rgb, 255 255 255) / calc(0.70 + var(--rs-theme-intensity, 0) * 0.2))
+            );
+          box-shadow: 0 0 16px var(--rs-theme-glow, transparent);
           border-radius: 0 var(--radius-xs, 2px) var(--radius-xs, 2px) 0;
           transition: transform 0.08s linear;
         }

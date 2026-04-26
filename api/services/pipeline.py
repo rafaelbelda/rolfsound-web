@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from core.database import database
+from utils.image_processor import cache_remote_cover_candidates_sync
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,13 @@ class LibraryManager:
         published_date = source_data.get("published_date")
         move_file = source_data.get("move_file", True)
 
+        thumbnail = self._cache_cover_for_source(
+            thumbnail=thumbnail,
+            source=source,
+            source_ref=source_ref,
+            fallback_key=target_track_id or title or temp_path.stem,
+        )
+
         conn = database.get_connection()
         try:
             created_track = False
@@ -111,6 +119,9 @@ class LibraryManager:
                 if not database.get_track_row(conn, target_track_id):
                     raise ValueError(f"Target track not found: {target_track_id}")
                 track_id = target_track_id
+                existing = database.get_track(conn, track_id)
+                if thumbnail and existing and not existing.get("thumbnail"):
+                    database.update_track_metadata(conn, track_id, {"thumbnail": thumbnail})
             else:
                 track_id = str(uuid.uuid4())
                 database.add_track(conn, {
@@ -165,6 +176,27 @@ class LibraryManager:
             "created_track": created_track,
             "allow_identity_resolution": allow_identity_resolution,
         }
+
+    def _cache_cover_for_source(
+        self,
+        thumbnail: str | None,
+        source: str,
+        source_ref: str | None,
+        fallback_key: str,
+    ) -> str | None:
+        candidates: list[str | None] = [thumbnail]
+        if source == "YOUTUBE" and source_ref:
+            candidates.extend([
+                f"https://i.ytimg.com/vi/{source_ref}/maxresdefault.jpg",
+                f"https://i.ytimg.com/vi/{source_ref}/hqdefault.jpg",
+                f"https://i.ytimg.com/vi/{source_ref}/mqdefault.jpg",
+            ])
+
+        return cache_remote_cover_candidates_sync(
+            source_ref or fallback_key,
+            candidates,
+            namespace=source.lower() or "cover",
+        ) or thumbnail
 
     def _place_file(
         self,

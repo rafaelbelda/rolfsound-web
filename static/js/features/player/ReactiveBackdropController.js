@@ -16,6 +16,8 @@
 //   --rs-theme-base-rgb, --rs-theme-accent-rgb, --rs-theme-contrast-rgb
 //   --rs-theme-intensity  (0 → neutro, 1 → plena saturação)
 
+import audioReactiveStore from '/static/js/features/player/AudioReactiveStore.js';
+
 export default class ReactiveBackdropController {
   /** @param {object} options
    *  @param {number} [options.transitionMs=2400] — duração da transição entre temas
@@ -26,9 +28,29 @@ export default class ReactiveBackdropController {
     this._transitionMs   = options.transitionMs   ?? 2400;
     this._intensityOnMs  = options.intensityOnMs  ?? 900;
     this._intensityOffMs = options.intensityOffMs ?? 1600;
+    this._audioStore     = options.audioStore     ?? audioReactiveStore;
 
-    this._currentKey    = null;  // trackKey da paleta atualmente renderizada
-    this._layersOpacity = 0;     // valor real de opacity das layers (rastreado em JS)
+    this._motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? null;
+    this._reducedMotion = !!this._motionQuery?.matches;
+    this._onMotionChange = (event) => {
+      this._reducedMotion = !!event.matches;
+      if (this._reducedMotion) {
+        this._stopAmbientLoop();
+      } else if (this._currentKey) {
+        this._startAmbientLoop();
+      }
+    };
+    this._onVisibilityChange = () => {
+      if (document.hidden) {
+        this._stopAmbientLoop({ resetAudio: false });
+      } else if (this._currentKey && !this._reducedMotion) {
+        this._startAmbientLoop();
+      }
+    };
+
+    this._currentKey    = null;     // trackKey da paleta atualmente renderizada
+    this._paletteMode   = 'neutral';
+    this._layersOpacity = 0;        // valor real de opacity das layers (rastreado em JS)
 
     // ── RAF de intensidade (--rs-theme-intensity) ──
     this._intensityRafId = null;
@@ -68,6 +90,9 @@ export default class ReactiveBackdropController {
     this._ensureLayers();
     this._readGradientConfig();
     this._applyNeutral(/* instant */ true);
+
+    this._motionQuery?.addEventListener?.('change', this._onMotionChange);
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
   }
 
   // ─── API pública ─────────────────────────────────────────────────────────
@@ -115,6 +140,7 @@ export default class ReactiveBackdropController {
   applyPalette(palette, key) {
     if (key === this._currentKey) return;
     this._currentKey = key;
+    this._paletteMode = palette?.mode || 'color';
 
     const targetRgb = {
       base:     ReactiveBackdropController._parseRgb(palette.base),
@@ -139,6 +165,7 @@ export default class ReactiveBackdropController {
    */
   applyNeutral(instant = false) {
     this._currentKey = null;
+    this._paletteMode = 'neutral';
     this._stopAmbientLoop();
     this._applyNeutral(instant);
   }
@@ -158,15 +185,18 @@ export default class ReactiveBackdropController {
   // Amplitudes máximas: accent ±7%, contrast ±5.5%  →  variação perceptível mas sutil.
   // Accent e contrast têm fases distintas — criam contramovimento de profundidade.
   //
+  // AudioReactiveStore fornece energia/pico reais via audio_monitor. As senoides
+  // ficam como fallback discreto quando o stream fica stale.
   // Tecnicamente: filter:brightness() por RAF (GPU compositor), sem layout recalc.
 
   _startAmbientLoop() {
     if (this._ambientRafId) return;           // já rodando (track change não reinicia)
+    if (this._reducedMotion || document.hidden) return;
     this._ambientStart = performance.now();
     this._ambientRafId = requestAnimationFrame(this._ambientBound);
   }
 
-  _stopAmbientLoop() {
+  _stopAmbientLoop({ resetAudio = true } = {}) {
     if (this._ambientRafId) {
       cancelAnimationFrame(this._ambientRafId);
       this._ambientRafId = null;
@@ -174,33 +204,73 @@ export default class ReactiveBackdropController {
     // Limpa o filtro residual para não travar num brightness != 1
     if (this._layers.accent)   this._layers.accent.style.filter   = '';
     if (this._layers.contrast) this._layers.contrast.style.filter = '';
+    if (this._layers.accent)   this._layers.accent.style.transform = '';
+    if (this._layers.contrast) this._layers.contrast.style.transform = '';
+    if (resetAudio) this._audioStore?.reset?.();
   }
 
   _ambientTick(ts) {
+    if (this._reducedMotion || document.hidden) {
+      this._ambientRafId = null;
+      return;
+    }
+
     this._ambientRafId = requestAnimationFrame(this._ambientBound);
     const t = (ts - this._ambientStart) * 0.001; // ms → segundos
+    const env = this._audioStore?.getEnvelope?.(ts) ?? { energy: 0, peak: 0, punch: 0, stale: true };
+    const nearBlackMode = this._paletteMode === 'near-black';
+    const monochromeMode = this._paletteMode === 'monochrome';
+    const limitedPaletteMode = this._paletteMode === 'limited-palette';
+    const faithfulMode = nearBlackMode || monochromeMode || limitedPaletteMode;
+    const syntheticMix = env.stale ? (nearBlackMode ? 0.35 : faithfulMode ? 0.55 : 1) : 0.10;
 
     // Constantes pré-calculadas: 2π × frequência
     //   2π×0.41  ≈ 2.576   2π×1.97  ≈ 12.38
     //   2π×0.73  ≈ 4.587   2π×5.13  ≈ 32.23
 
     // Camada accent — quente, guiada pelo sub-grave
-    const bassA = Math.sin(t * 2.576)  * 0.045;  // sub-grave: ±4.5%
-    const midA  = Math.sin(t * 12.38)  * 0.018;  // médio:     ±1.8%
-    const hiA   = Math.sin(t * 32.23)  * 0.007;  // agudo:     ±0.7%
+    const bassA = Math.sin(t * 2.576)  * 0.045 * syntheticMix;  // sub-grave
+    const midA  = Math.sin(t * 12.38)  * 0.018 * syntheticMix;  // médio
+    const hiA   = Math.sin(t * 32.23)  * 0.007 * syntheticMix;  // agudo
 
     // Camada contrast — fora de fase, cria contramovimento
-    const bassC = Math.sin(t * 4.587)          * 0.038;  // grave:  ±3.8%  (freq diferente)
-    const midC  = Math.sin(t * 12.38 + 1.99)   * 0.017;  // médio: ±1.7%  (fase deslocada)
+    const bassC = Math.sin(t * 4.587)          * 0.038 * syntheticMix;  // grave
+    const midC  = Math.sin(t * 12.38 + 1.99)   * 0.017 * syntheticMix;  // médio
 
-    const bAccent   = (1 + bassA + midA + hiA).toFixed(3);
-    const bContrast = (1 + bassC + midC).toFixed(3);
+    const audioAccentLift = nearBlackMode
+      ? env.energy * 0.42 + env.punch * 0.34
+      : env.energy * 0.28 + env.punch * 0.22;
+    const audioContrastLift = nearBlackMode
+      ? env.peak * 0.30 + env.punch * 0.26
+      : env.peak * 0.20 + env.punch * 0.18;
+    const bAccent           = (1 + bassA + midA + hiA + audioAccentLift).toFixed(3);
+    const bContrast         = (1 + bassC + midC + audioContrastLift).toFixed(3);
+    const sAccent           = nearBlackMode || monochromeMode
+      ? '1.000'
+      : (1 + env.energy * (limitedPaletteMode ? 0.14 : 0.30) + env.punch * (limitedPaletteMode ? 0.08 : 0.18)).toFixed(3);
+    const sContrast         = nearBlackMode || monochromeMode
+      ? '1.000'
+      : (1 + env.peak * (limitedPaletteMode ? 0.10 : 0.22)).toFixed(3);
+    const scaleAccent       = nearBlackMode
+      ? (1 + env.energy * 0.016 + env.punch * 0.022).toFixed(4)
+      : (1 + env.energy * 0.024 + env.punch * 0.030).toFixed(4);
+    const scaleContrast     = nearBlackMode
+      ? (1 + env.peak * 0.014).toFixed(4)
+      : (1 + env.peak * 0.018).toFixed(4);
 
-    if (this._layers.accent)   this._layers.accent.style.filter   = `brightness(${bAccent})`;
-    if (this._layers.contrast) this._layers.contrast.style.filter = `brightness(${bContrast})`;
+    if (this._layers.accent) {
+      this._layers.accent.style.filter = `brightness(${bAccent}) saturate(${sAccent})`;
+      this._layers.accent.style.transform = `scale(${scaleAccent})`;
+    }
+    if (this._layers.contrast) {
+      this._layers.contrast.style.filter = `brightness(${bContrast}) saturate(${sContrast})`;
+      this._layers.contrast.style.transform = `scale(${scaleContrast})`;
+    }
   }
 
   destroy() {
+    this._motionQuery?.removeEventListener?.('change', this._onMotionChange);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
     this._cancelColorRaf();
     this._cancelIntensityRaf();
     this._stopAmbientLoop();
@@ -238,8 +308,8 @@ export default class ReactiveBackdropController {
 
     // Accent + contrast layers animam filter:brightness() a cada frame — promove a filter
     this._layers.base     = insert('rs-bg-base',     1, 'opacity');
-    this._layers.accent   = insert('rs-bg-accent',   2, 'opacity, filter');
-    this._layers.contrast = insert('rs-bg-contrast', 3, 'opacity, filter');
+    this._layers.accent   = insert('rs-bg-accent',   2, 'opacity, filter, transform');
+    this._layers.contrast = insert('rs-bg-contrast', 3, 'opacity, filter, transform');
   }
 
   // Reconstrói os gradientes com os valores RGB atualmente interpolados.
@@ -304,6 +374,8 @@ export default class ReactiveBackdropController {
 
     this._cancelIntensityRaf();
     this._setLayersOpacity(0, instant ? 0 : this._intensityOffMs);
+    this._applyRenderedRgbToLayers();
+    this._publishCssVars();
     document.documentElement.style.setProperty('--rs-theme-intensity', '0');
   }
 

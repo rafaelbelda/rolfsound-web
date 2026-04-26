@@ -35,9 +35,14 @@ async def _recognize(path: str) -> dict | None:
     track = result.get("track") if isinstance(result, dict) else None
     if not track:
         return None
+    images = track.get("images") or {}
+    share = track.get("share") or {}
     return {
         "artist": track.get("subtitle", "") or "",
         "title":  track.get("title", "")    or "",
+        "thumbnail": images.get("coverarthq") or images.get("coverart") or share.get("image") or "",
+        "shazam_key": track.get("key") or "",
+        "url": share.get("href") or track.get("url") or "",
     }
 
 

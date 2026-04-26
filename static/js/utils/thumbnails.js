@@ -9,7 +9,11 @@
 export function thumbSrc(t) {
     const raw = String(t || '').trim();
     if (!raw) return null;
-    if (/^(https?:|data:|blob:)/i.test(raw) || raw.startsWith('/thumbs/')) return raw;
+    if (
+        /^(https?:|data:|blob:)/i.test(raw) ||
+        raw.startsWith('/thumbs/') ||
+        raw.startsWith('/static/')
+    ) return raw;
 
     let path = raw.replace(/\\/g, '/').replace(/^\.\/+/, '');
     const lower = path.toLowerCase();

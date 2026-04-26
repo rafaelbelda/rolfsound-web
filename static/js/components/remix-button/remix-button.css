@@ -15,12 +15,13 @@
   color: var(--color-playback-control, #fff);
   opacity: 0.78;
   cursor: pointer;
-  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease;
+  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease;
 }
 
 .remix-btn:hover {
   opacity: 1;
-  background: var(--color-playback-control-hover, rgba(255, 255, 255, 0.08));
+  background: var(--rs-theme-hover-bg, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 0 14px var(--rs-theme-glow, transparent);
 }
 
 .remix-btn:active {
@@ -29,5 +30,6 @@
 
 :host(.active) .remix-btn {
   opacity: 1;
-  color: var(--color-accent, #ffb86b);
+  color: rgb(var(--rs-theme-accent-rgb, 255 184 107) / calc(0.76 + var(--rs-theme-intensity, 0) * 0.2));
+  background: var(--rs-theme-active-bg, rgba(255, 255, 255, 0.08));
 }

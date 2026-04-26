@@ -16,7 +16,7 @@ export default class ColorPaletteExtractor {
    * Resolve a URL de uma imagem para uma paleta de 3 cores.
    * @param {string} srcUrl - URL completa da imagem
    * @param {string} cacheKey - chave única para este track (geralmente trackId|thumbnail)
-   * @returns {Promise<{ base: string, accent: string, contrast: string } | null>}
+   * @returns {Promise<{ base: string, accent: string, contrast: string, mode?: string, confidence?: number } | null>}
    */
   static async extract(srcUrl, cacheKey = srcUrl) {
     if (ColorPaletteExtractor._cache.has(cacheKey)) {
@@ -27,18 +27,19 @@ export default class ColorPaletteExtractor {
       const pixels = await ColorPaletteExtractor._sampleImage(srcUrl);
       if (!pixels) return null;
 
+      const nearBlack = ColorPaletteExtractor._detectNearBlack(pixels);
+      if (nearBlack) {
+        const palette = ColorPaletteExtractor._nearBlackPalette(nearBlack.confidence);
+        ColorPaletteExtractor._remember(cacheKey, palette);
+        return palette;
+      }
+
       const clusters = ColorPaletteExtractor._kMeans(pixels, 3, 12);
       if (!clusters || clusters.length < 3) return null;
 
       const palette = ColorPaletteExtractor._assignRoles(clusters);
 
-      // Evict LRU se o cache atingiu o limite
-      if (ColorPaletteExtractor._cache.size >= ColorPaletteExtractor._MAX_CACHE) {
-        const oldest = ColorPaletteExtractor._cache.keys().next().value;
-        ColorPaletteExtractor._cache.delete(oldest);
-      }
-
-      ColorPaletteExtractor._cache.set(cacheKey, palette);
+      ColorPaletteExtractor._remember(cacheKey, palette);
       return palette;
     } catch (err) {
       // SecurityError (canvas tainted) ou rede — falha silenciosa
@@ -187,6 +188,82 @@ export default class ColorPaletteExtractor {
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
+  static _detectNearBlack(pixels) {
+    const total = pixels?.length ?? 0;
+    if (total < 64) return null;
+
+    let nearPure = 0;
+    let deepNeutral = 0;
+    let bright = 0;
+    let veryBright = 0;
+    let colored = 0;
+    let lumaSum = 0;
+    let chromaSum = 0;
+
+    for (const [r, g, b] of pixels) {
+      const luma = ColorPaletteExtractor._luminance([r, g, b]);
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+
+      lumaSum += luma;
+      chromaSum += chroma;
+
+      if (luma <= 22 && chroma <= 12) nearPure++;
+      if (luma <= 34 && chroma <= 18) deepNeutral++;
+      if (luma > 58) bright++;
+      if (luma > 90) veryBright++;
+      if (luma > 16 && chroma > 20) colored++;
+    }
+
+    const nearPureRatio = nearPure / total;
+    const deepNeutralRatio = deepNeutral / total;
+    const brightRatio = bright / total;
+    const veryBrightRatio = veryBright / total;
+    const coloredRatio = colored / total;
+    const avgLuma = lumaSum / total;
+    const avgChroma = chromaSum / total;
+
+    const passes =
+      nearPureRatio >= 0.92 &&
+      deepNeutralRatio >= 0.985 &&
+      brightRatio <= 0.006 &&
+      veryBrightRatio <= 0.002 &&
+      coloredRatio <= 0.006 &&
+      avgLuma <= 19 &&
+      avgChroma <= 5.5;
+
+    if (!passes) return null;
+
+    return {
+      confidence: Math.min(1, Math.max(0.92,
+        (nearPureRatio * 0.34) +
+        (deepNeutralRatio * 0.34) +
+        ((1 - brightRatio) * 0.12) +
+        ((1 - coloredRatio) * 0.12) +
+        ((1 - Math.min(1, avgLuma / 32)) * 0.08)
+      ))
+    };
+  }
+
+  static _nearBlackPalette(confidence = 1) {
+    return {
+      base: '3 3 3',
+      accent: '72 72 72',
+      contrast: '22 22 22',
+      mode: 'near-black',
+      confidence
+    };
+  }
+
+  static _remember(cacheKey, palette) {
+    // Evict LRU se o cache atingiu o limite
+    if (ColorPaletteExtractor._cache.size >= ColorPaletteExtractor._MAX_CACHE) {
+      const oldest = ColorPaletteExtractor._cache.keys().next().value;
+      ColorPaletteExtractor._cache.delete(oldest);
+    }
+
+    ColorPaletteExtractor._cache.set(cacheKey, palette);
+  }
+
   static _distSq([r1, g1, b1], [r2, g2, b2]) {
     const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
     return dr * dr + dg * dg + db * db;

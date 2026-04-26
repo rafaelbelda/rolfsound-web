@@ -332,8 +332,11 @@ export default class PlayerShell {
         margin: 1px 5px;
         transition: background 0.15s ease;
       }
-      .q-item:hover { background: rgba(255,255,255,0.06); }
-      .q-item.q-active { background: rgba(255,255,255,0.09); }
+      .q-item:hover { background: var(--rs-theme-hover-bg, rgba(255,255,255,0.06)); }
+      .q-item.q-active {
+        background: var(--rs-theme-active-bg, rgba(255,255,255,0.09));
+        box-shadow: inset 2px 0 0 var(--rs-theme-glow, rgba(255,255,255,0.2));
+      }
       .q-idx {
         font-size: 9px;
         color: var(--color-text-disabled);
@@ -342,7 +345,9 @@ export default class PlayerShell {
         text-align: right;
         flex-shrink: 0;
       }
-      .q-item.q-active .q-idx { color: var(--color-control-active, rgba(255,255,255,0.7)); }
+      .q-item.q-active .q-idx {
+        color: rgb(var(--rs-theme-accent-rgb, 255 255 255) / calc(0.72 + var(--rs-theme-intensity, 0) * 0.22));
+      }
       .q-thumb {
         width: 34px;
         height: 34px;
@@ -373,7 +378,10 @@ export default class PlayerShell {
         margin-top: 1px;
       }
       .q-empty { text-align: center; color: var(--color-text-disabled); font-size: var(--fs-sm); padding: 48px 16px; }
-      .q-item.q-active .q-title { color: var(--color-base-white-strong); }
+      .q-item.q-active .q-title {
+        color: var(--color-base-white-strong);
+        text-shadow: 0 0 14px var(--rs-theme-glow, transparent);
+      }
       .q-remove {
         display: none;
         align-items: center;

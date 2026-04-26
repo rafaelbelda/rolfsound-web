@@ -1,8 +1,14 @@
 import os
+import hashlib
+import logging
+import re
+import urllib.request
 import httpx
 from pathlib import Path
 from PIL import Image
 from io import BytesIO
+
+logger = logging.getLogger(__name__)
 
 # Garante que a pasta de capas locais exista (caminho absoluto, independente do CWD)
 COVERS_DIR = Path(__file__).resolve().parent.parent / "static" / "covers"
@@ -10,6 +16,65 @@ os.makedirs(COVERS_DIR, exist_ok=True)
 
 # Shared HTTP client — reuses TCP connections for cover downloads
 _http_client = httpx.AsyncClient(timeout=15)
+
+
+def cache_remote_cover_candidates_sync(
+    cache_key: str,
+    image_urls: list[str | None],
+    namespace: str = "cover",
+) -> str | None:
+    """
+    Download the first working remote cover candidate, convert it to JPEG, and
+    return a stable /static/covers URL. Local/public URLs are returned as-is.
+    """
+    for image_url in image_urls:
+        public_url = cache_remote_cover_sync(cache_key, image_url, namespace=namespace)
+        if public_url:
+            return public_url
+    return None
+
+
+def cache_remote_cover_sync(
+    cache_key: str,
+    image_url: str | None,
+    namespace: str = "cover",
+) -> str | None:
+    raw = str(image_url or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("/static/") or raw.startswith("/thumbs/"):
+        return raw
+    if not raw.lower().startswith(("http://", "https://")):
+        return raw
+
+    safe_namespace = _safe_cover_part(namespace or "cover")
+    safe_key = _safe_cover_part(cache_key or hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16])
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    local_filename = f"{safe_namespace}_{safe_key}_{digest}.jpg"
+    local_filepath = COVERS_DIR / local_filename
+    public_url = f"/static/covers/{local_filename}"
+
+    if local_filepath.exists():
+        return public_url
+
+    try:
+        req = urllib.request.Request(raw, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = resp.read()
+
+        img = Image.open(BytesIO(payload)).convert("RGB")
+        img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+        img.save(local_filepath, "JPEG", quality=88, optimize=True)
+        logger.info("Cached remote cover: %s -> %s", raw, public_url)
+        return public_url
+    except Exception as exc:
+        logger.warning("Cover cache failed for %s: %s", raw, exc)
+        return None
+
+
+def _safe_cover_part(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value)).strip("._-")
+    return (cleaned or "cover")[:80]
 
 async def process_release_cover(release_id: str, discogs_url: str, auth_headers: dict) -> dict:
     """

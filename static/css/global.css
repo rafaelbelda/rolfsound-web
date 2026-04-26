@@ -78,7 +78,13 @@
 
   /* ── Tokens Semânticos de Componentes ── */
   --color-playback-shell: rgba(15, 15, 15, 0.92);
-  --color-playback-pill: rgba(12, 12, 12, 0.88);
+  --color-playback-pill:
+    linear-gradient(
+      135deg,
+      rgb(var(--rs-theme-accent-rgb, 18 18 18) / calc(var(--rs-theme-intensity, 0) * 0.12 + var(--rs-audio-energy, 0) * 0.09)),
+      rgb(var(--rs-theme-contrast-rgb, 12 12 12) / calc(var(--rs-theme-intensity, 0) * 0.08 + var(--rs-audio-punch, 0) * 0.08))
+    ),
+    rgba(12, 12, 12, 0.88);
   --color-playback-cover: #0f0f0f;
   --color-playback-gradient-start: rgba(0, 0, 0, 0.82);
   --color-playback-gradient-mid: rgba(0, 0, 0, 0.3);
@@ -121,8 +127,12 @@
   --shadow-soft: 0 8px 25px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-playback-pill: 0 8px 28px rgba(0, 0, 0, 0.55);
-  --shadow-miniplayer: 0 12px 40px rgba(0, 0, 0, 0.65);
+  --shadow-playback-pill:
+    0 8px 28px rgba(0, 0, 0, 0.55),
+    0 0 42px rgb(var(--rs-theme-accent-rgb, 18 18 18) / calc(var(--rs-theme-intensity, 0) * 0.14 + var(--rs-audio-energy, 0) * 0.16));
+  --shadow-miniplayer:
+    0 12px 40px rgba(0, 0, 0, 0.65),
+    0 0 38px rgb(var(--rs-theme-accent-rgb, 18 18 18) / calc(var(--rs-theme-intensity, 0) * 0.12 + var(--rs-audio-punch, 0) * 0.15));
   --shadow-overlay: 0 18px 40px rgba(0, 0, 0, 0.55);
   --shadow-cover: 0 16px 48px rgba(0, 0, 0, 0.7);
   --shadow-notification: 0 12px 35px rgba(0, 0, 0, 0.8);
@@ -161,6 +171,14 @@
   --rs-theme-accent-rgb:   18 18 18;
   --rs-theme-contrast-rgb: 12 12 12;
   --rs-theme-intensity:    0;
+  --rs-audio-level:        0;
+  --rs-audio-peak:         0;
+  --rs-audio-energy:       0;
+  --rs-audio-punch:        0;
+  --rs-theme-hover-bg:     rgb(var(--rs-theme-accent-rgb) / calc(0.05 + var(--rs-theme-intensity) * 0.11 + var(--rs-audio-energy) * 0.08));
+  --rs-theme-active-bg:    rgb(var(--rs-theme-accent-rgb) / calc(0.08 + var(--rs-theme-intensity) * 0.16 + var(--rs-audio-energy) * 0.10));
+  --rs-theme-border:       rgb(var(--rs-theme-accent-rgb) / calc(var(--rs-theme-intensity) * 0.26 + var(--rs-audio-punch) * 0.28));
+  --rs-theme-glow:         rgb(var(--rs-theme-accent-rgb) / calc(var(--rs-theme-intensity) * 0.36 + var(--rs-audio-punch) * 0.38));
 
   /* ── Geometria dos gradientes do backdrop (tunável via DevTools/CSS override) ─── */
   /* Mudar estes vars e chamar backdrop.refreshGradientConfig() aplica em tempo real */
@@ -273,8 +291,10 @@ html, body {
 
 /* Quando estiver em cima de um botão (Pílula Magnética) */
 #cursor-dot.hovering {
-  background-color: var(--color-surface-card-hover);
-  border: 1px solid var(--color-border-focus);
+  background:
+    radial-gradient(circle at 50% 50%, var(--rs-theme-hover-bg, rgba(255,255,255,0.08)), var(--color-surface-card-hover));
+  border: 1px solid var(--rs-theme-border, var(--color-border-focus));
+  box-shadow: 0 0 18px var(--rs-theme-glow, transparent);
 }
 
 /* Ativa a bolinha menor interna para não perder o mouse de vista */
