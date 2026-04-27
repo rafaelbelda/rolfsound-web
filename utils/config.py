@@ -16,6 +16,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 _DEFAULTS = {
     "core_url":                  "http://localhost:8765",
     "server_port":               8766,
+    "ipc_port":                  8767,
     # "poll" = /events every 2s (safe default). "sse" = push via /events/stream.
     "core_events_transport":     "poll",
     "log_file_level":           logging.INFO,
