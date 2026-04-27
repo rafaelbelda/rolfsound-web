@@ -3,12 +3,14 @@ import json
 import logging
 import platform
 
+from utils import config
+
 logger = logging.getLogger(__name__)
 
 class IpcClient:
     def __init__(self):
         self.host = "127.0.0.1"
-        self.port = 8767
+        self.port = config.get("ipc_port", 8767)
         self.socket_path = "/tmp/rolfsound.sock"
         self.is_windows = platform.system() == "Windows"
 
