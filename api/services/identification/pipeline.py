@@ -144,7 +144,10 @@ async def _gather_local_evidence(
                     raw=yt_title,
                     reasons=["yt_dlp_title"],
                 ))
-        if existing_title and (existing_artist or "").strip():
+        # Skip existing_track_row for YouTube tracks: existing_artist is the
+        # channel name, not the real artist. youtube_title evidence (above)
+        # already covers the title hint without the poisoned artist field.
+        if existing_title and (existing_artist or "").strip() and not hints.get("youtube_id"):
             evidences.append(Evidence(
                 source="existing_track_row",
                 confidence=0.45,
