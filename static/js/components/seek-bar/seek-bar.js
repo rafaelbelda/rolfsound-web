@@ -41,7 +41,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
         <span class="time-sep">/</span>
         <span class="time-total">0:00</span>
       </div>
-      <div class="bar">
+      <div class="bar" data-cursor="range" role="slider" aria-label="Seek">
         <div class="track-outer">
           <div class="track">
             <div class="fill"></div>

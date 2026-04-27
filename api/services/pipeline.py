@@ -221,20 +221,10 @@ class LibraryManager:
         return final_path
 
     def _schedule_indexer(self, asset_id: str, allow_identity_resolution: bool) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            logger.debug("Pipeline: no running loop; indexer scheduling skipped")
-            return
-
-        async def _run():
-            try:
-                from api.services.indexer import index_asset
-                await index_asset(asset_id, allow_identity_resolution=allow_identity_resolution)
-            except Exception as e:
-                logger.error(f"Pipeline: indexer failed for asset {asset_id}: {e}")
-
-        loop.create_task(_run())
+        # Hand the asset to the persistent identification queue.
+        # `allow_identity_resolution` is now always honored by the queue.
+        from api.services.identification.jobs import enqueue as enqueue_identification
+        enqueue_identification(asset_id)
 
 
 def _blank_to_none(value):

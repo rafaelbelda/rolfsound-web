@@ -17,7 +17,7 @@ button {
   transition: color 0.18s ease, transform 0.18s ease;
   position: relative;
   flex: 0 0 auto;
-  cursor: pointer;
+  cursor: none;
 }
 
 button svg {

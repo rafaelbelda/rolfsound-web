@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Rolfsound · Revisão de Identidade</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --surface: #1a1a1a;
+    --surface-2: #232323;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #5b9dff;
+    --confirm: #3fb27f;
+    --reject: #d35d5d;
+    --warn: #d4a04b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  header {
+    max-width: 900px;
+    margin: 0 auto 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .stats {
+    color: var(--muted);
+    font-size: 12px;
+    display: flex;
+    gap: 16px;
+  }
+  .stats span { color: var(--text); font-weight: 600; }
+  main { max-width: 900px; margin: 0 auto; }
+  .empty, .loading, .error {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .error { color: var(--reject); border-color: var(--reject); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: 96px 1fr auto;
+    gap: 16px;
+    align-items: center;
+  }
+  .cover {
+    width: 96px;
+    height: 96px;
+    border-radius: 6px;
+    background: var(--surface-2) center/cover no-repeat;
+    flex-shrink: 0;
+  }
+  .meta { min-width: 0; }
+  .meta .title { font-weight: 600; font-size: 16px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; }
+  .meta .artist { color: var(--muted); margin-bottom: 8px; }
+  .meta .vs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+  .vs .pill {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 99px;
+    color: var(--muted);
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .vs .pill strong { color: var(--text); margin-right: 4px; }
+  .vs .arrow { color: var(--accent); font-weight: 700; }
+  .score {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    font-family: ui-monospace, monospace;
+  }
+  .score b { color: var(--warn); }
+  .reasons {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-style: italic;
+  }
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  button {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 120px;
+    transition: opacity 0.15s, border-color 0.15s, background 0.15s;
+  }
+  button:hover { border-color: var(--accent); }
+  button[data-action="confirm"] { border-color: var(--confirm); color: var(--confirm); }
+  button[data-action="confirm"]:hover { background: var(--confirm); color: #000; }
+  button[data-action="reject"] { border-color: var(--reject); color: var(--reject); }
+  button[data-action="reject"]:hover { background: var(--reject); color: #000; }
+  button:disabled { opacity: 0.4; cursor: wait; }
+  .refresh {
+    background: transparent;
+    border-color: var(--border);
+    min-width: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  audio { width: 100%; margin-top: 8px; height: 28px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Revisão de Identidade</h1>
+  <div class="stats">
+    <div>Pendentes: <span id="stat-pending">—</span></div>
+    <div>Fila: <span id="stat-queue">—</span></div>
+    <button class="refresh" onclick="loadAll()">Atualizar</button>
+  </div>
+</header>
+
+<main id="content">
+  <div class="loading">Carregando…</div>
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function escapeHtml(text) {
+  return String(text || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+
+function fmtScore(s) {
+  const v = Math.round((s || 0) * 100);
+  return `<b>${v}%</b>`;
+}
+
+function coverUrl(track) {
+  if (!track) return "";
+  const t = track.thumbnail || "";
+  if (!t) return "";
+  if (t.startsWith("http")) return t;
+  if (t.startsWith("/")) return t;
+  return "/thumbs/" + t.replace(/^.*[\\\/]music[\\\/]/, "");
+}
+
+function renderCard(c) {
+  const target = c.candidate_track || {};
+  const source = c.source_track || {};
+  const cover = coverUrl(target) || coverUrl(source);
+  const reasonsText = (c.reasons || []).join(", ") || "—";
+
+  return `
+    <div class="card" data-candidate-id="${c.id}">
+      <div class="cover" style="background-image:url('${cover}')"></div>
+      <div class="meta">
+        <div class="title">${escapeHtml(target.title || "(sem título)")}</div>
+        <div class="artist">${escapeHtml(target.artist || "(sem artista)")}</div>
+        <div class="vs">
+          <span class="pill"><strong>De:</strong>${escapeHtml(source.title || "?")} — ${escapeHtml(source.artist || "?")}</span>
+          <span class="arrow">→</span>
+          <span class="pill"><strong>Para:</strong>${escapeHtml(target.title || "?")} — ${escapeHtml(target.artist || "?")}</span>
+        </div>
+        <div class="score">Confiança: ${fmtScore(c.score)} · arquivo: <code>${escapeHtml(((c.asset || {}).file_path || "").split(/[\\\/]/).pop())}</code></div>
+        <div class="reasons">Motivos: ${escapeHtml(reasonsText)}</div>
+        ${(c.asset || {}).file_path ? `<audio controls preload="none" src="/api/library/${source.id || ""}/download"></audio>` : ""}
+      </div>
+      <div class="actions">
+        <button data-action="confirm" onclick="decide('${c.id}', 'confirm', this)">Confirmar</button>
+        <button data-action="reject" onclick="decide('${c.id}', 'reject', this)">Descartar</button>
+      </div>
+    </div>
+  `;
+}
+
+async function loadAll() {
+  const main = $("#content");
+  main.innerHTML = '<div class="loading">Carregando…</div>';
+
+  try {
+    const [candRes, statsRes] = await Promise.all([
+      fetch("/api/library/identity-candidates"),
+      fetch("/api/library/identification-stats"),
+    ]);
+    if (!candRes.ok) throw new Error(`HTTP ${candRes.status}`);
+
+    const data = await candRes.json();
+    const stats = statsRes.ok ? await statsRes.json() : { queue: {} };
+
+    $("#stat-pending").textContent = data.total ?? 0;
+    const queue = stats.queue || {};
+    $("#stat-queue").textContent = Object.entries(queue)
+      .map(([k, v]) => `${k}:${v}`).join(" ") || "0";
+
+    if (!data.candidates || data.candidates.length === 0) {
+      main.innerHTML = '<div class="empty">Nada para revisar — tudo identificado ou sem candidatos pendentes.</div>';
+      return;
+    }
+
+    main.innerHTML = data.candidates.map(renderCard).join("");
+  } catch (err) {
+    main.innerHTML = `<div class="error">Falha ao carregar: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function decide(candidateId, decision, btn) {
+  const card = btn.closest(".card");
+  card.querySelectorAll("button").forEach(b => b.disabled = true);
+
+  try {
+    const r = await fetch(`/api/library/identity-candidates/${candidateId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(text || `HTTP ${r.status}`);
+    }
+    card.style.transition = "opacity 0.3s";
+    card.style.opacity = "0";
+    setTimeout(() => loadAll(), 300);
+  } catch (err) {
+    alert("Erro: " + err.message);
+    card.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+
+</body>
+</html>

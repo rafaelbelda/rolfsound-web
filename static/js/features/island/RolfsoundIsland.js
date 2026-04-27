@@ -1218,7 +1218,7 @@ class RolfsoundIsland extends HTMLElement {
                 font-size: var(--fs-xs, 9px);
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
-                cursor: pointer;
+                cursor: none;
                 white-space: nowrap;
                 transition: all 0.16s ease;
             }

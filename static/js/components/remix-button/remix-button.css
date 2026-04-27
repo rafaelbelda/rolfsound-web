@@ -14,7 +14,7 @@
   border-radius: 50%;
   color: var(--color-playback-control, #fff);
   opacity: 0.78;
-  cursor: pointer;
+  cursor: none;
   transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease;
 }
 

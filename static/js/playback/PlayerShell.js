@@ -307,7 +307,7 @@ export default class PlayerShell {
         border: none;
         border-radius: var(--radius-lg);
         color: var(--color-text-disabled);
-        cursor: pointer;
+        cursor: none;
         transition: color 0.15s ease, background 0.15s ease;
         flex-shrink: 0;
       }
@@ -327,7 +327,7 @@ export default class PlayerShell {
         align-items: center;
         padding: 7px 10px;
         gap: 9px;
-        cursor: pointer;
+        cursor: none;
         border-radius: 10px;
         margin: 1px 5px;
         transition: background 0.15s ease;
@@ -393,7 +393,7 @@ export default class PlayerShell {
         border: none;
         border-radius: 50%;
         color: var(--color-text-disabled);
-        cursor: pointer;
+        cursor: none;
         flex-shrink: 0;
         transition: color 0.12s ease, background 0.12s ease;
       }
@@ -418,7 +418,7 @@ export default class PlayerShell {
         background: transparent;
         border: 1px solid var(--color-border-subtle);
         border-radius: var(--radius-sm);
-        cursor: pointer;
+        cursor: none;
         transition: color 0.12s, background 0.12s, border-color 0.12s;
         white-space: nowrap;
       }

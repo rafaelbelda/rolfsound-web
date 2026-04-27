@@ -3,10 +3,11 @@
 import asyncio
 import os
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_asset
+from api.services.identification.jobs import enqueue as enqueue_identification, queue_stats
 
 from core.database import database
 from utils.core import core
@@ -39,8 +40,85 @@ async def scan_library():
     try:
         asset_ids = database.scan_and_reconcile(conn, music_dir, return_asset_ids=True)
         for asset_id in asset_ids:
-            asyncio.create_task(index_asset(asset_id, allow_identity_resolution=True))
+            enqueue_identification(asset_id)
         return {"ok": True, "added": len(asset_ids), "asset_ids": asset_ids}
+    finally:
+        conn.close()
+
+
+@router.get("/library/identification-stats")
+async def identification_stats():
+    """Counts of identification jobs by status — observability for the queue."""
+    return {"queue": queue_stats()}
+
+
+# ── Identity candidates (low-confidence matches awaiting user confirmation) ──
+
+@router.get("/library/identity-candidates")
+async def list_pending_candidates():
+    """Pending candidate identifications — assets the system thinks may match
+    an existing track but isn't sure enough to auto-merge."""
+    conn = database.get_connection()
+    try:
+        candidates = database.list_identity_candidates(conn, status="pending")
+        enriched = []
+        for cand in candidates:
+            asset = database.get_asset(conn, cand["asset_id"])
+            target_track = database.get_track(conn, cand["candidate_track_id"])
+            source_track = database.get_track(conn, asset["track_id"]) if asset else None
+            enriched.append({
+                **cand,
+                "asset": asset,
+                "candidate_track": target_track,
+                "source_track": source_track,
+            })
+        return {"candidates": enriched, "total": len(enriched)}
+    finally:
+        conn.close()
+
+
+class CandidateDecision(BaseModel):
+    decision: str  # "confirm" | "reject"
+
+
+@router.post("/library/identity-candidates/{candidate_id}")
+async def decide_candidate(candidate_id: str, body: CandidateDecision):
+    """Confirm: merge the asset into the candidate track. Reject: dismiss."""
+    if body.decision not in ("confirm", "reject"):
+        raise HTTPException(status_code=400, detail="decision must be 'confirm' or 'reject'")
+
+    conn = database.get_connection()
+    try:
+        cand = database.get_identity_candidate(conn, candidate_id)
+        if not cand:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        if cand["status"] != "pending":
+            raise HTTPException(status_code=409, detail=f"Candidate already {cand['status']}")
+
+        if body.decision == "reject":
+            database.set_identity_candidate_status(conn, candidate_id, "rejected")
+            return {"ok": True, "status": "rejected"}
+
+        asset = database.get_asset(conn, cand["asset_id"])
+        target = database.get_track(conn, cand["candidate_track_id"])
+        if not asset or not target:
+            raise HTTPException(status_code=410, detail="Asset or target track missing")
+
+        from api.services.indexer import _move_asset_to_track_bundle, _infer_asset_type
+        inferred_type = _infer_asset_type(target.get("title") or "", asset.get("asset_type"))
+        new_path = _move_asset_to_track_bundle(asset, target["id"], inferred_type)
+        if new_path and new_path != asset["file_path"]:
+            database.update_asset_path(conn, asset["id"], new_path)
+        database.reassign_asset(
+            conn,
+            asset_id=asset["id"],
+            target_track_id=target["id"],
+            asset_type=inferred_type,
+            set_primary=False,
+        )
+        database.set_identity_candidate_status(conn, candidate_id, "confirmed")
+        conn.commit()
+        return {"ok": True, "status": "confirmed", "merged_into": target["id"]}
     finally:
         conn.close()
 
@@ -72,18 +150,6 @@ async def download_track(track_id: str):
             filename=filename,
             media_type="application/octet-stream",
         )
-    finally:
-        conn.close()
-
-
-@router.get("/library/{track_id}")
-async def get_track(track_id: str):
-    conn = database.get_connection()
-    try:
-        track = database.get_track(conn, track_id)
-        if not track:
-            raise HTTPException(status_code=404, detail="Track not found")
-        return track
     finally:
         conn.close()
 
@@ -147,7 +213,7 @@ async def identify_all_tracks():
     return {"ok": True, "total": len(pending), **results}
 
 
-async def _run_reindex(assets: list):
+async def _run_reindex(assets: list, resolve_identity: bool = True):
     global _reindex_state
     for asset in assets:
         asset_id = asset.get("id")
@@ -156,7 +222,7 @@ async def _run_reindex(assets: list):
             _reindex_state["skipped"] += 1
             _reindex_state["done"] += 1
             continue
-        meta = await index_asset(asset_id, allow_identity_resolution=False)
+        meta = await index_asset(asset_id, allow_identity_resolution=resolve_identity)
         if meta["status"] == "identified":
             _reindex_state["identified"] += 1
         else:
@@ -166,7 +232,10 @@ async def _run_reindex(assets: list):
 
 
 @router.post("/library/reindex-all")
-async def reindex_all_tracks(background_tasks: BackgroundTasks):
+async def reindex_all_tracks(
+    background_tasks: BackgroundTasks,
+    resolve_identity: bool = Query(True),
+):
     """Força reprocessamento de todas as faixas em background."""
     global _reindex_state
     if _reindex_state["running"]:
@@ -181,9 +250,10 @@ async def reindex_all_tracks(background_tasks: BackgroundTasks):
     _reindex_state.update({
         "running": True, "total": len(assets),
         "done": 0, "identified": 0, "failed": 0, "skipped": 0,
+        "resolve_identity": resolve_identity,
     })
-    background_tasks.add_task(_run_reindex, assets)
-    return {"ok": True, "total": len(assets)}
+    background_tasks.add_task(_run_reindex, assets, resolve_identity)
+    return {"ok": True, "total": len(assets), "resolve_identity": resolve_identity}
 
 
 @router.get("/library/reindex-status")
@@ -198,6 +268,18 @@ async def get_duplicates():
     try:
         groups = database.find_duplicate_fingerprints(conn)
         return {"groups": groups, "total_groups": len(groups)}
+    finally:
+        conn.close()
+
+
+@router.get("/library/{track_id}")
+async def get_track(track_id: str):
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        return track
     finally:
         conn.close()
 

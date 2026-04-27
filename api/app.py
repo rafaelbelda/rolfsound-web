@@ -54,10 +54,14 @@ async def lifespan(app: FastAPI):
     finally:
         conn.close()
 
+    from api.services.identification.jobs import (
+        enqueue as enqueue_identification,
+        start_worker_loop as start_identification_workers,
+    )
     if scanned_asset_ids:
-        from api.services.indexer import index_asset
         for asset_id in scanned_asset_ids:
-            asyncio.create_task(index_asset(asset_id, allow_identity_resolution=True))
+            enqueue_identification(asset_id)
+    await start_identification_workers()
 
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
@@ -66,14 +70,7 @@ async def lifespan(app: FastAPI):
     _loop = asyncio.get_event_loop()
 
     def _on_download_complete(source_ref: str, ingest_result: dict, meta: dict):
-        from api.services.indexer import index_asset
-        asyncio.run_coroutine_threadsafe(
-            index_asset(
-                ingest_result["asset_id"],
-                allow_identity_resolution=ingest_result.get("allow_identity_resolution", True),
-            ),
-            _loop,
-        )
+        enqueue_identification(ingest_result["asset_id"])
         logger.info(f"Indexer scheduled for YouTube source {source_ref}")
 
     manager.on_complete(_on_download_complete)
@@ -143,6 +140,9 @@ async def lifespan(app: FastAPI):
     await close_search_client()
     # Save queue state before closing the core connection.
     await _save_queue_state()
+    # Stop the identification worker loop so pending jobs survive to the next boot.
+    from api.services.identification.jobs import stop_worker_loop as stop_identification_workers
+    await stop_identification_workers()
     # Before: await core_client.close_client()
     await http_client.close_client()
     logger.info("rolfsound-control stopped")
@@ -241,7 +241,7 @@ def _register_event_handlers(source, loop=None):
             existing = db.get_track(conn, track_id)
             already_registered = db.get_asset_by_path(conn, filepath)
             if not existing and not already_registered and os.path.exists(filepath):
-                from api.services.indexer import index_asset
+                from api.services.identification.jobs import enqueue as enqueue_identification
                 from api.services.pipeline import LibraryManager
 
                 manager = LibraryManager(
@@ -256,14 +256,8 @@ def _register_event_handlers(source, loop=None):
                     "asset_type": "RECORDING",
                     "title": os.path.basename(filepath),
                 }, schedule_index=False)
-                if ingest_result and loop:
-                    asyncio.run_coroutine_threadsafe(
-                        index_asset(
-                            ingest_result["asset_id"],
-                            allow_identity_resolution=ingest_result.get("allow_identity_resolution", True),
-                        ),
-                        loop,
-                    )
+                if ingest_result:
+                    enqueue_identification(ingest_result["asset_id"])
                     logger.info(f"Auto-ingested recording into library: {ingest_result['track_id']}")
         except Exception as e:
             logger.error(f"on_track_finished ingest error: {e}")

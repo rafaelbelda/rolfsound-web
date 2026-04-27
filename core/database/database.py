@@ -188,12 +188,35 @@ def _create_tables(conn):
             created_at   INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS external_lookup_cache (
+            provider     TEXT NOT NULL,
+            cache_key    TEXT NOT NULL,
+            response     TEXT,
+            fetched_at   INTEGER NOT NULL,
+            ttl_seconds  INTEGER NOT NULL,
+            PRIMARY KEY (provider, cache_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS identification_jobs (
+            asset_id      TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            attempts      INTEGER NOT NULL DEFAULT 0,
+            last_error    TEXT,
+            next_retry_at INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_assets_track_id ON assets(track_id);
         CREATE INDEX IF NOT EXISTS idx_assets_source ON assets(source, source_ref);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_one_primary
             ON assets(track_id) WHERE is_primary = 1;
         CREATE INDEX IF NOT EXISTS idx_identity_candidates_asset
             ON identity_candidates(asset_id);
+        CREATE INDEX IF NOT EXISTS idx_external_lookup_fetched
+            ON external_lookup_cache(fetched_at);
+        CREATE INDEX IF NOT EXISTS idx_identification_jobs_status
+            ON identification_jobs(status, next_retry_at);
     """)
 
 
@@ -718,18 +741,20 @@ def add_identity_candidate(
     return candidate_id
 
 
-def list_identity_candidates(conn, asset_id: str | None = None) -> list[dict]:
+def list_identity_candidates(conn, asset_id: str | None = None, status: str | None = None) -> list[dict]:
+    clauses = []
+    params: list = []
     if asset_id:
-        rows = conn.execute("""
-            SELECT * FROM identity_candidates
-            WHERE asset_id = ?
-            ORDER BY score DESC, created_at DESC
-        """, (asset_id,)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT * FROM identity_candidates
-            ORDER BY score DESC, created_at DESC
-        """).fetchall()
+        clauses.append("asset_id = ?")
+        params.append(asset_id)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM identity_candidates{where} ORDER BY score DESC, created_at DESC",
+        params,
+    ).fetchall()
     result = []
     for row in rows:
         item = dict(row)
@@ -739,6 +764,29 @@ def list_identity_candidates(conn, asset_id: str | None = None) -> list[dict]:
             item["reasons"] = []
         result.append(item)
     return result
+
+
+def get_identity_candidate(conn, candidate_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM identity_candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["reasons"] = json.loads(item.pop("reasons_json") or "[]")
+    except json.JSONDecodeError:
+        item["reasons"] = []
+    return item
+
+
+def set_identity_candidate_status(conn, candidate_id: str, status: str) -> bool:
+    cursor = conn.execute(
+        "UPDATE identity_candidates SET status = ? WHERE id = ?",
+        (status, candidate_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def find_identity_matches(conn, meta: dict, exclude_track_id: str | None = None) -> list[dict]:
@@ -772,8 +820,10 @@ def find_identity_matches(conn, meta: dict, exclude_track_id: str | None = None)
         for row in rows:
             add(row["id"], 0.96, "musicbrainz_recording")
 
-    title = _identity_text(meta.get("title") or "")
-    artist = _identity_text(meta.get("artist") or "")
+    incoming = _canonical_identity(meta.get("artist"), meta.get("title"))
+    title = incoming.get("title_key") or _identity_text(meta.get("title") or "")
+    artist = incoming.get("artist_key") or _identity_text(meta.get("artist") or "")
+    incoming_version = meta.get("version_type") or incoming.get("version_type") or "ORIGINAL_MIX"
     identity_source = meta.get("identity_source")
     if title and artist:
         rows = conn.execute("""
@@ -781,20 +831,28 @@ def find_identity_matches(conn, meta: dict, exclude_track_id: str | None = None)
             WHERE id != COALESCE(?, '')
         """, (exclude_track_id,)).fetchall()
         for row in rows:
-            if _identity_text(row["title"] or "") != title:
+            existing = _canonical_identity(row["artist"], row["title"])
+            if (existing.get("title_key") or _identity_text(row["title"] or "")) != title:
                 continue
-            if _identity_text(row["artist"] or "") != artist:
+            if (existing.get("artist_key") or _identity_text(row["artist"] or "")) != artist:
                 continue
-            score = 0.94 if identity_source in {"acoustid", "shazam"} else 0.86
+            sources = set(meta.get("all_sources") or [])
+            if identity_source:
+                sources.add(identity_source)
+            trusted = bool(sources & {
+                "acoustid", "shazam", "spotify_isrc", "spotify_fuzzy",
+                "discogs", "mb_by_id", "mb_by_isrc", "youtube_title",
+            })
+            score = 0.94 if trusted else 0.86
             duration = meta.get("duration")
             existing_duration = row["duration"]
             if duration and existing_duration:
                 ratio = abs(float(duration) - float(existing_duration)) / max(float(duration), float(existing_duration))
                 if ratio <= 0.08:
                     score += 0.02
-                elif ratio >= 0.45:
+                elif ratio >= 0.45 and incoming_version == "ORIGINAL_MIX":
                     score -= 0.005
-            add(row["id"], score, f"title_artist_{identity_source or 'unknown'}")
+            add(row["id"], score, f"canonical_title_artist_{identity_source or 'unknown'}")
 
     return sorted(matches.values(), key=lambda item: item["score"], reverse=True)
 
@@ -806,6 +864,19 @@ def _identity_text(value: str) -> str:
     text = re.sub(r"\s*[\(\[].*?[\)\]]", "", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
+
+
+def _canonical_identity(artist: str | None, title: str | None) -> dict:
+    try:
+        from api.services.identification.canonical import canonicalize
+        identity = canonicalize(artist, title)
+        return {
+            "artist_key": identity.artist_key,
+            "title_key": identity.title_key,
+            "version_type": identity.version_type,
+        }
+    except Exception:
+        return {"artist_key": "", "title_key": "", "version_type": "ORIGINAL_MIX"}
 
 
 # Downloads
@@ -1170,3 +1241,110 @@ def cancel_scheduled_queue(conn, sq_id: int) -> bool:
     )
     conn.commit()
     return cursor.rowcount > 0
+
+
+# External lookup cache (AcoustID, MusicBrainz, Discogs, Shazam, Spotify, Genius...)
+
+def cache_get_external(conn, provider: str, key: str) -> str | None:
+    row = conn.execute(
+        "SELECT response, fetched_at, ttl_seconds FROM external_lookup_cache "
+        "WHERE provider = ? AND cache_key = ?",
+        (provider, key),
+    ).fetchone()
+    if not row:
+        return None
+    if row["ttl_seconds"] > 0 and (int(time.time()) - int(row["fetched_at"])) > int(row["ttl_seconds"]):
+        return None
+    return row["response"]
+
+
+def cache_put_external(conn, provider: str, key: str, response: str, ttl_seconds: int) -> None:
+    conn.execute(
+        "INSERT INTO external_lookup_cache (provider, cache_key, response, fetched_at, ttl_seconds) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(provider, cache_key) DO UPDATE SET "
+        "response = excluded.response, fetched_at = excluded.fetched_at, ttl_seconds = excluded.ttl_seconds",
+        (provider, key, response, int(time.time()), int(ttl_seconds)),
+    )
+    conn.commit()
+
+
+def cache_purge_external(conn, provider: str | None = None, older_than_seconds: int | None = None) -> int:
+    clauses = []
+    params: list = []
+    if provider:
+        clauses.append("provider = ?")
+        params.append(provider)
+    if older_than_seconds:
+        clauses.append("fetched_at < ?")
+        params.append(int(time.time()) - older_than_seconds)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    cursor = conn.execute(f"DELETE FROM external_lookup_cache{where}", params)
+    conn.commit()
+    return cursor.rowcount
+
+
+# Identification jobs (persistent retry queue for indexer)
+
+def upsert_identification_job(conn, asset_id: str, *, status: str = "pending", next_retry_at: int = 0) -> None:
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO identification_jobs (asset_id, status, attempts, next_retry_at, created_at, updated_at) "
+        "VALUES (?, ?, 0, ?, ?, ?) "
+        "ON CONFLICT(asset_id) DO UPDATE SET "
+        "status = excluded.status, next_retry_at = excluded.next_retry_at, updated_at = excluded.updated_at",
+        (asset_id, status, next_retry_at, now, now),
+    )
+    conn.commit()
+
+
+def claim_identification_jobs(conn, limit: int = 5) -> list[dict]:
+    now = int(time.time())
+    rows = conn.execute(
+        "SELECT asset_id, status, attempts, last_error, next_retry_at FROM identification_jobs "
+        "WHERE status IN ('pending', 'retry') AND next_retry_at <= ? "
+        "ORDER BY next_retry_at ASC LIMIT ?",
+        (now, limit),
+    ).fetchall()
+    claimed = []
+    for row in rows:
+        cursor = conn.execute(
+            "UPDATE identification_jobs SET status = 'in_progress', updated_at = ? "
+            "WHERE asset_id = ? AND status IN ('pending', 'retry')",
+            (now, row["asset_id"]),
+        )
+        if cursor.rowcount:
+            claimed.append(dict(row))
+    conn.commit()
+    return claimed
+
+
+def complete_identification_job(conn, asset_id: str, *, success: bool, error: str | None = None) -> None:
+    now = int(time.time())
+    if success:
+        conn.execute(
+            "UPDATE identification_jobs SET status = 'done', last_error = NULL, updated_at = ? "
+            "WHERE asset_id = ?",
+            (now, asset_id),
+        )
+    else:
+        row = conn.execute(
+            "SELECT attempts FROM identification_jobs WHERE asset_id = ?", (asset_id,)
+        ).fetchone()
+        attempts = (int(row["attempts"]) if row else 0) + 1
+        backoff_table = [60, 300, 1800, 7200, 43200, 86400]
+        delay = backoff_table[min(attempts - 1, len(backoff_table) - 1)]
+        new_status = "failed" if attempts >= 8 else "retry"
+        conn.execute(
+            "UPDATE identification_jobs SET status = ?, attempts = ?, last_error = ?, "
+            "next_retry_at = ?, updated_at = ? WHERE asset_id = ?",
+            (new_status, attempts, (error or "")[:500], now + delay, now, asset_id),
+        )
+    conn.commit()
+
+
+def get_identification_job(conn, asset_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM identification_jobs WHERE asset_id = ?", (asset_id,)
+    ).fetchone()
+    return _dict(row)

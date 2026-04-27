@@ -1,30 +1,154 @@
-// static/js/Cursor.js
+// static/js/utils/Cursor.js
 import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+
+const INTERACTIVE_SELECTOR = [
+  '.hover-target',
+  '[data-cursor]:not([data-cursor="ignore"])',
+  'a[href]',
+  'button',
+  'input:not([type="hidden"])',
+  'select',
+  'textarea',
+  'summary',
+  'label[for]',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="tab"]',
+  '[role="option"]',
+  '[role="slider"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+  '[onclick]',
+  '[data-action]',
+  '[data-tab]',
+  '[data-filter]',
+  '[data-mode]',
+  '[data-remove-idx]',
+  '#webgl-container',
+  '.btn',
+  '.btn-action',
+  '.dl-filter-btn',
+  '.folder-close-btn',
+  '.folder-sort-select',
+  '.folder-track-remove',
+  '.playlist-card',
+  '.playlist-folder-track',
+  '.playlist-picker-item',
+  '.q-action-btn',
+  '.q-item',
+  '.q-remove',
+  '.tab',
+  '.track-action-btn',
+  '.track-card'
+].join(',');
+
+const TEXT_SELECTOR = [
+  'textarea',
+  '[contenteditable="true"]',
+  'input:not([type])',
+  'input[type="email"]',
+  'input[type="number"]',
+  'input[type="password"]',
+  'input[type="search"]',
+  'input[type="tel"]',
+  'input[type="text"]',
+  'input[type="url"]'
+].join(',');
+
+const RANGE_SELECTOR = [
+  'input[type="range"]',
+  '[role="slider"]'
+].join(',');
+
+const CARD_SELECTOR = [
+  '.playlist-card',
+  '.playlist-folder-track',
+  '.q-item',
+  '.track-card',
+  '[role="option"]'
+].join(',');
+
+const DANGER_SELECTOR = [
+  '.btn-danger',
+  '.q-action-danger',
+  '.rs-context-item--danger',
+  '[aria-label*="delete" i]',
+  '[aria-label*="remove" i]',
+  '[data-action*="delete" i]',
+  '[title*="delete" i]',
+  '[title*="remove" i]'
+].join(',');
+
+const TOGGLE_SELECTOR = [
+  'input[type="checkbox"]',
+  'input[type="radio"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '.toggle'
+].join(',');
+
+const MODE_CLASSES = [
+  'cursor-card',
+  'cursor-danger',
+  'cursor-drag',
+  'cursor-hidden',
+  'cursor-pressing',
+  'cursor-range',
+  'cursor-select',
+  'cursor-text',
+  'cursor-toggle'
+];
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isElement(node) {
+  return node?.nodeType === Node.ELEMENT_NODE;
+}
 
 export default class Cursor {
   constructor() {
     this.dot = document.getElementById('cursor-dot');
     this.mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     this.pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    
-    this.speedFree = 0.75;    
-    this.speedMagnetic = 0.2; 
-    
+
+    this.speedFree = 0.75;
+    this.speedMagnetic = 0.2;
+    this.speedFollow = 0.68;
+
     this.isHovering = false;
+    this.isPressing = false;
     this.isContextRing = false;
     this.isContextMorphing = false;
     this.currentTarget = null;
     this.targetRect = null;
+    this.cursorMode = 'default';
     this.contextMorphTimer = null;
+    this.prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
-    // Bound refs — stored once so they can be removed in destroy()
-    this._renderBound        = this.render.bind(this);
-    this._onMouseMove        = (e) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.checkHoverState(e); };
-    this._onMouseLeave       = () => this.resetHover();
-    this._onScroll           = () => { if (this.isHovering && this.currentTarget && this.currentTarget.isConnected) { this.targetRect = this.currentTarget.getBoundingClientRect(); } };
-    this._onContextOpen      = (e) => { this.startContextMorph(e.detail?.x, e.detail?.y); };
-    this._onContextClose     = () => this.stopContextMorph();
-    this._rafId              = null;
+    this._renderBound = this.render.bind(this);
+    this._onPointerMove = (e) => this.handlePointerMove(e);
+    this._onPointerDown = (e) => this.handlePointerDown(e);
+    this._onPointerUp = () => this.releasePress();
+    this._onMouseLeave = () => {
+      this.releasePress();
+      this.resetHover();
+      this.dot?.classList.add('cursor-hidden');
+    };
+    this._onScroll = () => {
+      if (this.isHovering && this.isValidTarget(this.currentTarget)) {
+        this.targetRect = this.currentTarget.getBoundingClientRect();
+      }
+    };
+    this._onContextOpen = (e) => { this.startContextMorph(e.detail?.x, e.detail?.y); };
+    this._onContextClose = () => this.stopContextMorph();
+    this._rafId = null;
 
     this.init();
   }
@@ -32,46 +156,106 @@ export default class Cursor {
   init() {
     if (!this.dot) return;
 
-    window.addEventListener('mousemove',            this._onMouseMove);
-    document.addEventListener('mouseleave',         this._onMouseLeave);
-    window.addEventListener('scroll',               this._onScroll, { capture: true, passive: true });
-    window.addEventListener('rolfsound-context-open',  this._onContextOpen);
+    window.addEventListener('pointermove', this._onPointerMove, { passive: true });
+    window.addEventListener('pointerdown', this._onPointerDown, { passive: true });
+    window.addEventListener('pointerup', this._onPointerUp);
+    window.addEventListener('pointercancel', this._onPointerUp);
+    window.addEventListener('blur', this._onPointerUp);
+    document.addEventListener('mouseleave', this._onMouseLeave);
+    window.addEventListener('scroll', this._onScroll, { capture: true, passive: true });
+    window.addEventListener('rolfsound-context-open', this._onContextOpen);
     window.addEventListener('rolfsound-context-close', this._onContextClose);
 
     this._rafId = requestAnimationFrame(this._renderBound);
   }
 
   destroy() {
-    window.removeEventListener('mousemove',            this._onMouseMove);
-    document.removeEventListener('mouseleave',         this._onMouseLeave);
-    window.removeEventListener('scroll',               this._onScroll, { capture: true });
-    window.removeEventListener('rolfsound-context-open',  this._onContextOpen);
+    window.removeEventListener('pointermove', this._onPointerMove);
+    window.removeEventListener('pointerdown', this._onPointerDown);
+    window.removeEventListener('pointerup', this._onPointerUp);
+    window.removeEventListener('pointercancel', this._onPointerUp);
+    window.removeEventListener('blur', this._onPointerUp);
+    document.removeEventListener('mouseleave', this._onMouseLeave);
+    window.removeEventListener('scroll', this._onScroll, { capture: true });
+    window.removeEventListener('rolfsound-context-open', this._onContextOpen);
     window.removeEventListener('rolfsound-context-close', this._onContextClose);
-    if (this._rafId !== null) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+    if (this._rafId !== null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
     AnimationEngine.clearScheduled(this, 'contextMorphTimer');
   }
 
-  // ─── FUNÇÃO NOVA: Limpa o estado do cursor com segurança ───
+  handlePointerMove(e) {
+    if (e.pointerType === 'touch') {
+      this.dot?.classList.add('cursor-hidden');
+      return;
+    }
+
+    this.dot?.classList.remove('cursor-hidden');
+    this.mouse.x = e.clientX;
+    this.mouse.y = e.clientY;
+    this.checkHoverState(e);
+  }
+
+  handlePointerDown(e) {
+    if (e.pointerType === 'touch') return;
+
+    this.mouse.x = e.clientX;
+    this.mouse.y = e.clientY;
+    this.isPressing = true;
+    this.dot?.classList.add('cursor-pressing');
+    this.checkHoverState(e);
+
+    if (this.cursorMode === 'range' || this.cursorMode === 'drag') {
+      this.dot?.classList.add('cursor-drag');
+    }
+  }
+
+  releasePress() {
+    this.isPressing = false;
+    this.dot?.classList.remove('cursor-pressing', 'cursor-drag');
+  }
+
   resetHover() {
+    if (!this.dot) return;
+
     this.isHovering = false;
     this.currentTarget = null;
     this.targetRect = null;
+    this.setCursorMode('default');
     this.dot.classList.remove('hovering');
 
-    this.dot.style.width = '5px';
-    this.dot.style.height = '5px';
-    this.dot.style.borderRadius = '50%';
-    this.dot.style.border = '0';
+    this.dot.style.width = '';
+    this.dot.style.height = '';
+    this.dot.style.borderRadius = '';
+    this.dot.style.border = '';
+    this.dot.style.background = '';
     this.dot.style.backgroundColor = '';
-    
+
     this.dot.style.setProperty('--dx', '0px');
     this.dot.style.setProperty('--dy', '0px');
+  }
+
+  setCursorMode(mode) {
+    if (!this.dot) return;
+
+    const normalized = mode || 'default';
+    if (this.cursorMode === normalized) return;
+
+    this.dot.classList.remove(...MODE_CLASSES.filter((className) => className !== 'cursor-hidden' && className !== 'cursor-pressing'));
+    this.cursorMode = normalized;
+
+    if (normalized !== 'default') {
+      this.dot.classList.add(`cursor-${normalized}`);
+    }
   }
 
   setContextRing() {
     if (this.isContextRing) return;
     this.isContextRing = true;
     this.dot.classList.remove('hovering');
+    this.setCursorMode('default');
     this.dot.classList.add('context-ring');
     this.dot.style.setProperty('--dx', '0px');
     this.dot.style.setProperty('--dy', '0px');
@@ -81,38 +265,25 @@ export default class Cursor {
     if (!this.isContextRing) return;
     this.isContextRing = false;
     this.dot.classList.remove('context-ring');
-    this.dot.style.border = '0';
+    this.dot.style.border = '';
+    this.dot.style.background = '';
     this.dot.style.backgroundColor = '';
   }
 
   checkHoverState(e) {
     if (this.isContextMorphing) return;
 
-    // Valida se o elemento ainda existe e tem a classe
-    if (this.currentTarget && (!this.currentTarget.isConnected || !this.currentTarget.classList.contains('hover-target'))) {
+    if (this.currentTarget && !this.isValidTarget(this.currentTarget)) {
       this.resetHover();
     }
 
-    const path = e.composedPath();
-    const target = path.find(el => el.classList && el.classList.contains('hover-target'));
-    const insideContextMenu = path.find(el => el.classList && el.classList.contains('rs-context-menu'));
+    const path = e.composedPath?.() || [];
+    const target = this.findCursorTarget(path);
+    const insideContextMenu = path.some((el) => isElement(el) && el.classList.contains('rs-context-menu'));
 
     if (target) {
       this.clearContextRing();
-
-      if (this.currentTarget !== target) {
-        this.currentTarget = target;
-        this.isHovering = true;
-        this.dot.classList.add('hovering');
-
-        // Calcula tamanho APENAS UMA VEZ (pois o botão não cresce/encolhe)
-        this.targetRect = target.getBoundingClientRect();
-        const style = window.getComputedStyle(target);
-
-        this.dot.style.width = `${this.targetRect.width}px`;
-        this.dot.style.height = `${this.targetRect.height}px`;
-        this.dot.style.borderRadius = style.borderRadius;
-      }
+      this.setHoverTarget(target);
     } else if (insideContextMenu) {
       if (this.isHovering) this.resetHover();
       this.setContextRing();
@@ -122,6 +293,96 @@ export default class Cursor {
     } else {
       this.clearContextRing();
     }
+  }
+
+  findCursorTarget(path) {
+    for (const node of path) {
+      if (!isElement(node) || node === this.dot || node.id === 'cursor-dot') continue;
+      if (node.closest?.('[data-cursor="ignore"]')) return null;
+      if (this.isValidTarget(node) && this.matchesInteractiveTarget(node)) return node;
+    }
+    return null;
+  }
+
+  matchesInteractiveTarget(el) {
+    if (el.matches?.(INTERACTIVE_SELECTOR)) return true;
+
+    const cursor = window.getComputedStyle(el).cursor;
+    return cursor && !['auto', 'default', 'none'].includes(cursor);
+  }
+
+  isValidTarget(el) {
+    if (!isElement(el) || !el.isConnected) return false;
+    if (el.matches?.('[data-cursor="ignore"], :disabled, [disabled], [aria-disabled="true"]')) return false;
+    if (el.closest?.('[inert], [aria-hidden="true"]')) return false;
+
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return false;
+
+    const rect = el.getBoundingClientRect();
+    return rect.width > 1 && rect.height > 1;
+  }
+
+  setHoverTarget(target) {
+    const mode = this.getCursorModeForTarget(target);
+
+    if (this.currentTarget !== target || this.cursorMode !== mode) {
+      this.currentTarget = target;
+      this.isHovering = true;
+      this.dot.classList.add('hovering');
+      this.setCursorMode(mode);
+      this.syncTargetGeometry();
+    }
+  }
+
+  getCursorModeForTarget(target) {
+    const explicit = target.getAttribute?.('data-cursor');
+    if (explicit && explicit !== 'target') return explicit;
+    if (target.id === 'webgl-container' || target.matches?.('[draggable="true"], .draggable, .grab, .grabbable')) return 'drag';
+    if (target.matches?.(TEXT_SELECTOR)) return 'text';
+    if (target.matches?.(RANGE_SELECTOR)) return 'range';
+    if (target.matches?.('select')) return 'select';
+    if (target.matches?.(DANGER_SELECTOR)) return 'danger';
+    if (target.matches?.(TOGGLE_SELECTOR)) return 'toggle';
+    if (target.matches?.(CARD_SELECTOR)) return 'card';
+    return 'interactive';
+  }
+
+  syncTargetGeometry() {
+    if (!this.dot || !this.currentTarget) return;
+
+    const rect = this.currentTarget.getBoundingClientRect();
+    const style = window.getComputedStyle(this.currentTarget);
+    let width = rect.width;
+    let height = rect.height;
+    let radius = style.borderRadius || '999px';
+
+    if (this.cursorMode === 'text') {
+      width = 3;
+      height = clamp(rect.height * 0.7, 18, 30);
+      radius = '3px';
+    } else if (this.cursorMode === 'range') {
+      const horizontal = rect.width >= rect.height;
+      width = horizontal ? 34 : 16;
+      height = horizontal ? 16 : 34;
+      radius = '999px';
+    } else if (this.cursorMode === 'drag') {
+      width = this.isPressing ? 24 : 18;
+      height = this.isPressing ? 24 : 18;
+      radius = '999px';
+    } else if (this.cursorMode === 'select') {
+      width = Math.min(rect.width, 120);
+      height = rect.height;
+    }
+
+    this.targetRect = rect;
+    this.dot.style.width = `${width}px`;
+    this.dot.style.height = `${height}px`;
+    this.dot.style.borderRadius = radius;
+  }
+
+  targetFollowsPointer() {
+    return ['drag', 'range', 'text'].includes(this.cursorMode);
   }
 
   startContextMorph(x, y) {
@@ -163,39 +424,37 @@ export default class Cursor {
   }
 
   render() {
-    let targetX, targetY, currentSpeed;
+    let targetX;
+    let targetY;
+    let currentSpeed;
 
     if (this.isContextMorphing) {
       targetX = this.pos.x;
       targetY = this.pos.y;
       currentSpeed = 1;
     } else if (this.isHovering && this.currentTarget) {
-      // ─── A CORREÇÃO DO BUG DA MITOSE ESTÁ AQUI ───
-      // Se o botão for deletado do DOM OU perder a classe hover-target, solta o cursor imediatamente!
-      if (!this.currentTarget.isConnected || !this.currentTarget.classList.contains('hover-target')) {
+      if (!this.isValidTarget(this.currentTarget) || !this.matchesInteractiveTarget(this.currentTarget)) {
         this.resetHover();
-        
-        // Redireciona o alvo imediatamente para o mouse livre para não engasgar
         targetX = this.mouse.x;
         targetY = this.mouse.y;
         currentSpeed = this.speedFree;
       } else {
-        // Atualiza posição E tamanho em TEMPO REAL para acompanhar animações CSS
-        this.targetRect = this.currentTarget.getBoundingClientRect();
+        this.syncTargetGeometry();
 
-        targetX = this.targetRect.left + this.targetRect.width / 2;
-        targetY = this.targetRect.top + this.targetRect.height / 2;
-
-        this.dot.style.width  = `${this.targetRect.width}px`;
-        this.dot.style.height = `${this.targetRect.height}px`;
+        if (this.targetFollowsPointer()) {
+          targetX = this.mouse.x;
+          targetY = this.mouse.y;
+          currentSpeed = this.speedFollow;
+        } else {
+          targetX = this.targetRect.left + this.targetRect.width / 2;
+          targetY = this.targetRect.top + this.targetRect.height / 2;
+          currentSpeed = this.speedMagnetic;
+        }
 
         const dx = (this.mouse.x - targetX) * 0.4;
         const dy = (this.mouse.y - targetY) * 0.4;
-
         this.dot.style.setProperty('--dx', `${dx}px`);
         this.dot.style.setProperty('--dy', `${dy}px`);
-        
-        currentSpeed = this.speedMagnetic;
       }
     } else {
       targetX = this.mouse.x;
@@ -203,11 +462,15 @@ export default class Cursor {
       currentSpeed = this.speedFree;
     }
 
-    this.pos.x += (targetX - this.pos.x) * currentSpeed;
-    this.pos.y += (targetY - this.pos.y) * currentSpeed;
+    if (this.prefersReducedMotion) {
+      this.pos.x = targetX;
+      this.pos.y = targetY;
+    } else {
+      this.pos.x += (targetX - this.pos.x) * currentSpeed;
+      this.pos.y += (targetY - this.pos.y) * currentSpeed;
+    }
 
-    // Usando translate3d força a renderização via Hardware (GPU)
-    this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0)`;
+    this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0) scale(var(--cursor-scale, 1))`;
 
     this._rafId = requestAnimationFrame(this._renderBound);
   }

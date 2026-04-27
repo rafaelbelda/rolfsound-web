@@ -39,6 +39,17 @@ _DEFAULTS = {
     # Users never see or touch these; they just click "Connect Discogs account".
     "discogs_consumer_key":      "",
     "discogs_consumer_secret":   "",
+    # MusicBrainz requires a User-Agent identifying the app + contact.
+    # See: musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
+    "musicbrainz_user_agent":    "Rolfsound/1.0 ( https://github.com/lucksducks/rolfsound )",
+    # Spotify Web API (Client Credentials flow). Free; create app at developer.spotify.com.
+    "spotify_client_id":         "",
+    "spotify_client_secret":     "",
+    # Genius API token (free; api.genius.com). Used to validate uncertain matches.
+    "genius_token":              "",
+    # Identification queue worker tunables.
+    "identification_workers":    2,
+    "identification_max_attempts": 8,
 }
 
 _config: dict = {}

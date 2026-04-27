@@ -43,7 +43,7 @@ header {
 
 .reset-btn {
   all: unset;
-  cursor: pointer;
+  cursor: none;
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
@@ -118,7 +118,7 @@ header {
   width: 24px;
   height: 24px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: none;
   font-size: 18px;
   color: rgba(255, 255, 255, 0.6);
   transition: all 0.15s ease;
@@ -144,7 +144,7 @@ input[type="range"] {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
   outline: none;
-  cursor: pointer;
+  cursor: none;
 }
 
 /* Webkit (Chrome/Safari) Thumb */
@@ -191,7 +191,7 @@ footer {
   gap: 10px;
   font-size: 12px;
   opacity: 0.8;
-  cursor: pointer;
+  cursor: none;
 }
 
 /* Custom Checkbox estilo iOS Switch */

@@ -11,7 +11,7 @@
   gap: 10px;
   padding: 7px 10px 7px 8px;
   border-radius: var(--radius-lg);
-  cursor: pointer;
+  cursor: none;
   transition:
     background 0.14s var(--ease-standard),
     outline 0.1s ease;
@@ -186,7 +186,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: none;
   transition:
     background 0.12s ease,
     color 0.12s ease,

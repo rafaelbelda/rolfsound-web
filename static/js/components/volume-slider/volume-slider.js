@@ -42,7 +42,7 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
           </svg>
         </button>
         <div class="track-wrap" aria-hidden="true">
-          <div class="vol-track">
+          <div class="vol-track" data-cursor="range" role="slider" aria-label="Volume">
             <div class="vol-fill"></div>
             <div class="vol-thumb"></div>
           </div>

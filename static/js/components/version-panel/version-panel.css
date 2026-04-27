@@ -117,7 +117,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: none;
   transition: transform 0.2s var(--ease-spring), background-color 0.14s ease, color 0.14s ease;
 }
 
@@ -209,7 +209,7 @@
   border: 1px solid var(--color-border-interactive);
   background: var(--color-surface-interactive);
   color: var(--color-text-control);
-  cursor: pointer;
+  cursor: none;
   transition:
     transform 0.2s var(--ease-spring),
     background-color 0.14s ease,
@@ -310,7 +310,7 @@
 
 .version-default-btn:disabled {
   opacity: 0.55;
-  cursor: default;
+  cursor: none;
 }
 
 @keyframes version-row-in {

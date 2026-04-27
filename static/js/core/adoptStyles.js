@@ -12,6 +12,17 @@
 //   this.shadowRoot.adoptedStyleSheets = [tokensSheet, sheet];
 
 const _cache = new Map();
+const SHADOW_CURSOR_RESET = `
+:host {
+  cursor: none !important;
+}
+
+*,
+*::before,
+*::after {
+  cursor: none !important;
+}
+`;
 
 export async function adoptStyles(url) {
   if (_cache.has(url)) return _cache.get(url);
@@ -23,7 +34,7 @@ export async function adoptStyles(url) {
     }
     const text = await response.text();
     const sheet = new CSSStyleSheet();
-    await sheet.replace(text);
+    await sheet.replace(`${text}\n${SHADOW_CURSOR_RESET}`);
     return sheet;
   })();
 

@@ -36,7 +36,7 @@
   height: 24px; /* Hitbox grande para o dedo */
   display: flex;
   align-items: center; /* Centraliza a barra verticalmente na hitbox */
-  cursor: pointer;
+  cursor: none;
   touch-action: none;
 }
 

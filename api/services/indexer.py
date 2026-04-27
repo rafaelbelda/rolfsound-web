@@ -16,6 +16,7 @@ import httpx
 from tinytag import TinyTag
 
 from core.database import database
+from api.services.identification.canonical import canonicalize
 from utils.image_processor import cache_remote_cover_candidates_sync
 from utils import config as cfg
 
@@ -313,14 +314,18 @@ _BRACKET_NOISE_RE = re.compile(
     r"\b("
     r"official|audio|video|visuali[sz]er|lyrics?|lyric video|remaster(?:ed)?|"
     r"explicit|uncensored|censored|clean|radio edit|single edit|album version|full album|hd|hq|4k|"
-    r"provided to youtube|topic|official music video|feat\.?|ft\.?|featuring"
+    r"provided to youtube|topic|official music video|feat\.?|ft\.?|featuring|"
+    r"remix|rework|live|demo|instrumental|karaoke|acapella|a cappella|"
+    r"alt|alternate|alternative|version|slowed|reverb|sped up|nightcore"
     r")\b",
     re.IGNORECASE,
 )
 _TITLE_NOISE_RE = re.compile(
     r"\b("
     r"official|audio|video|visuali[sz]er|lyrics?|remaster(?:ed)?|explicit|clean|"
-    r"radio edit|single edit|album version|provided to youtube by|topic|hd|hq|4k"
+    r"radio edit|single edit|album version|provided to youtube by|topic|hd|hq|4k|"
+    r"remix|rework|live|demo|instrumental|karaoke|acapella|a cappella|"
+    r"alt|alternate|alternative|version|slowed|reverb|sped up|nightcore"
     r")\b",
     re.IGNORECASE,
 )
@@ -390,7 +395,7 @@ def _needs_shazam_lookup(title: str | None, artist: str | None, identity_source:
         not artist or
         _is_generic_title(title) or
         _is_generic_artist(artist) or
-        identity_source in {"local_tags", "filename", None}
+        identity_source in {"local_tags", "filename", "existing_metadata", None}
     )
 
 
@@ -870,136 +875,88 @@ async def identify_track(
     existing_artist: str | None = None,
     existing_year: int | None = None,
     existing_thumbnail: str | None = None,
+    youtube_id: str | None = None,
+    youtube_title: str | None = None,
 ) -> dict:
-    local_tags = await asyncio.to_thread(extract_local_tags, file_path, track_id)
+    """
+    Run the multi-provider identification pipeline.
 
-    artist = local_tags.get("artist")
-    title = local_tags.get("title")
-    local_tag_thumbnail = local_tags.get("thumbnail")
-    thumbnail = local_tag_thumbnail or existing_thumbnail
-    year = local_tags.get("year") or existing_year
-    duration = local_tags.get("duration")
-    identity_source = "local_tags" if title and artist and not _is_generic_title(title) and not _is_generic_artist(artist) else None
-    mb_id = None
-    raw_fp = None
-    recording = None
-    shazam_match = None
-    shazam_thumbnail = None
+    Delegates to api.services.identification.pipeline.identify and translates
+    the consensus result to the shape index_asset expects (`thumbnail`,
+    `identity_source`, etc.). Falls back to filename-derived title when no
+    provider produces one and `fallback_title` is given.
+    """
+    from api.services.identification.pipeline import identify as pipeline_identify
 
-    if _is_generic_title(title) and not _is_generic_title(existing_title):
-        title = existing_title
-        identity_source = identity_source or "existing_metadata"
-    if _is_generic_artist(artist) and not _is_generic_artist(existing_artist):
-        artist = existing_artist
-        identity_source = identity_source or "existing_metadata"
+    hints = {
+        "existing_title": existing_title,
+        "existing_artist": existing_artist,
+        "existing_year": existing_year,
+        "existing_thumbnail": existing_thumbnail,
+        "youtube_id": youtube_id,
+        "youtube_title": youtube_title,
+    }
+    result = await pipeline_identify(file_path, track_id, hints=hints)
 
-    if title and artist:
-        logger.debug(f"Indexer [{track_id}]: local tags found, fingerprinting for identity")
-    else:
-        logger.info(f"Indexer [{track_id}]: metadata incomplete, starting fingerprint")
-
-    fp = await fingerprint(file_path)
-    logger.info(f"Indexer [{track_id}]: fingerprint {'ok' if fp else 'failed'}")
-    if fp:
-        duration = duration or fp["duration"]
-        raw_fp = fp["fingerprint"]
-
-        recording = await lookup_acoustid(fp)
-        logger.info(f"Indexer [{track_id}]: AcoustID {'matched' if recording else 'no match'}")
-        if recording:
-            recording_artist = recording["artists"][0]["name"] if recording.get("artists") else None
-            artist = recording_artist or artist
-            title = recording.get("title") or title
-            mb_id = recording.get("id")
-            identity_source = "acoustid"
-
-    if _needs_shazam_lookup(title, artist, identity_source) and not (recording and recording.get("artists") and recording.get("title")):
-        logger.info(f"Indexer [{track_id}]: invoking Shazamio (source={identity_source})")
-        shazam = await lookup_shazam(file_path)
-        if shazam:
-            shazam_match = shazam
-            shazam_thumbnail = shazam.get("thumbnail") or None
-            artist = shazam["artist"] or artist
-            title = shazam["title"] or title
-            identity_source = "shazam"
+    title = (result.get("title") or "").strip() or None
+    artist = (result.get("artist") or "").strip() or None
 
     if (not title or _is_generic_title(title)) and fallback_title:
-        title = re.sub(
+        cleaned = re.sub(
             r"\s*[\(\[].*[\)\]]|\s+-\s+(?:official.*|lyric.*)|\s+\|\s+.*$",
             "",
             fallback_title,
             flags=re.IGNORECASE,
-        ).strip(" -") or fallback_title
-        identity_source = identity_source or "filename"
-
-    artist, title = _split_embedded_artist_title(artist, title)
+        ).strip(" -")
+        title = cleaned or fallback_title
+        result["sources"] = (result.get("sources") or []) + ["filename_fallback"]
 
     if _is_generic_title(title):
-        title = ""
+        title = None
     if _is_generic_artist(artist):
-        artist = ""
+        artist = None
+
+    if title and artist:
+        artist, title = _recover_artist_from_yt_title(artist, title)
 
     if not title:
         return {
             "status": "unidentified",
             "reason": "generic_or_missing_metadata",
-            "raw_fp": raw_fp,
-            "identity_source": identity_source or "unknown",
+            "raw_fp": result.get("raw_fp"),
+            "identity_source": (result.get("sources") or ["unknown"])[0],
+            "confidence": result.get("confidence", 0.0),
+            "evidence": result.get("evidence"),
         }
 
-    if identity_source != "shazam":
-        recovered_artist, recovered_title = _recover_artist_from_yt_title(artist, title)
-        if recovered_artist != artist or recovered_title != title:
-            logger.info(
-                "Indexer [%s]: recovered from YT title: artist=%r title=%r (was: %r / %r)",
-                track_id, recovered_artist, recovered_title, artist, title,
-            )
-            artist, title = recovered_artist, recovered_title
-
-    discogs = None
-    _thumb_kind = _thumbnail_kind(thumbnail)
-    if title and (not year or not thumbnail or _thumb_kind in {"youtube", "none"}):
-        logger.info(f"Indexer [{track_id}]: fetching Discogs enrichment")
-        discogs = await lookup_discogs(artist or "", title, year=year, duration=duration)
-
-    if discogs:
-        discogs_confidence = float(discogs.get("_rolfsound_confidence") or 0)
-        _unverified_source = identity_source in {"local_tags", "filename", None}
-        discogs_artist_raw, _ = _split_discogs_title(discogs.get("title"))
-        discogs_artist = _clean_display_artist(discogs_artist_raw)
-        if not artist or (_unverified_source and discogs_confidence >= DISCOGS_MIN_CONFIDENCE and discogs_artist):
-            artist = discogs_artist or artist
-        discogs_track_title = discogs.get("_rolfsound_track_title")
-        if discogs_track_title and _unverified_source and discogs_confidence >= DISCOGS_MIN_CONFIDENCE:
-            title = _clean_display_title(discogs_track_title)
-
-    if _should_use_discogs_cover(thumbnail, local_tag_thumbnail, discogs):
-        thumbnail = discogs.get("cover_image")
-    elif shazam_thumbnail and _thumbnail_kind(thumbnail) in {"youtube", "none", ""}:
-        thumbnail = shazam_thumbnail
-        logger.info(
-            "Indexer [%s]: using Shazamio artwork fallback for %s - %s",
-            track_id,
-            artist or "",
-            title or "",
-        )
+    sources = result.get("sources") or []
+    primary_source = sources[0] if sources else "unknown"
 
     return {
-        "status": "identified",
+        "status": result.get("status", "identified"),
         "title": title,
-        "artist": artist,
-        "duration": duration,
-        "mb_recording_id": mb_id,
-        "discogs_id": discogs.get("id") if discogs else None,
-        "thumbnail": thumbnail,
-        "label": (discogs.get("label") or [None])[0] if discogs else None,
-        "year": year or (discogs.get("year") if discogs else None),
-        "raw_fp": raw_fp,
-        "identity_source": identity_source or "unknown",
-        "discogs_confidence": discogs.get("_rolfsound_confidence") if discogs else None,
-        "discogs_reasons": discogs.get("_rolfsound_reasons") if discogs else None,
-        "shazam_key": shazam_match.get("shazam_key") if shazam_match else None,
-        "shazam_url": shazam_match.get("url") if shazam_match else None,
+        "artist": artist or "",
+        "duration": result.get("duration"),
+        "mb_recording_id": result.get("mb_recording_id"),
+        "discogs_id": result.get("discogs_id"),
+        "spotify_id": result.get("spotify_id"),
+        "isrc": result.get("isrc"),
+        "canonical_title": result.get("canonical_title"),
+        "canonical_artist": result.get("canonical_artist"),
+        "version_type": result.get("version_type"),
+        "featured_artists": result.get("featured_artists"),
+        "thumbnail": result.get("cover_image"),
+        "label": result.get("label"),
+        "year": result.get("year"),
+        "raw_fp": result.get("raw_fp"),
+        "identity_source": primary_source,
+        "confidence": result.get("confidence"),
+        "all_sources": result.get("all_sources"),
+        "discogs_confidence": result.get("confidence") if "discogs" in sources else None,
+        "discogs_reasons": result.get("reasons"),
+        "shazam_key": None,
+        "shazam_url": None,
+        "evidence": result.get("evidence"),
     }
 
 
@@ -1018,6 +975,11 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         track_id = track["id"]
         file_path = asset["file_path"]
         fallback_title = track.get("title") or Path(file_path).stem
+        youtube_id = asset.get("source_ref") if asset.get("source") == "youtube" else None
+        youtube_title = None
+        if youtube_id:
+            download = database.get_download(conn, youtube_id)
+            youtube_title = (download or {}).get("title")
     finally:
         conn.close()
 
@@ -1029,11 +991,16 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         existing_artist=track.get("artist"),
         existing_year=track.get("year"),
         existing_thumbnail=track.get("thumbnail"),
+        youtube_id=youtube_id,
+        youtube_title=youtube_title,
     )
-    logger.info(f"index_asset {asset_id}: status={meta['status']}")
+    logger.info(
+        "index_asset %s: status=%s confidence=%s sources=%s",
+        asset_id, meta.get("status"), meta.get("confidence"), meta.get("all_sources"),
+    )
 
     track_update: dict = {"status": meta["status"]}
-    if meta["status"] == "identified":
+    if meta["status"] in ("identified", "low_confidence"):
         track_update.update({
             "title": meta.get("title"),
             "artist": meta.get("artist"),
@@ -1073,6 +1040,7 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
             "duration": track_update.get("duration"),
             "bpm": track_update.get("bpm"),
             "fingerprint": track_update.get("fingerprint"),
+            "asset_type": meta.get("version_type") if meta.get("version_type") != "ORIGINAL_MIX" else None,
         })
 
         can_update_track = (
@@ -1087,6 +1055,7 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
             for field in ("thumbnail", "discogs_id", "label", "year", "duration", "mb_recording_id"):
                 if track_update.get(field) and not track.get(field):
                     partial_update[field] = track_update[field]
+            partial_update.update(_canonical_display_update(track, meta))
             if partial_update:
                 database.update_track_metadata(conn, track["id"], partial_update)
         conn.commit()
@@ -1142,6 +1111,33 @@ async def index_file(track_id: str, file_path: str) -> dict:
     return await index_asset(asset["id"], allow_identity_resolution=False)
 
 
+def _canonical_display_update(track: dict, meta: dict) -> dict:
+    canonical_title = meta.get("canonical_title") or meta.get("title")
+    canonical_artist = meta.get("canonical_artist") or meta.get("artist")
+    if not canonical_title or not canonical_artist:
+        return {}
+
+    existing = canonicalize(track.get("artist"), track.get("title"))
+    incoming = canonicalize(canonical_artist, canonical_title)
+    if not incoming.artist_key or not incoming.title_key:
+        return {}
+
+    same_identity = (
+        existing.artist_key == incoming.artist_key
+        and existing.title_key == incoming.title_key
+    )
+    generic_existing = _is_generic_title(track.get("title")) or _is_generic_artist(track.get("artist"))
+    if not same_identity and not generic_existing:
+        return {}
+
+    update: dict = {}
+    if track.get("title") != incoming.canonical_title:
+        update["title"] = incoming.canonical_title
+    if track.get("artist") != incoming.canonical_artist:
+        update["artist"] = incoming.canonical_artist
+    return update
+
+
 def _resolve_identity(asset_id: str, meta: dict) -> str | None:
     conn = database.get_connection()
     try:
@@ -1159,9 +1155,14 @@ def _resolve_identity(asset_id: str, meta: dict) -> str | None:
             return source_track_id
 
         best = matches[0]
-        inferred_asset_type = _infer_asset_type(meta.get("title") or "", asset.get("asset_type"))
+        inferred_asset_type = _infer_asset_type(
+            meta.get("title") or "",
+            asset.get("asset_type"),
+            meta.get("version_type"),
+        )
 
         if best["score"] >= 0.93:
+            target_track = database.get_track(conn, best["track_id"])
             new_path = _move_asset_to_track_bundle(asset, best["track_id"], inferred_asset_type)
             if new_path and new_path != asset["file_path"]:
                 database.update_asset_path(conn, asset_id, new_path)
@@ -1172,6 +1173,10 @@ def _resolve_identity(asset_id: str, meta: dict) -> str | None:
                 asset_type=inferred_asset_type,
                 set_primary=False,
             )
+            if target_track:
+                display_update = _canonical_display_update(target_track, meta)
+                if display_update:
+                    database.update_track_metadata(conn, best["track_id"], display_update)
             database.add_identity_candidate(
                 conn,
                 asset_id,
@@ -1215,8 +1220,10 @@ def _resolve_identity(asset_id: str, meta: dict) -> str | None:
         conn.close()
 
 
-def _infer_asset_type(title: str, current_type: str | None) -> str:
+def _infer_asset_type(title: str, current_type: str | None, version_type: str | None = None) -> str:
     current = (current_type or "ORIGINAL_MIX").upper()
+    if version_type and version_type != "ORIGINAL_MIX":
+        return version_type
     text = title.lower()
     rules = [
         ("REMIX", r"\bremix\b|rework|edit mix"),
