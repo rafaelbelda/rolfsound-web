@@ -40,6 +40,37 @@ from .youtube_meta import parse_for_youtube_id, parse_video_title
 
 logger = logging.getLogger(__name__)
 
+
+_DESCRIPTIVE_BRACKETS_RE = __import__("re").compile(
+    r"[\(\[][^)\]]*?\b(?:live|acoustic|demo|unplugged|session|remix|rework|"
+    r"rmx|edit|cover|orchestral|symphonic|piano|solo|jam)\b[^)\]]*?[\)\]]",
+    __import__("re").IGNORECASE,
+)
+
+
+def _has_descriptive_brackets(text: str | None) -> bool:
+    """True when text has brackets with words that often appear in canonical
+    Discogs/Spotify titles (live recordings, acoustic versions, named remixes).
+    Used to decide whether the 2-pass retry is worth the extra API call."""
+    if not text:
+        return False
+    return bool(_DESCRIPTIVE_BRACKETS_RE.search(text))
+
+
+def _channel_artist_mismatch(parsed: str | None, channel: str | None) -> bool:
+    """True when the artist parsed from a 'Artist - Title' video title is
+    clearly NOT the channel uploader (classic fan-upload case)."""
+    if not parsed or not channel:
+        return False
+    from api.services.indexer import _text_score, _tokens
+    if _text_score(parsed, channel) >= 0.55:
+        return False
+    pt, ct = _tokens(parsed), _tokens(channel)
+    if not pt or not ct:
+        return True
+    return not (pt <= ct or ct <= pt)
+
+
 _SHAZAM_CONTEXT_SOURCES = {
     "youtube_title",
     "youtube_meta",
@@ -134,14 +165,26 @@ async def _gather_local_evidence(
         if hints.get("youtube_id") and youtube_title:
             yt_title = parse_video_title(youtube_title, existing_artist)
             if yt_title.get("title") or yt_title.get("artist"):
+                base_conf = float(yt_title.get("confidence") or 0.0)
+                # Boost when the parsed artist is clearly different from the
+                # channel name (classic "real artist embedded in title" case),
+                # so this evidence outweighs other weak hints in consensus.
+                parsed_artist = yt_title.get("artist")
+                if (
+                    base_conf >= 0.78
+                    and parsed_artist
+                    and existing_artist
+                    and _channel_artist_mismatch(parsed_artist, existing_artist)
+                ):
+                    base_conf = max(base_conf, 0.85)
                 evidences.append(Evidence(
                     source="youtube_title",
-                    confidence=float(yt_title.get("confidence") or 0.0),
-                    artist=yt_title.get("artist"),
+                    confidence=base_conf,
+                    artist=parsed_artist,
                     title=yt_title.get("title"),
                     year=hints.get("existing_year"),
                     cover_image=existing_thumb,
-                    raw=yt_title,
+                    raw={**yt_title, "raw_youtube_title": youtube_title},
                     reasons=["yt_dlp_title"],
                 ))
         # Skip existing_track_row for YouTube tracks: existing_artist is the
@@ -474,6 +517,26 @@ async def _discogs_evidence(artist: str | None, title: str | None, year, duratio
     )
 
 
+async def _discogs_evidence_two_pass(
+    artist: str | None,
+    title: str | None,
+    fallback_title: str | None,
+    year,
+    duration,
+) -> Evidence | None:
+    """Try Discogs with the cleaned title first; if nothing comes back (or
+    confidence is too low), retry with a less-cleaned fallback title that
+    preserves descriptive brackets like '(Live at X)'."""
+    primary = await _discogs_evidence(artist, title, year, duration)
+    if primary and primary.confidence >= 0.84:
+        return primary
+    if fallback_title and fallback_title.strip().lower() != (title or "").strip().lower():
+        retry = await _discogs_evidence(artist, fallback_title, year, duration)
+        if retry and (not primary or retry.confidence > primary.confidence):
+            return retry
+    return primary
+
+
 async def _spotify_fuzzy_evidence(artist, title, duration) -> Evidence | None:
     if not title:
         return None
@@ -495,6 +558,23 @@ async def _spotify_fuzzy_evidence(artist, title, duration) -> Evidence | None:
         raw=sp,
         reasons=["spotify_fuzzy_search"],
     )
+
+
+async def _spotify_fuzzy_two_pass(
+    artist,
+    title,
+    fallback_title,
+    duration,
+) -> Evidence | None:
+    """Same 2-pass strategy as _discogs_evidence_two_pass for Spotify."""
+    primary = await _spotify_fuzzy_evidence(artist, title, duration)
+    if primary and primary.confidence >= 0.78 and primary.spotify_id:
+        return primary
+    if fallback_title and fallback_title.strip().lower() != (title or "").strip().lower():
+        retry = await _spotify_fuzzy_evidence(artist, fallback_title, duration)
+        if retry and (not primary or retry.confidence >= (primary.confidence if primary else 0)):
+            return retry
+    return primary
 
 
 async def _genius_evidence(artist, title) -> Evidence | None:
@@ -582,22 +662,52 @@ async def identify(
         if sz_ev:
             evidences.append(sz_ev)
 
-    seed_artist = next(
-        (ev.canonical_artist or ev.artist for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_artist or ev.artist),
+    # Seed selection: when youtube_title parsed a strong "Artist - Title" split
+    # (conf >= 0.78), trust BOTH fields from that single evidence — this avoids
+    # the channel name (poisoned existing_artist) leaking into the Discogs query.
+    yt_title_ev = next(
+        (ev for ev in evidences if ev.source == "youtube_title" and ev.confidence >= 0.78 and ev.artist and ev.title),
         None,
     )
-    seed_title = next(
-        (ev.canonical_title or ev.title for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_title or ev.title),
-        None,
-    )
+    if yt_title_ev:
+        seed_artist = yt_title_ev.canonical_artist or yt_title_ev.artist
+        seed_title = yt_title_ev.canonical_title or yt_title_ev.title
+    else:
+        seed_artist = next(
+            (ev.canonical_artist or ev.artist for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_artist or ev.artist),
+            None,
+        )
+        seed_title = next(
+            (ev.canonical_title or ev.title for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_title or ev.title),
+            None,
+        )
+
+    # Late safety net: if the seed pair still looks like "channel + 'Real Artist - Title'"
+    # (e.g. yt_title_ev was missing or weak), apply the recovery before querying.
+    if seed_artist and seed_title:
+        from api.services.indexer import _recover_artist_from_yt_title
+        seed_artist, seed_title = _recover_artist_from_yt_title(seed_artist, seed_title)
+
     seed_year = next((ev.year for ev in sorted(evidences, key=lambda e: -e.priority) if ev.year), None)
     seed_duration = tags.get("duration") or next((ev.duration for ev in evidences if ev.duration), None)
 
+    # Pass-2 fallback title for Discogs/Spotify retry: the raw youtube title with
+    # only the "Artist - " prefix removed (so brackets like "(Live at X)" survive).
+    # Only enabled when the raw brackets contain DESCRIPTIVE keywords that may
+    # be part of canonical titles — never for noise like "(Official Video)".
+    fallback_title: str | None = None
+    if yt_title_ev:
+        raw_yt = (yt_title_ev.raw or {}).get("raw_youtube_title")
+        if raw_yt and " - " in raw_yt:
+            candidate = raw_yt.split(" - ", 1)[1].strip()
+            if _has_descriptive_brackets(candidate):
+                fallback_title = candidate
+
     if seed_title:
-        dg_ev = await _discogs_evidence(seed_artist, seed_title, seed_year, seed_duration)
+        dg_ev = await _discogs_evidence_two_pass(seed_artist, seed_title, fallback_title, seed_year, seed_duration)
         if dg_ev:
             evidences.append(dg_ev)
-        sp_ev = await _spotify_fuzzy_evidence(seed_artist, seed_title, seed_duration)
+        sp_ev = await _spotify_fuzzy_two_pass(seed_artist, seed_title, fallback_title, seed_duration)
         if sp_ev:
             evidences.append(sp_ev)
             if sp_ev.isrc and sp_ev.isrc not in isrc_candidates:

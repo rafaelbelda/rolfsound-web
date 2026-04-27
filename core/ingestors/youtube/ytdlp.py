@@ -39,6 +39,7 @@ _download_lock = threading.Lock()
 
 AUDIO_EXTENSIONS = {".webm", ".wav", ".flac", ".opus", ".m4a", ".aac", ".ogg", ".mp3"}
 _NATIVE_FORMATS  = {"webm", "opus", "m4a", "aac", "ogg"}
+_YTDLP_LOG_TAIL_LINES = 20
 
 
 def _best_thumbnail(data: dict) -> str:
@@ -93,6 +94,69 @@ def get_metadata(track_id: str) -> dict | None:
         return None
 
 
+def _interesting_ytdlp_line(line: str) -> bool:
+    if not line:
+        return False
+    if "[download]" in line and "%" in line:
+        return False
+    return True
+
+
+def _tail_output(lines: list[str], limit: int = _YTDLP_LOG_TAIL_LINES) -> str:
+    interesting = [line for line in lines if _interesting_ytdlp_line(line)]
+    if not interesting:
+        interesting = lines
+    return "\n".join(interesting[-limit:]).strip()
+
+
+def _run_download_command(
+    cmd: list[str],
+    track_id: str,
+    progress_callback: Callable[[int, str], None] | None,
+    *,
+    attempt: str,
+) -> tuple[int, str]:
+    output_lines: list[str] = []
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError:
+        logger.error("yt-dlp executable not found while downloading %s", track_id)
+        return 127, "yt-dlp executable not found"
+
+    if process.stdout:
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if line:
+                output_lines.append(line)
+            if "[download]" in line and "%" in line:
+                try:
+                    pct = int(float(line.split("%")[0].split()[-1]))
+                    if progress_callback:
+                        progress_callback(pct, "downloading")
+                except (ValueError, IndexError):
+                    pass
+
+    process.wait()
+    tail = _tail_output(output_lines)
+    if process.returncode != 0:
+        logger.error(
+            "yt-dlp failed for %s (%s, exit %s)%s%s",
+            track_id,
+            attempt,
+            process.returncode,
+            ": " if tail else "",
+            tail,
+        )
+    return process.returncode, tail
+
+
 def download(
     track_id:          str,
     output_dir:        str,
@@ -123,6 +187,8 @@ def download(
         if progress_callback:
             progress_callback(5, "downloading")
 
+        retry_cmd: list[str] | None = None
+
         if is_native:
             fmt_filter = {
                 "webm": "bestaudio[ext=webm]/bestaudio",
@@ -139,6 +205,18 @@ def download(
                 "--progress",    "--no-warnings",
                 url,
             ]
+            retry_cmd = [
+                "yt-dlp",
+                "--format",      "bestaudio/best",
+                "--output",      temp_template,
+                "--no-playlist", "--no-call-home",
+                "--progress",    "--no-warnings",
+                "--force-ipv4",
+                "--retries", "3",
+                "--fragment-retries", "3",
+                "--extractor-args", "youtube:player_client=default,ios",
+                url,
+            ]
         else:
             cmd = [
                 "yt-dlp",
@@ -151,23 +229,47 @@ def download(
                 "--progress",      "--no-warnings",
                 url,
             ]
+            retry_cmd = [
+                "yt-dlp",
+                "--extract-audio",
+                "--audio-format",  audio_format,
+                "--audio-quality", "0",
+                "--format",        "bestaudio/best",
+                "--output",        temp_template,
+                "--no-playlist",   "--no-call-home",
+                "--progress",      "--no-warnings",
+                "--force-ipv4",
+                "--retries", "3",
+                "--fragment-retries", "3",
+                "--extractor-args", "youtube:player_client=default,ios",
+                url,
+            ]
 
         logger.info(f"Downloading {track_id} ({'native' if is_native else 'transcoded'} {audio_format})")
 
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in process.stdout:
-            line = line.strip()
-            if "[download]" in line and "%" in line:
-                try:
-                    pct = int(float(line.split("%")[0].split()[-1]))
-                    if progress_callback:
-                        progress_callback(pct, "downloading")
-                except (ValueError, IndexError):
-                    pass
-
-        process.wait()
-        if process.returncode != 0:
-            logger.error(f"yt-dlp failed for {track_id} (exit {process.returncode})")
+        returncode, first_tail = _run_download_command(
+            cmd,
+            track_id,
+            progress_callback,
+            attempt="primary",
+        )
+        if returncode != 0 and retry_cmd:
+            logger.info("Retrying YouTube download with fallback yt-dlp options: %s", track_id)
+            returncode, retry_tail = _run_download_command(
+                retry_cmd,
+                track_id,
+                progress_callback,
+                attempt="fallback",
+            )
+            if returncode != 0:
+                logger.error(
+                    "yt-dlp exhausted attempts for %s%s%s",
+                    track_id,
+                    "; last output: " if retry_tail or first_tail else "",
+                    retry_tail or first_tail,
+                )
+                return None
+        elif returncode != 0:
             return None
 
         if progress_callback:

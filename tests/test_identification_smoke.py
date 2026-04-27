@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from api.services.identification import pipeline
+from api.services.identification import shazam
 from api.services.identification.cache import cached_fetch, make_cache_key
 from api.services.identification.canonical import canonicalize
 from api.services.identification.consensus import resolve
@@ -76,6 +77,25 @@ class IdentificationSmokeTests(unittest.TestCase):
         ])
         self.assertEqual(consensus["status"], "identified")
         self.assertGreaterEqual(consensus["confidence"], 0.95)
+
+    def test_shazam_passes_mix_loud_and_anchor_starts(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy not installed")
+
+        sr = 16000
+        snippet_seconds = 10
+        pcm = np.zeros(sr * 120, dtype=np.int16)
+        pcm[sr * 70:sr * 72] = 20000
+
+        pass1, pass2 = shazam._make_passes(pcm, sr, snippet_seconds)
+
+        self.assertLessEqual(len(pass1), 4)
+        self.assertLessEqual(len(pass2), 4)
+        self.assertTrue(any(abs(start - (sr * 65)) <= sr * 6 for start in pass1))
+        self.assertTrue(any(start in pass1 for start in shazam._pick_anchor_starts(len(pcm), sr, snippet_seconds)))
+        self.assertFalse(set(pass1) & set(pass2))
 
     def test_canonical_identity_ignores_feat_and_extracts_versions(self):
         base = canonicalize("Polyphia", "Fuck Around and Find Out")

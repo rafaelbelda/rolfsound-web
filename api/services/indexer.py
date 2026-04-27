@@ -33,6 +33,14 @@ DISCOGS_MIN_CONFIDENCE = 0.84
 DISCOGS_COVER_REPLACE_CONFIDENCE = 0.93
 
 
+def _ffmpeg_exe() -> str:
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
+
+
 def extract_local_tags(file_path: str, track_id: str) -> dict:
     result = {
         "title": None,
@@ -100,6 +108,7 @@ async def fingerprint(path: str) -> dict | None:
         import acoustid
         import av
         import numpy as np
+        import chromaprint  # noqa: F401
 
         target_sr = 44100
         n_channels = 2
@@ -443,12 +452,22 @@ def _split_embedded_artist_title(artist: str | None, title: str | None) -> tuple
     return _clean_display_artist(inferred_artist or clean_artist), _clean_display_title(inferred_title or clean_title)
 
 
+_GENERIC_ARTIST_NOISE = {"song", "track", "music", "audio", "video", "version", "mix", "remix"}
+
+
 def _recover_artist_from_yt_title(artist: str | None, title: str | None) -> tuple[str | None, str | None]:
     """
-    YouTube downloads often embed the real artist in the title ("Artist - Song") while
-    the artist field holds a channel name. Detect this mismatch and extract the real pair.
-    Only applies when the declared artist is meaningfully different from the embedded
-    artist (low text similarity) AND not subset-related, AND not mentioned in the title.
+    YouTube downloads (and some local imports) embed the real artist in the
+    title ("Artist - Song") while the artist field holds a channel name or a
+    truncated form. Detect that and extract the real pair.
+
+    Two recovery patterns:
+      1. Declared is a STRICT SUBSET of embedded — channel/source has only
+         the first name (e.g. "Caê") while the title carries the full name
+         ("Caê Rolfsen - Do Avesso"). Upgrade to the longer form, but only
+         when the extra tokens are real names (not "Song"/"Track"/...).
+      2. Declared and embedded are DISJOINT — channel is wrong (e.g. fan
+         channel "XOXOXO" with title "Frank Ocean - Nights"). Replace.
     """
     if not title:
         return artist, title
@@ -457,23 +476,35 @@ def _recover_artist_from_yt_title(artist: str | None, title: str | None) -> tupl
     if not embedded_artist_raw or not embedded_title_raw:
         return artist, title
 
-    embedded_title_tokens = _tokens(embedded_title_raw)
-    if len(embedded_title_tokens) < 2:
-        return artist, title
-
     declared_tokens = _tokens(artist)
     embedded_tokens = _tokens(embedded_artist_raw)
     if not declared_tokens or not embedded_tokens:
         return artist, title
 
-    if declared_tokens <= embedded_tokens or embedded_tokens <= declared_tokens:
+    # Equal sets, or embedded is subset of declared — declared is already
+    # at-least-as-specific. No recovery needed.
+    if embedded_tokens <= declared_tokens:
         return artist, title
 
+    # Pattern 1: subset upgrade.
+    if declared_tokens < embedded_tokens:
+        delta = len(embedded_tokens) - len(declared_tokens)
+        extra = embedded_tokens - declared_tokens
+        if delta <= 2 and not (extra & _GENERIC_ARTIST_NOISE):
+            return _clean_display_artist(embedded_artist_raw), _clean_display_title(embedded_title_raw)
+        # Subset but unsafe (delta too large or generic noise) — keep declared.
+        return artist, title
+
+    # Pattern 2: disjoint sets — declared and embedded are unrelated names.
+    # Apply similarity and "declared mentioned in title" guards before swapping.
     if _text_score(artist, embedded_artist_raw) >= 0.7:
         return artist, title
 
     title_tokens = _tokens(title)
     if declared_tokens <= title_tokens:
+        return artist, title
+
+    if not _tokens(embedded_title_raw):
         return artist, title
 
     return _clean_display_artist(embedded_artist_raw), _clean_display_title(embedded_title_raw)
@@ -595,6 +626,9 @@ def _score_discogs_candidate(
 
     has_cover = bool(candidate.get("cover_image") or (detail or {}).get("images"))
     is_master = (candidate.get("_rolfsound_kind") == "master") or bool(candidate.get("master_id"))
+    _artist_part, release_title = _split_discogs_title(candidate.get("title"))
+    query_version = canonicalize(artist, title).version_type
+    release_version = canonicalize(artist, release_title or (detail or {}).get("title")).version_type
 
     score = (
         artist_score * 0.34 +
@@ -628,6 +662,10 @@ def _score_discogs_candidate(
         reasons.append(f"duration_{'match' if d_score >= 0.86 else 'weak'}")
     if has_cover:
         reasons.append("has_cover")
+
+    if query_version == "ORIGINAL_MIX" and release_version != "ORIGINAL_MIX":
+        score = min(score, 0.78)
+        reasons.append(f"release_version_mismatch_{release_version.lower()}")
 
     return round(max(0.0, min(1.0, score)), 4), reasons
 
@@ -843,7 +881,7 @@ async def detect_bpm(file_path: str) -> int | None:
     async with BPM_SEMAPHORE:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg",
+                _ffmpeg_exe(),
                 "-i",
                 file_path,
                 "-af",
@@ -954,8 +992,8 @@ async def identify_track(
         "all_sources": result.get("all_sources"),
         "discogs_confidence": result.get("confidence") if "discogs" in sources else None,
         "discogs_reasons": result.get("reasons"),
-        "shazam_key": None,
-        "shazam_url": None,
+        "shazam_key": result.get("shazam_key"),
+        "shazam_url": result.get("shazam_url"),
         "evidence": result.get("evidence"),
     }
 

@@ -35,14 +35,22 @@ _SHAZAM_WORKER = str(Path(__file__).parent.parent / "_shazam_worker.py")
 _SHAZAM_TIMEOUT = 30
 _TARGET_SR = 16000
 _MAX_SECONDS = 120
+_MAX_SNIPPETS_PER_PASS = 4
+
+
+def _ffmpeg_exe() -> str:
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
 
 
 def _decode_mono_pcm(file_path: str) -> "tuple[np.ndarray, int]":
-    """Decode up to _MAX_SECONDS of audio to int16 mono @ 16 kHz, post-loudnorm."""
+    """Decode up to _MAX_SECONDS of audio to int16 mono @ 16 kHz."""
     import av
     import numpy as np
 
-    target_pre = "loudnorm=I=-16:TP=-1.5:LRA=11"
     pcm_chunks: list[np.ndarray] = []
     collected = 0
     max_samples = _TARGET_SR * _MAX_SECONDS
@@ -50,9 +58,8 @@ def _decode_mono_pcm(file_path: str) -> "tuple[np.ndarray, int]":
     try:
         proc = subprocess.Popen(
             [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                _ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
                 "-i", file_path,
-                "-af", target_pre,
                 "-ac", "1", "-ar", str(_TARGET_SR),
                 "-f", "s16le", "-",
             ],
@@ -75,7 +82,7 @@ def _decode_mono_pcm(file_path: str) -> "tuple[np.ndarray, int]":
         proc.stdout.close()
         proc.wait(timeout=5)
     except Exception as exc:
-        logger.debug("ffmpeg loudnorm decode failed (%s); falling back to PyAV", exc)
+        logger.debug("ffmpeg raw decode failed (%s); falling back to PyAV", exc)
         pcm_chunks = []
         collected = 0
         with av.open(file_path) as container:
@@ -100,6 +107,17 @@ def _decode_mono_pcm(file_path: str) -> "tuple[np.ndarray, int]":
     if not pcm_chunks:
         return np.zeros(0, dtype=np.int16), _TARGET_SR
     return np.concatenate(pcm_chunks), _TARGET_SR
+
+
+def _dedupe_starts(starts: list[int], max_start: int, min_spacing: int, limit: int) -> list[int]:
+    picks: list[int] = []
+    for start in starts:
+        start = max(0, min(max_start, int(start)))
+        if all(abs(start - existing) >= min_spacing for existing in picks):
+            picks.append(start)
+        if len(picks) >= limit:
+            break
+    return picks
 
 
 def _pick_loud_centers(pcm, sr: int, snippet_seconds: int, k: int) -> list[int]:
@@ -134,6 +152,49 @@ def _pick_loud_centers(pcm, sr: int, snippet_seconds: int, k: int) -> list[int]:
             break
 
     return picks or [0]
+
+
+def _pick_anchor_starts(total_samples: int, sr: int, snippet_seconds: int) -> list[int]:
+    snippet_samples = int(snippet_seconds * sr)
+    max_start = max(0, total_samples - snippet_samples)
+    if max_start == 0:
+        return [0]
+
+    fixed_seconds = [12, 28, 45, 65, 90]
+    fixed = [sec * sr for sec in fixed_seconds if sec * sr <= max_start]
+    proportional = [int(max_start * ratio) for ratio in (0.18, 0.38, 0.58, 0.78)]
+    return _dedupe_starts(
+        fixed + proportional,
+        max_start,
+        max(sr * 4, snippet_samples // 3),
+        6,
+    )
+
+
+def _make_passes(pcm, sr: int, snippet_seconds: int) -> tuple[list[int], list[int]]:
+    snippet_samples = int(snippet_seconds * sr)
+    max_start = max(0, len(pcm) - snippet_samples)
+    min_spacing = max(sr * 4, snippet_samples // 3)
+
+    loud = _pick_loud_centers(pcm, sr, snippet_seconds, 6)
+    anchors = _pick_anchor_starts(len(pcm), sr, snippet_seconds)
+
+    pass1 = _dedupe_starts(
+        loud[:2] + anchors[:3] + loud[2:],
+        max_start,
+        min_spacing,
+        _MAX_SNIPPETS_PER_PASS,
+    )
+
+    shift = snippet_samples // 2
+    shifted = [min(max_start, start + shift) for start in pass1]
+    pass2 = _dedupe_starts(
+        anchors[3:] + loud[2:] + shifted,
+        max_start,
+        min_spacing,
+        _MAX_SNIPPETS_PER_PASS,
+    )
+    return [start for start in pass1], [start for start in pass2 if start not in pass1]
 
 
 def _write_snippets(pcm, sr: int, starts: list[int], snippet_seconds: int) -> tuple[str, list[str]]:
@@ -215,11 +276,19 @@ async def lookup_shazam(file_path: str) -> dict | None:
             logger.warning("Shazamio: track too short (%.1fs)", total_seconds)
             return None
 
-        snippet_seconds = min(20, max(8, int(total_seconds / 6)))
-
-        loud_starts = await asyncio.to_thread(_pick_loud_centers, pcm, sr, snippet_seconds, 4)
+        snippet_seconds = min(18, max(10, int(total_seconds / 6)))
+        pass1_starts, pass2_starts = await asyncio.to_thread(
+            _make_passes, pcm, sr, snippet_seconds
+        )
+        logger.debug(
+            "Shazamio snippets: length=%.1fs snippet=%ss pass1=%s pass2=%s",
+            total_seconds,
+            snippet_seconds,
+            [round(start / sr, 2) for start in pass1_starts],
+            [round(start / sr, 2) for start in pass2_starts],
+        )
         tmp_dir, snippets = await asyncio.to_thread(
-            _write_snippets, pcm, sr, loud_starts, snippet_seconds
+            _write_snippets, pcm, sr, pass1_starts, snippet_seconds
         )
 
         for snippet in snippets:
@@ -231,34 +300,31 @@ async def lookup_shazam(file_path: str) -> dict | None:
                 )
                 return result
 
-        if total_seconds < 30 or len(loud_starts) < 2:
-            logger.info("Shazamio: pass 1 missed; track too short for pass 2")
-            return None
+        if total_seconds < 30 or not pass2_starts:
+            logger.info("Shazamio: pass 1 missed; skipping pass 2")
+        else:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            tmp_dir, snippets = await asyncio.to_thread(
+                _write_snippets, pcm, sr, pass2_starts, snippet_seconds
+            )
+            for snippet in snippets:
+                result = await _recognize_snippet(snippet)
+                if result:
+                    logger.info(
+                        "Shazamio recognized (pass 2): %s - %s",
+                        result.get("artist"), result.get("title"),
+                    )
+                    return result
 
-        shift = int(sr * snippet_seconds / 2)
-        max_start = max(0, len(pcm) - int(sr * snippet_seconds))
-        shifted = []
-        for start in loud_starts:
-            new_start = max(0, min(max_start, start + shift))
-            if all(abs(new_start - existing) >= int(sr * snippet_seconds / 2) for existing in loud_starts + shifted):
-                shifted.append(new_start)
-        if not shifted:
-            return None
+        result = await _recognize_snippet(str(Path(file_path).resolve()))
+        if result:
+            logger.info(
+                "Shazamio recognized (original file fallback): %s - %s",
+                result.get("artist"), result.get("title"),
+            )
+            return result
 
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        tmp_dir, snippets = await asyncio.to_thread(
-            _write_snippets, pcm, sr, shifted, snippet_seconds
-        )
-        for snippet in snippets:
-            result = await _recognize_snippet(snippet)
-            if result:
-                logger.info(
-                    "Shazamio recognized (pass 2): %s - %s",
-                    result.get("artist"), result.get("title"),
-                )
-                return result
-
-        logger.info("Shazamio: no match across both passes")
+        logger.info("Shazamio: no match across snippets or original file fallback")
         return None
     except Exception as exc:
         logger.debug("Shazamio lookup failed: %s", exc)

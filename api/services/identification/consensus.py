@@ -153,6 +153,14 @@ def _first_set(evidences: list[Evidence], attr: str):
     return None
 
 
+def _first_raw(evidences: list[Evidence], key: str):
+    for e in sorted(evidences, key=lambda x: (-x.priority, -x.confidence)):
+        v = (e.raw or {}).get(key)
+        if v not in (None, "", 0):
+            return v
+    return None
+
+
 def _best_version_type(evidences: list[Evidence]) -> str:
     best = "ORIGINAL_MIX"
     for ev in evidences:
@@ -190,5 +198,7 @@ def _build_result(
         "discogs_id": _first_set(agreeing, "discogs_id"),
         "label": _first_set(agreeing, "label"),
         "cover_image": _pick_best_cover(all_evidence, winner),
+        "shazam_key": _first_raw(agreeing, "shazam_key"),
+        "shazam_url": _first_raw(agreeing, "url"),
         "reasons": list(dict.fromkeys(r for e in agreeing for r in e.reasons)),
     }

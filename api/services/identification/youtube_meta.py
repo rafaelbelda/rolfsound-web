@@ -61,6 +61,21 @@ _BRACKET_NOISE_RE = re.compile(
     r"[^)\]]*?[\)\]]\s*",
     re.IGNORECASE,
 )
+# Featuring brackets ALWAYS get stripped — Discogs/Spotify canonical titles
+# never include them. Matches "(feat. X)", "[ft. X]", "(with X)", "(w/ X)".
+_FEATURE_NOISE_RE = re.compile(
+    r"\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|w/)\s+[^)\]]+[\)\]]\s*",
+    re.IGNORECASE,
+)
+# Version/edit/mix descriptors that aren't on the canonical release
+# (e.g. "[Mixed Version]", "(Studio Version)", "[Bootleg]", "(Mashup)").
+_VERSION_NOISE_RE = re.compile(
+    r"\s*[\(\[][^)\]]*?\b(?:bootleg|mashup|mixed|extended|short|long|"
+    r"radio|studio|club|dirty|original|main|"
+    r"vip|hard|soft|deep|tech)\b\s*"
+    r"(?:version|edit|mix|cut|rework)?[^)\]]*?[\)\]]\s*",
+    re.IGNORECASE,
+)
 _TRAILING_NOISE_RE = re.compile(
     r"\s*(?:[-\u2010\u2011\u2012\u2013\u2014\u2212|:]\s*)?"
     r"(?:official\s*)?(?:music\s*)?(?:video|videoclipe?|clip|lyrics?|lyric\s*video|audio|visualizer)"
@@ -160,7 +175,9 @@ def _clean_youtube_piece(text: str | None) -> str | None:
     prev = None
     while prev != text:
         prev = text
+        text = _FEATURE_NOISE_RE.sub(" ", text)
         text = _BRACKET_NOISE_RE.sub(" ", text)
+        text = _VERSION_NOISE_RE.sub(" ", text)
         text = _TRAILING_NOISE_RE.sub("", text)
     text = _FEAT_NORMALIZE_RE.sub("feat.", text)
     text = _squash(text)
