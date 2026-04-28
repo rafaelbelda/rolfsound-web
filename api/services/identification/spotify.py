@@ -128,8 +128,24 @@ async def _api_get(path: str, params: dict | None = None) -> dict | None:
 def _normalize_track(track: dict | None) -> dict | None:
     if not track:
         return None
-    artists = [a.get("name") for a in (track.get("artists") or []) if isinstance(a, dict) and a.get("name")]
+    artist_items = [a for a in (track.get("artists") or []) if isinstance(a, dict) and a.get("name")]
+    artists = [a.get("name") for a in artist_items]
+    artist_credits = [
+        {
+            "name": a.get("name"),
+            "spotify_id": a.get("id"),
+            "role": "main",
+            "position": idx,
+            "is_primary": idx == 0,
+            "source": "spotify",
+        }
+        for idx, a in enumerate(artist_items)
+    ]
     album = track.get("album") or {}
+    album_artists = [
+        a.get("name") for a in (album.get("artists") or [])
+        if isinstance(a, dict) and a.get("name")
+    ]
     images = album.get("images") or []
     cover = max(images, key=lambda i: int(i.get("width") or 0)).get("url") if images else None
     release_date = album.get("release_date") or ""
@@ -137,12 +153,28 @@ def _normalize_track(track: dict | None) -> dict | None:
     if release_date and len(release_date) >= 4 and release_date[:4].isdigit():
         year = int(release_date[:4])
     duration_ms = track.get("duration_ms") or 0
+    album_data = None
+    if album.get("name"):
+        album_data = {
+            "title": album.get("name"),
+            "spotify_album_id": album.get("id"),
+            "display_artist": ", ".join(album_artists) if album_artists else ", ".join(artists),
+            "cover": cover,
+            "year": year,
+            "release_date": release_date,
+            "source": "spotify",
+        }
     return {
         "spotify_id": track.get("id"),
         "title": track.get("name"),
-        "artist": artists[0] if artists else None,
+        "artist": ", ".join(artists) if artists else None,
+        "display_artist": ", ".join(artists) if artists else None,
+        "primary_artist": artists[0] if artists else None,
         "artists": artists,
+        "artist_credits": artist_credits,
         "album": album.get("name"),
+        "album_data": album_data,
+        "albums": [album_data] if album_data else [],
         "album_id": album.get("id"),
         "cover_image": cover,
         "year": year,

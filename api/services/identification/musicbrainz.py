@@ -75,15 +75,32 @@ def _normalize_recording(data: dict) -> dict:
     artist_credits = data.get("artist-credit") or []
     artist_names: list[str] = []
     artist_ids: list[str] = []
-    for credit in artist_credits:
+    normalized_credits: list[dict] = []
+    display_parts: list[str] = []
+    for idx, credit in enumerate(artist_credits):
         if not isinstance(credit, dict):
             continue
         name = credit.get("name") or (credit.get("artist") or {}).get("name")
         if name:
             artist_names.append(name)
+            display_parts.append(name)
         artist_id = (credit.get("artist") or {}).get("id")
         if artist_id:
             artist_ids.append(artist_id)
+        join_phrase = credit.get("joinphrase") or ""
+        if name:
+            normalized_credits.append({
+                "name": name,
+                "sort_name": (credit.get("artist") or {}).get("sort-name"),
+                "mb_artist_id": artist_id,
+                "role": "main",
+                "position": idx,
+                "is_primary": idx == 0,
+                "join_phrase": join_phrase,
+                "source": "musicbrainz",
+            })
+        if join_phrase:
+            display_parts.append(join_phrase)
 
     releases = data.get("releases") or []
     release_groups: list[dict] = []
@@ -122,16 +139,39 @@ def _normalize_recording(data: dict) -> dict:
         seen_rg.add(rg["id"])
         deduped_rg.append(rg)
 
+    display_artist = "".join(display_parts).strip() or (" & ".join(artist_names) if artist_names else None)
+    albums = [
+        {
+            "title": rg.get("title"),
+            "mb_release_group_id": rg.get("id"),
+            "year": (
+                int(str(rg.get("first_release_date") or "")[:4])
+                if str(rg.get("first_release_date") or "")[:4].isdigit()
+                else None
+            ),
+            "release_date": rg.get("first_release_date"),
+            "primary_type": rg.get("primary_type"),
+            "display_artist": display_artist,
+            "source": "musicbrainz",
+        }
+        for rg in deduped_rg
+        if rg.get("title")
+    ]
+
     return {
         "mb_recording_id": data.get("id"),
         "title": data.get("title"),
-        "artist": " & ".join(artist_names) if artist_names else None,
+        "artist": display_artist,
+        "display_artist": display_artist,
         "artist_names": artist_names,
         "artist_ids": list(dict.fromkeys(artist_ids)),
+        "artist_credits": normalized_credits,
         "isrcs": list(data.get("isrcs") or []),
         "duration": (data.get("length") or 0) / 1000.0 if data.get("length") else None,
         "year": earliest_year,
         "release_groups": deduped_rg,
+        "albums": albums,
+        "album_data": albums[0] if albums else None,
         "labels": list(dict.fromkeys(label_names)),
         "barcodes": list(dict.fromkeys(barcodes)),
         "tags": [t.get("name") for t in (data.get("tags") or []) if isinstance(t, dict) and t.get("name")],

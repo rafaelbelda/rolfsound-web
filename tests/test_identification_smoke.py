@@ -101,6 +101,8 @@ class IdentificationSmokeTests(unittest.TestCase):
         base = canonicalize("Polyphia", "Fuck Around and Find Out")
         feat = canonicalize("Polyphia, $NOT", "Fuck Around and Find Out (feat. SNOT)")
         instrumental = canonicalize("Polyphia", "Fuck Around and Find Out (Instrumental)")
+        tyler = canonicalize("Tyler, The Creator", "EARFQUAKE")
+        kendrick_kanye = canonicalize("Kendrick Lamar, Kanye West", "Example")
 
         self.assertEqual(base.artist_key, feat.artist_key)
         self.assertEqual(base.title_key, feat.title_key)
@@ -109,6 +111,9 @@ class IdentificationSmokeTests(unittest.TestCase):
         self.assertEqual(feat.canonical_artist, "Polyphia")
         self.assertEqual(feat.canonical_title, "Fuck Around and Find Out")
         self.assertIn("SNOT", feat.featured_artists)
+        self.assertEqual(tyler.canonical_artist, "Tyler, The Creator")
+        self.assertEqual(tyler.artist_key, "tyler the creator")
+        self.assertEqual(kendrick_kanye.canonical_artist, "Kendrick Lamar, Kanye West")
         self.assertEqual(instrumental.version_type, "INSTRUMENTAL")
         self.assertEqual(instrumental.title_key, base.title_key)
 
@@ -185,6 +190,56 @@ class IdentificationSmokeTests(unittest.TestCase):
         self.assertTrue(matches)
         self.assertEqual(matches[0]["track_id"], track_id)
         self.assertGreaterEqual(matches[0]["score"], 0.93)
+
+    def test_database_persists_artist_album_entities_and_searches_guest(self):
+        conn = database.get_connection()
+        try:
+            first_id = database.add_track(conn, {
+                "title": "No More Parties in LA",
+                "display_artist": "Kendrick Lamar, Kanye West",
+                "status": "identified",
+            })
+            second_id = database.add_track(conn, {
+                "title": "Second Track",
+                "display_artist": "Kendrick Lamar",
+                "status": "identified",
+            })
+            database.set_track_artist_credits(conn, first_id, [
+                {"name": "Kendrick Lamar", "position": 0, "is_primary": True, "role": "main"},
+                {"name": "Kanye West", "position": 1, "is_primary": False, "role": "featured"},
+            ], display_artist="Kendrick Lamar, Kanye West", source="test")
+            database.set_track_artist_credits(conn, second_id, [
+                {"name": "Kendrick Lamar", "position": 0, "is_primary": True, "role": "main"},
+            ], display_artist="Kendrick Lamar", source="test")
+            database.set_track_albums(conn, first_id, [{
+                "title": "Untitled Test Album",
+                "display_artist": "Kendrick Lamar",
+                "year": 2024,
+            }], track_number=2, disc_number=1, source="test")
+            database.set_track_albums(conn, second_id, [{
+                "title": "Untitled Test Album",
+                "display_artist": "Kendrick Lamar",
+                "year": 2024,
+            }], track_number=1, disc_number=1, source="test")
+            conn.commit()
+
+            track = database.get_track(conn, first_id)
+            self.assertEqual(track["artist"], "Kendrick Lamar, Kanye West")
+            self.assertEqual(track["display_artist"], "Kendrick Lamar, Kanye West")
+            self.assertEqual([a["name"] for a in track["artists"]], ["Kendrick Lamar", "Kanye West"])
+
+            search = database.search_tracks(conn, "Kanye")
+            self.assertEqual([t["id"] for t in search], [first_id])
+
+            guest = next(a for a in database.list_artists(conn) if a["name"] == "Kanye West")
+            guest_tracks = database.get_artist_tracks(conn, guest["id"])
+            self.assertEqual([t["id"] for t in guest_tracks], [first_id])
+
+            album = database.list_albums(conn)[0]
+            album_tracks = database.get_album_tracks(conn, album["id"])
+            self.assertEqual([t["title"] for t in album_tracks], ["Second Track", "No More Parties in LA"])
+        finally:
+            conn.close()
 
     def test_pipeline_stops_after_strong_isrc_consensus(self):
         async def run():
@@ -572,7 +627,9 @@ class IdentificationSmokeTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "identified")
             self.assertEqual(result["title"], "Fuck Around and Find Out")
-            self.assertEqual(result["artist"], "Polyphia")
+            self.assertEqual(result["display_artist"], "Polyphia, SNOT")
+            self.assertEqual(result["artist"], "Polyphia, SNOT")
+            self.assertEqual([a["name"] for a in result["artists"]], ["Polyphia", "SNOT"])
             self.assertIn("youtube_title", result["sources"])
             self.assertIn("shazam", result["sources"])
             self.assertNotIn("shazam_conflict", result["all_sources"])

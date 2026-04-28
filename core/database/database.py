@@ -59,6 +59,7 @@ def _create_tables(conn):
             id                  TEXT PRIMARY KEY,
             title               TEXT,
             artist              TEXT,
+            display_artist      TEXT,
             duration            REAL,
             thumbnail           TEXT,
             date_added          INTEGER,
@@ -66,12 +67,121 @@ def _create_tables(conn):
             streams             INTEGER DEFAULT 0,
             status              TEXT DEFAULT 'pending_identity',
             mb_recording_id     TEXT,
+            isrc                TEXT,
+            spotify_id          TEXT,
             discogs_id          TEXT,
             label               TEXT,
             year                INTEGER,
             bpm                 INTEGER,
             fingerprint         TEXT,
-            preferred_asset_id  TEXT
+            preferred_asset_id  TEXT,
+            primary_artist_id   TEXT,
+            primary_album_id    TEXT,
+            canonical_title_key TEXT,
+            primary_artist_key  TEXT,
+            recording_key       TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS artists (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            sort_name       TEXT,
+            canonical_key   TEXT NOT NULL UNIQUE,
+            mb_artist_id    TEXT,
+            spotify_id      TEXT,
+            discogs_id      TEXT,
+            source          TEXT,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS artist_aliases (
+            id              TEXT PRIMARY KEY,
+            artist_id       TEXT NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+            alias           TEXT NOT NULL,
+            canonical_key   TEXT NOT NULL,
+            source          TEXT,
+            created_at      INTEGER NOT NULL,
+            UNIQUE(artist_id, canonical_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS track_artists (
+            track_id        TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            artist_id       TEXT NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+            role            TEXT NOT NULL DEFAULT 'main',
+            position        INTEGER NOT NULL DEFAULT 0,
+            is_primary      INTEGER NOT NULL DEFAULT 0,
+            join_phrase     TEXT NOT NULL DEFAULT '',
+            source          TEXT,
+            PRIMARY KEY (track_id, artist_id, role)
+        );
+
+        CREATE TABLE IF NOT EXISTS albums (
+            id                   TEXT PRIMARY KEY,
+            title                TEXT NOT NULL,
+            display_artist       TEXT,
+            canonical_key        TEXT NOT NULL UNIQUE,
+            year                 INTEGER,
+            cover                TEXT,
+            mb_release_id        TEXT,
+            mb_release_group_id  TEXT,
+            spotify_album_id     TEXT,
+            discogs_id           TEXT,
+            source               TEXT,
+            created_at           INTEGER NOT NULL,
+            updated_at           INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS album_tracks (
+            album_id        TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+            track_id        TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            disc_number     INTEGER NOT NULL DEFAULT 1,
+            track_number    INTEGER,
+            position        INTEGER NOT NULL DEFAULT 0,
+            source          TEXT,
+            PRIMARY KEY (album_id, track_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS catalog_releases (
+            id              TEXT PRIMARY KEY,
+            provider        TEXT NOT NULL,
+            provider_id     TEXT NOT NULL,
+            artist_id       TEXT REFERENCES artists(id) ON DELETE SET NULL,
+            album_id        TEXT REFERENCES albums(id) ON DELETE SET NULL,
+            title           TEXT NOT NULL,
+            release_type    TEXT,
+            year            INTEGER,
+            cover           TEXT,
+            raw_json        TEXT,
+            fetched_at      INTEGER NOT NULL,
+            UNIQUE(provider, provider_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS catalog_recordings (
+            id                  TEXT PRIMARY KEY,
+            provider            TEXT NOT NULL,
+            provider_id         TEXT NOT NULL,
+            catalog_release_id  TEXT REFERENCES catalog_releases(id) ON DELETE CASCADE,
+            album_id            TEXT REFERENCES albums(id) ON DELETE SET NULL,
+            title               TEXT NOT NULL,
+            display_artist      TEXT,
+            isrc                TEXT,
+            duration            REAL,
+            disc_number         INTEGER,
+            track_number        INTEGER,
+            available_track_id  TEXT REFERENCES tracks(id) ON DELETE SET NULL,
+            raw_json            TEXT,
+            fetched_at          INTEGER NOT NULL,
+            UNIQUE(provider, provider_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS catalog_artist_credits (
+            catalog_recording_id TEXT NOT NULL REFERENCES catalog_recordings(id) ON DELETE CASCADE,
+            artist_id            TEXT NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+            role                 TEXT NOT NULL DEFAULT 'main',
+            position             INTEGER NOT NULL DEFAULT 0,
+            is_primary           INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (catalog_recording_id, artist_id, role)
         );
 
         CREATE TABLE IF NOT EXISTS assets (
@@ -209,6 +319,19 @@ def _create_tables(conn):
 
         CREATE INDEX IF NOT EXISTS idx_assets_track_id ON assets(track_id);
         CREATE INDEX IF NOT EXISTS idx_assets_source ON assets(source, source_ref);
+        CREATE INDEX IF NOT EXISTS idx_tracks_primary_artist ON tracks(primary_artist_id);
+        CREATE INDEX IF NOT EXISTS idx_tracks_primary_album ON tracks(primary_album_id);
+        CREATE INDEX IF NOT EXISTS idx_tracks_recording_key ON tracks(recording_key);
+        CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_mb
+            ON artists(mb_artist_id) WHERE mb_artist_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_spotify
+            ON artists(spotify_id) WHERE spotify_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_discogs
+            ON artists(discogs_id) WHERE discogs_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_track_artists_artist ON track_artists(artist_id);
+        CREATE INDEX IF NOT EXISTS idx_album_tracks_track ON album_tracks(track_id);
+        CREATE INDEX IF NOT EXISTS idx_catalog_recordings_album ON catalog_recordings(album_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_one_primary
             ON assets(track_id) WHERE is_primary = 1;
         CREATE INDEX IF NOT EXISTS idx_identity_candidates_asset
@@ -235,21 +358,64 @@ def _normal_asset_type(value: str | None) -> str:
     return cleaned or "ORIGINAL_MIX"
 
 
+def _artist_entity_key(value: str | None) -> str:
+    try:
+        from api.services.identification.canonical import artist_identity_key
+        return artist_identity_key(value)
+    except Exception:
+        return _identity_text(value or "")
+
+
+def _title_entity_key(value: str | None) -> str:
+    try:
+        from api.services.identification.canonical import canonicalize
+        return canonicalize(None, value).title_key
+    except Exception:
+        return _identity_text(value or "")
+
+
+def _track_recording_key(title: str | None, artist_key: str | None) -> str | None:
+    title_key = _title_entity_key(title)
+    if not title_key:
+        return None
+    return f"{artist_key or ''}||{title_key}"
+
+
+def _track_primary_artist_key(artist: str | None, title: str | None) -> str:
+    identity = _canonical_identity(artist, title)
+    return identity.get("artist_key") or _artist_entity_key(artist)
+
+
+def _clean_int(value, default: int | None = None) -> int | None:
+    if value in (None, ""):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def add_track(conn, track: dict) -> str:
     track_id = track.get("id") or str(uuid.uuid4())
+    display_artist = track.get("display_artist") or track.get("artist", "")
+    primary_artist_key = track.get("primary_artist_key") or _track_primary_artist_key(display_artist, track.get("title"))
+    canonical_title_key = track.get("canonical_title_key") or _title_entity_key(track.get("title"))
     conn.execute("""
         INSERT INTO tracks
-            (id, title, artist, duration, thumbnail, date_added, published_date,
-             streams, status, mb_recording_id, discogs_id, label, year, bpm,
-             fingerprint, preferred_asset_id)
+            (id, title, artist, display_artist, duration, thumbnail, date_added, published_date,
+             streams, status, mb_recording_id, isrc, spotify_id, discogs_id, label, year, bpm,
+             fingerprint, preferred_asset_id, primary_artist_id, primary_album_id,
+             canonical_title_key, primary_artist_key, recording_key)
         VALUES
-            (:id, :title, :artist, :duration, :thumbnail, :date_added, :published_date,
-             :streams, :status, :mb_recording_id, :discogs_id, :label, :year, :bpm,
-             :fingerprint, :preferred_asset_id)
+            (:id, :title, :artist, :display_artist, :duration, :thumbnail, :date_added, :published_date,
+             :streams, :status, :mb_recording_id, :isrc, :spotify_id, :discogs_id, :label, :year, :bpm,
+             :fingerprint, :preferred_asset_id, :primary_artist_id, :primary_album_id,
+             :canonical_title_key, :primary_artist_key, :recording_key)
     """, {
         "id": track_id,
         "title": track.get("title"),
-        "artist": track.get("artist", ""),
+        "artist": display_artist,
+        "display_artist": display_artist,
         "duration": track.get("duration"),
         "thumbnail": track.get("thumbnail"),
         "date_added": track.get("date_added", int(time.time())),
@@ -257,12 +423,19 @@ def add_track(conn, track: dict) -> str:
         "streams": track.get("streams", 0),
         "status": track.get("status", "pending_identity"),
         "mb_recording_id": track.get("mb_recording_id"),
+        "isrc": track.get("isrc"),
+        "spotify_id": track.get("spotify_id"),
         "discogs_id": track.get("discogs_id"),
         "label": track.get("label"),
         "year": track.get("year"),
         "bpm": track.get("bpm"),
         "fingerprint": track.get("fingerprint"),
         "preferred_asset_id": track.get("preferred_asset_id"),
+        "primary_artist_id": track.get("primary_artist_id"),
+        "primary_album_id": track.get("primary_album_id"),
+        "canonical_title_key": canonical_title_key,
+        "primary_artist_key": primary_artist_key,
+        "recording_key": track.get("recording_key") or _track_recording_key(track.get("title"), primary_artist_key),
     })
     return track_id
 
@@ -435,6 +608,340 @@ def mark_asset_primary(conn, asset_id: str) -> bool:
     return True
 
 
+def _find_artist_by_external_id(conn, credit: dict):
+    for column in ("mb_artist_id", "spotify_id", "discogs_id"):
+        value = credit.get(column)
+        if not value:
+            continue
+        row = conn.execute(f"SELECT * FROM artists WHERE {column} = ? LIMIT 1", (str(value),)).fetchone()
+        if row:
+            return row
+    return None
+
+
+def upsert_artist(conn, credit: dict | str) -> str | None:
+    if isinstance(credit, str):
+        credit = {"name": credit}
+    if not isinstance(credit, dict):
+        return None
+    name = (credit.get("name") or "").strip()
+    if not name:
+        return None
+    canonical_key = _artist_entity_key(name)
+    if not canonical_key:
+        return None
+
+    row = _find_artist_by_external_id(conn, credit)
+    if not row:
+        row = conn.execute("SELECT * FROM artists WHERE canonical_key = ? LIMIT 1", (canonical_key,)).fetchone()
+
+    now = int(time.time())
+    if row:
+        artist_id = row["id"]
+        updates = {
+            "sort_name": credit.get("sort_name") or credit.get("sort-name") or row["sort_name"],
+            "mb_artist_id": credit.get("mb_artist_id") or row["mb_artist_id"],
+            "spotify_id": credit.get("spotify_id") or row["spotify_id"],
+            "discogs_id": credit.get("discogs_id") or row["discogs_id"],
+            "source": credit.get("source") or row["source"],
+            "updated_at": now,
+        }
+        conn.execute("""
+            UPDATE artists
+            SET sort_name = ?, mb_artist_id = ?, spotify_id = ?, discogs_id = ?,
+                source = ?, updated_at = ?
+            WHERE id = ?
+        """, (
+            updates["sort_name"], updates["mb_artist_id"], updates["spotify_id"],
+            updates["discogs_id"], updates["source"], updates["updated_at"], artist_id,
+        ))
+        if name != row["name"]:
+            add_artist_alias(conn, artist_id, name, credit.get("source"))
+        return artist_id
+
+    artist_id = credit.get("id") if credit.get("id") and len(str(credit.get("id"))) >= 8 else str(uuid.uuid4())
+    conn.execute("""
+        INSERT INTO artists
+            (id, name, sort_name, canonical_key, mb_artist_id, spotify_id, discogs_id,
+             source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        artist_id,
+        name,
+        credit.get("sort_name") or credit.get("sort-name"),
+        canonical_key,
+        credit.get("mb_artist_id"),
+        credit.get("spotify_id"),
+        credit.get("discogs_id"),
+        credit.get("source"),
+        now,
+        now,
+    ))
+    return artist_id
+
+
+def add_artist_alias(conn, artist_id: str, alias: str, source: str | None = None) -> str | None:
+    alias = (alias or "").strip()
+    if not alias:
+        return None
+    canonical_key = _artist_entity_key(alias)
+    if not canonical_key:
+        return None
+    existing = conn.execute("""
+        SELECT id FROM artist_aliases
+        WHERE artist_id = ? AND canonical_key = ?
+    """, (artist_id, canonical_key)).fetchone()
+    if existing:
+        return existing["id"]
+    alias_id = str(uuid.uuid4())
+    conn.execute("""
+        INSERT INTO artist_aliases (id, artist_id, alias, canonical_key, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (alias_id, artist_id, alias, canonical_key, source, int(time.time())))
+    return alias_id
+
+
+def _normalize_credit(credit: dict | str, position: int) -> dict | None:
+    if isinstance(credit, str):
+        name = credit.strip()
+        return {"name": name, "role": "main", "position": position, "is_primary": position == 0} if name else None
+    if not isinstance(credit, dict):
+        return None
+    name = (credit.get("name") or "").strip()
+    if not name:
+        return None
+    out = dict(credit)
+    out["name"] = name
+    out["role"] = out.get("role") or "main"
+    out["position"] = _clean_int(out.get("position"), position) or 0
+    out["is_primary"] = bool(out.get("is_primary")) if out.get("is_primary") is not None else position == 0
+    out["join_phrase"] = out.get("join_phrase") or ""
+    return out
+
+
+def _display_from_artist_credits(credits: list[dict]) -> str:
+    ordered = sorted(credits, key=lambda c: int(c.get("position") or 0))
+    parts: list[str] = []
+    for idx, credit in enumerate(ordered):
+        if idx > 0:
+            parts.append(ordered[idx - 1].get("join_phrase") or ", ")
+        parts.append(credit.get("name") or "")
+    return "".join(parts).strip()
+
+
+def set_track_artist_credits(
+    conn,
+    track_id: str,
+    credits: list[dict] | None,
+    *,
+    display_artist: str | None = None,
+    source: str | None = None,
+) -> None:
+    normalized = [
+        c for idx, raw in enumerate(credits or [])
+        if (c := _normalize_credit(raw, idx))
+    ]
+    if not normalized and display_artist:
+        normalized = [{
+            "name": display_artist,
+            "role": "main",
+            "position": 0,
+            "is_primary": True,
+            "source": source,
+        }]
+    if not normalized:
+        return
+
+    conn.execute("DELETE FROM track_artists WHERE track_id = ?", (track_id,))
+    primary_artist_id = None
+    primary_artist_key = None
+    for idx, credit in enumerate(normalized):
+        credit.setdefault("source", source)
+        artist_id = upsert_artist(conn, credit)
+        if not artist_id:
+            continue
+        is_primary = bool(credit.get("is_primary")) or (primary_artist_id is None and idx == 0)
+        if is_primary and primary_artist_id is None:
+            primary_artist_id = artist_id
+            primary_artist_key = _artist_entity_key(credit.get("name"))
+        conn.execute("""
+            INSERT OR REPLACE INTO track_artists
+                (track_id, artist_id, role, position, is_primary, join_phrase, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            track_id,
+            artist_id,
+            credit.get("role") or "main",
+            _clean_int(credit.get("position"), idx) or 0,
+            1 if is_primary else 0,
+            credit.get("join_phrase") or "",
+            credit.get("source") or source,
+        ))
+
+    final_display = display_artist or _display_from_artist_credits(normalized)
+    if final_display or primary_artist_id:
+        row = get_track_row(conn, track_id)
+        title = row["title"] if row else None
+        update_track_metadata(conn, track_id, {
+            "display_artist": final_display,
+            "primary_artist_id": primary_artist_id,
+            "primary_artist_key": primary_artist_key,
+            "recording_key": _track_recording_key(title, primary_artist_key),
+        })
+
+
+def get_track_artists(conn, track_id: str) -> list[dict]:
+    rows = conn.execute("""
+        SELECT ar.id, ar.name, ar.sort_name, ar.canonical_key, ar.mb_artist_id,
+               ar.spotify_id, ar.discogs_id, ta.role, ta.position,
+               ta.is_primary, ta.join_phrase, ta.source
+        FROM track_artists ta
+        JOIN artists ar ON ar.id = ta.artist_id
+        WHERE ta.track_id = ?
+        ORDER BY ta.position ASC, ar.name ASC
+    """, (track_id,)).fetchall()
+    return [
+        {**dict(r), "is_primary": bool(r["is_primary"])}
+        for r in rows
+    ]
+
+
+def _album_key(album: dict) -> str:
+    title = (album.get("title") or album.get("name") or "").strip()
+    display_artist = (album.get("display_artist") or "").strip()
+    return f"{_title_entity_key(title)}||{_artist_entity_key(display_artist)}"
+
+
+def _find_album_by_external_id(conn, album: dict):
+    for column in ("mb_release_id", "mb_release_group_id", "spotify_album_id", "discogs_id"):
+        value = album.get(column)
+        if value in (None, ""):
+            continue
+        row = conn.execute(f"SELECT * FROM albums WHERE {column} = ? LIMIT 1", (str(value),)).fetchone()
+        if row:
+            return row
+    return None
+
+
+def upsert_album(conn, album: dict | str) -> str | None:
+    if isinstance(album, str):
+        album = {"title": album}
+    if not isinstance(album, dict):
+        return None
+    title = (album.get("title") or album.get("name") or "").strip()
+    if not title:
+        return None
+    album = dict(album)
+    album["title"] = title
+    canonical_key = album.get("canonical_key") or _album_key(album)
+    if not canonical_key.strip("|"):
+        return None
+    row = _find_album_by_external_id(conn, album)
+    if not row:
+        row = conn.execute("SELECT * FROM albums WHERE canonical_key = ? LIMIT 1", (canonical_key,)).fetchone()
+
+    now = int(time.time())
+    if row:
+        album_id = row["id"]
+        conn.execute("""
+            UPDATE albums
+            SET display_artist = COALESCE(?, display_artist),
+                year = COALESCE(?, year),
+                cover = COALESCE(?, cover),
+                mb_release_id = COALESCE(?, mb_release_id),
+                mb_release_group_id = COALESCE(?, mb_release_group_id),
+                spotify_album_id = COALESCE(?, spotify_album_id),
+                discogs_id = COALESCE(?, discogs_id),
+                source = COALESCE(?, source),
+                updated_at = ?
+            WHERE id = ?
+        """, (
+            album.get("display_artist"),
+            album.get("year"),
+            album.get("cover"),
+            album.get("mb_release_id"),
+            album.get("mb_release_group_id"),
+            album.get("spotify_album_id"),
+            album.get("discogs_id"),
+            album.get("source"),
+            now,
+            album_id,
+        ))
+        return album_id
+
+    album_id = album.get("id") if album.get("id") and len(str(album.get("id"))) >= 8 else str(uuid.uuid4())
+    conn.execute("""
+        INSERT INTO albums
+            (id, title, display_artist, canonical_key, year, cover, mb_release_id,
+             mb_release_group_id, spotify_album_id, discogs_id, source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        album_id,
+        title,
+        album.get("display_artist"),
+        canonical_key,
+        album.get("year"),
+        album.get("cover"),
+        album.get("mb_release_id"),
+        album.get("mb_release_group_id"),
+        album.get("spotify_album_id"),
+        album.get("discogs_id"),
+        album.get("source"),
+        now,
+        now,
+    ))
+    return album_id
+
+
+def set_track_albums(
+    conn,
+    track_id: str,
+    albums: list[dict] | None,
+    *,
+    track_number: int | None = None,
+    disc_number: int | None = None,
+    source: str | None = None,
+) -> None:
+    normalized = [a for a in (albums or []) if isinstance(a, dict) and (a.get("title") or a.get("name"))]
+    if not normalized:
+        return
+    conn.execute("DELETE FROM album_tracks WHERE track_id = ?", (track_id,))
+    primary_album_id = None
+    for idx, album in enumerate(normalized):
+        album = dict(album)
+        album.setdefault("source", source)
+        album_id = upsert_album(conn, album)
+        if not album_id:
+            continue
+        if primary_album_id is None:
+            primary_album_id = album_id
+        conn.execute("""
+            INSERT OR REPLACE INTO album_tracks
+                (album_id, track_id, disc_number, track_number, position, source)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            album_id,
+            track_id,
+            _clean_int(album.get("disc_number"), disc_number or 1) or 1,
+            _clean_int(album.get("track_number"), track_number),
+            idx,
+            album.get("source") or source,
+        ))
+    if primary_album_id:
+        update_track_metadata(conn, track_id, {"primary_album_id": primary_album_id})
+
+
+def get_track_albums(conn, track_id: str) -> list[dict]:
+    rows = conn.execute("""
+        SELECT al.*, at.disc_number, at.track_number, at.position, at.source AS link_source
+        FROM album_tracks at
+        JOIN albums al ON al.id = at.album_id
+        WHERE at.track_id = ?
+        ORDER BY at.position ASC, al.year ASC, al.title ASC
+    """, (track_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def _attach_fast_asset(conn, track: dict) -> dict:
     assets = get_assets_for_track(conn, track["id"])
     track["assets"] = assets
@@ -445,6 +952,15 @@ def _attach_fast_asset(conn, track: dict) -> dict:
         track["file_path"] = fast_asset["file_path"]
         track["source"] = fast_asset["source"]
         track["source_ref"] = fast_asset["source_ref"]
+    track["display_artist"] = track.get("display_artist") or track.get("artist") or ""
+    track["artist"] = track["display_artist"]
+    artists = get_track_artists(conn, track["id"])
+    track["artists"] = artists
+    primary = next((a for a in artists if a.get("is_primary")), artists[0] if artists else None)
+    track["primary_artist"] = {"id": primary["id"], "name": primary["name"]} if primary else None
+    albums = get_track_albums(conn, track["id"])
+    track["albums"] = albums
+    track["album"] = albums[0] if albums else None
     return track
 
 
@@ -485,11 +1001,30 @@ def list_unidentified_tracks(conn) -> list[dict]:
 
 def update_track_metadata(conn, track_id: str, data: dict) -> None:
     allowed = {
-        "title", "artist", "duration", "thumbnail", "status",
-        "mb_recording_id", "discogs_id", "label", "year", "bpm",
-        "fingerprint", "preferred_asset_id", "published_date",
+        "title", "artist", "display_artist", "duration", "thumbnail", "status",
+        "mb_recording_id", "isrc", "spotify_id", "discogs_id", "label", "year", "bpm",
+        "fingerprint", "preferred_asset_id", "published_date", "primary_artist_id",
+        "primary_album_id", "canonical_title_key", "primary_artist_key", "recording_key",
     }
-    updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    incoming = dict(data)
+    if incoming.get("display_artist") is not None and incoming.get("artist") is None:
+        incoming["artist"] = incoming.get("display_artist")
+    if incoming.get("artist") is not None and incoming.get("display_artist") is None:
+        incoming["display_artist"] = incoming.get("artist")
+    if incoming.get("title") is not None and incoming.get("canonical_title_key") is None:
+        incoming["canonical_title_key"] = _title_entity_key(incoming.get("title"))
+    if incoming.get("display_artist") is not None and incoming.get("primary_artist_key") is None:
+        title_for_key = incoming.get("title")
+        if title_for_key is None:
+            existing = get_track_row(conn, track_id)
+            title_for_key = existing["title"] if existing else None
+        incoming["primary_artist_key"] = _track_primary_artist_key(incoming.get("display_artist"), title_for_key)
+    if (incoming.get("title") is not None or incoming.get("primary_artist_key") is not None) and incoming.get("recording_key") is None:
+        existing = get_track_row(conn, track_id)
+        title = incoming.get("title") if incoming.get("title") is not None else (existing["title"] if existing else None)
+        artist_key = incoming.get("primary_artist_key") if incoming.get("primary_artist_key") is not None else (existing["primary_artist_key"] if existing and "primary_artist_key" in existing.keys() else None)
+        incoming["recording_key"] = _track_recording_key(title, artist_key)
+    updates = {k: v for k, v in incoming.items() if k in allowed and v is not None}
     if not updates:
         return
     fields = ", ".join(f"{k} = ?" for k in updates)
@@ -583,13 +1118,23 @@ def search_tracks(conn, query, limit=50):
         SELECT DISTINCT t.*
         FROM tracks t
         LEFT JOIN assets a ON a.track_id = t.id
+        LEFT JOIN track_artists ta ON ta.track_id = t.id
+        LEFT JOIN artists ar ON ar.id = ta.artist_id
+        LEFT JOIN artist_aliases aa ON aa.artist_id = ar.id
+        LEFT JOIN album_tracks alt ON alt.track_id = t.id
+        LEFT JOIN albums al ON al.id = alt.album_id
         WHERE t.title LIKE ?
            OR t.artist LIKE ?
+           OR t.display_artist LIKE ?
+           OR ar.name LIKE ?
+           OR aa.alias LIKE ?
+           OR al.title LIKE ?
+           OR al.display_artist LIKE ?
            OR a.asset_type LIKE ?
            OR a.source_ref LIKE ?
         ORDER BY t.streams DESC, t.date_added DESC
         LIMIT ?
-    """, (pattern, pattern, pattern, pattern, limit)).fetchall()
+    """, (pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, limit)).fetchall()
     return [_attach_fast_asset(conn, dict(r)) for r in rows]
 
 
@@ -600,6 +1145,122 @@ def increment_streams(conn, track_id):
 def delete_track(conn, track_id):
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     conn.execute("DELETE FROM downloads WHERE resolved_track_id = ?", (track_id,))
+
+
+def list_artists(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT ar.*,
+               COUNT(DISTINCT ta.track_id) AS track_count,
+               COUNT(DISTINCT alt.album_id) AS album_count
+        FROM artists ar
+        LEFT JOIN track_artists ta ON ta.artist_id = ar.id
+        LEFT JOIN album_tracks alt ON alt.track_id = ta.track_id
+        GROUP BY ar.id
+        ORDER BY ar.sort_name COLLATE NOCASE, ar.name COLLATE NOCASE
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_artist(conn, artist_id: str) -> dict | None:
+    row = conn.execute("""
+        SELECT ar.*,
+               COUNT(DISTINCT ta.track_id) AS track_count,
+               COUNT(DISTINCT alt.album_id) AS album_count
+        FROM artists ar
+        LEFT JOIN track_artists ta ON ta.artist_id = ar.id
+        LEFT JOIN album_tracks alt ON alt.track_id = ta.track_id
+        WHERE ar.id = ?
+        GROUP BY ar.id
+    """, (artist_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_artist_tracks(conn, artist_id: str) -> list[dict]:
+    rows = conn.execute("""
+        SELECT DISTINCT t.*, ta.role AS artist_role, ta.position AS artist_position
+        FROM track_artists ta
+        JOIN tracks t ON t.id = ta.track_id
+        WHERE ta.artist_id = ?
+        ORDER BY t.year IS NULL, t.year ASC, t.title COLLATE NOCASE
+    """, (artist_id,)).fetchall()
+    return [_attach_fast_asset(conn, dict(r)) for r in rows]
+
+
+def get_artist_albums(conn, artist_id: str) -> list[dict]:
+    rows = conn.execute("""
+        SELECT al.*,
+               COUNT(DISTINCT at.track_id) AS local_track_count,
+               MIN(at.disc_number) AS first_disc,
+               MIN(at.track_number) AS first_track
+        FROM track_artists ta
+        JOIN album_tracks at ON at.track_id = ta.track_id
+        JOIN albums al ON al.id = at.album_id
+        WHERE ta.artist_id = ?
+        GROUP BY al.id
+        ORDER BY al.year IS NULL, al.year ASC, al.title COLLATE NOCASE
+    """, (artist_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_albums(conn) -> list[dict]:
+    rows = conn.execute("""
+        SELECT al.*, COUNT(DISTINCT at.track_id) AS local_track_count
+        FROM albums al
+        LEFT JOIN album_tracks at ON at.album_id = al.id
+        GROUP BY al.id
+        ORDER BY al.year IS NULL, al.year ASC, al.title COLLATE NOCASE
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_album(conn, album_id: str) -> dict | None:
+    row = conn.execute("""
+        SELECT al.*, COUNT(DISTINCT at.track_id) AS local_track_count
+        FROM albums al
+        LEFT JOIN album_tracks at ON at.album_id = al.id
+        WHERE al.id = ?
+        GROUP BY al.id
+    """, (album_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_album_tracks(conn, album_id: str) -> list[dict]:
+    rows = conn.execute("""
+        SELECT t.*, at.disc_number, at.track_number, at.position AS album_position
+        FROM album_tracks at
+        JOIN tracks t ON t.id = at.track_id
+        WHERE at.album_id = ?
+        ORDER BY at.disc_number ASC, at.track_number IS NULL, at.track_number ASC,
+                 at.position ASC, t.title COLLATE NOCASE
+    """, (album_id,)).fetchall()
+    return [_attach_fast_asset(conn, dict(r)) for r in rows]
+
+
+def get_artist_discography(conn, artist_id: str, scope: str = "local") -> dict:
+    scope = scope if scope in {"local", "catalog", "all"} else "local"
+    local_albums = get_artist_albums(conn, artist_id) if scope in {"local", "all"} else []
+    local_tracks = get_artist_tracks(conn, artist_id) if scope in {"local", "all"} else []
+    catalog_rows = []
+    if scope in {"catalog", "all"}:
+        catalog_rows = conn.execute("""
+            SELECT cr.*, al.title AS album_title, al.cover AS album_cover
+            FROM catalog_artist_credits cac
+            JOIN catalog_recordings cr ON cr.id = cac.catalog_recording_id
+            LEFT JOIN albums al ON al.id = cr.album_id
+            WHERE cac.artist_id = ?
+            ORDER BY cr.track_number IS NULL, cr.track_number ASC, cr.title COLLATE NOCASE
+        """, (artist_id,)).fetchall()
+    catalog = []
+    for row in catalog_rows:
+        item = dict(row)
+        item["available"] = bool(item.get("available_track_id"))
+        catalog.append(item)
+    return {
+        "scope": scope,
+        "albums": local_albums,
+        "tracks": local_tracks,
+        "catalog": catalog,
+    }
 
 
 def scan_and_reconcile(conn, music_dir, return_asset_ids: bool = False):
@@ -820,21 +1481,26 @@ def find_identity_matches(conn, meta: dict, exclude_track_id: str | None = None)
         for row in rows:
             add(row["id"], 0.96, "musicbrainz_recording")
 
-    incoming = _canonical_identity(meta.get("artist"), meta.get("title"))
+    primary_artist = meta.get("primary_artist") or {}
+    incoming_artist_value = (
+        primary_artist.get("name") if isinstance(primary_artist, dict) else None
+    ) or meta.get("canonical_artist") or meta.get("display_artist") or meta.get("artist")
+    incoming = _canonical_identity(incoming_artist_value, meta.get("title"))
     title = incoming.get("title_key") or _identity_text(meta.get("title") or "")
-    artist = incoming.get("artist_key") or _identity_text(meta.get("artist") or "")
+    artist = incoming.get("artist_key") or _artist_entity_key(incoming_artist_value or "")
     incoming_version = meta.get("version_type") or incoming.get("version_type") or "ORIGINAL_MIX"
     identity_source = meta.get("identity_source")
     if title and artist:
         rows = conn.execute("""
-            SELECT id, title, artist, duration FROM tracks
+            SELECT id, title, artist, display_artist, canonical_title_key, primary_artist_key, duration FROM tracks
             WHERE id != COALESCE(?, '')
         """, (exclude_track_id,)).fetchall()
         for row in rows:
-            existing = _canonical_identity(row["artist"], row["title"])
-            if (existing.get("title_key") or _identity_text(row["title"] or "")) != title:
+            existing = _canonical_identity(row["display_artist"] or row["artist"], row["title"])
+            existing_artist_key = row["primary_artist_key"] or _canonical_identity(row["display_artist"] or row["artist"], row["title"]).get("artist_key")
+            if (row["canonical_title_key"] or existing.get("title_key") or _identity_text(row["title"] or "")) != title:
                 continue
-            if (existing.get("artist_key") or _identity_text(row["artist"] or "")) != artist:
+            if (existing_artist_key or _artist_entity_key(row["display_artist"] or row["artist"] or "")) != artist:
                 continue
             sources = set(meta.get("all_sources") or [])
             if identity_source:

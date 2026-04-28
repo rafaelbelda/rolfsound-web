@@ -29,7 +29,7 @@ from api.ws.endpoint import get_manager as get_ws_manager, ws_endpoint
 from api.ws import state_broadcaster
 
 # ADICIONADO: import do arquivo de upload
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, upload
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, upload, catalog
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +288,7 @@ def create_app() -> FastAPI:
     app.include_router(discogs.router,    prefix="/api")
     app.include_router(playlists.router,        prefix="/api")
     app.include_router(scheduled_queues.router, prefix="/api")
+    app.include_router(catalog.router,          prefix="/api")
     
     # ADICIONADO: Inclusão do router de upload
     app.include_router(upload.router, prefix="/api")

@@ -535,6 +535,10 @@ def _duration_score(expected: float | None, candidate: float | None) -> float | 
         return 0.62
     if diff <= 30:
         return 0.35
+    # Candidate is a short excerpt of a longer file (e.g. Shazam snippet vs DJ set).
+    # Treat as neutral rather than a hard zero so the rest of the score can still win.
+    if float(candidate) > 0 and float(expected) / float(candidate) >= 1.8:
+        return None
     return 0.0
 
 
@@ -579,6 +583,49 @@ def _candidate_label_names(candidate: dict, detail: dict | None) -> list[str]:
         if name:
             labels.append(name)
     return list(dict.fromkeys(labels))
+
+
+def _discogs_artist_credits(candidate: dict, detail: dict | None) -> list[dict]:
+    credits: list[dict] = []
+    for idx, item in enumerate((detail or {}).get("artists", []) or []):
+        if not isinstance(item, dict):
+            continue
+        name = re.sub(r"\s+\(\d+\)$", "", item.get("name") or "").strip()
+        if not name:
+            continue
+        credits.append({
+            "name": name,
+            "discogs_id": item.get("id"),
+            "role": "main",
+            "position": idx,
+            "is_primary": idx == 0,
+            "join_phrase": item.get("join") or "",
+            "source": "discogs",
+        })
+    if credits:
+        return credits
+    artist_part, _release_title = _split_discogs_title(candidate.get("title"))
+    if artist_part:
+        return [{
+            "name": artist_part,
+            "role": "main",
+            "position": 0,
+            "is_primary": True,
+            "source": "discogs_title",
+        }]
+    return []
+
+
+def _discogs_display_artist(credits: list[dict]) -> str | None:
+    if not credits:
+        return None
+    ordered = sorted(credits, key=lambda c: int(c.get("position") or 0))
+    parts: list[str] = []
+    for idx, credit in enumerate(ordered):
+        if idx > 0:
+            parts.append(ordered[idx - 1].get("join_phrase") or ", ")
+        parts.append(credit.get("name") or "")
+    return "".join(parts).strip() or None
 
 
 def _best_track_match(title: str, candidate: dict, detail: dict | None) -> tuple[float, dict | None]:
@@ -639,22 +686,30 @@ def _score_discogs_candidate(
         (1.0 if is_master else 0.0) * 0.03
     )
 
+    # Structural corroboration: year + duration match + cover art strongly suggests
+    # a correct release even when text scores are weak (e.g. remix title variance).
+    strong_corroboration = (
+        y_score is not None and y_score >= 0.82
+        and d_score is not None and d_score >= 0.86
+        and has_cover
+    )
+
     if artist:
         if artist_score >= 0.92:
             reasons.append("artist_exact")
         elif artist_score >= 0.70:
             reasons.append("artist_close")
         else:
-            score = min(score, 0.58)
-            reasons.append("artist_weak")
+            score = min(score, 0.76 if strong_corroboration else 0.58)
+            reasons.append("artist_weak_corroborated" if strong_corroboration else "artist_weak")
 
     if track_score >= 0.92:
         reasons.append("track_exact")
     elif track_score >= 0.72:
         reasons.append("track_close")
     else:
-        score = min(score, 0.60)
-        reasons.append("track_weak")
+        score = min(score, 0.78 if strong_corroboration else 0.60)
+        reasons.append("track_weak_corroborated" if strong_corroboration else "track_weak")
 
     if y_score is not None:
         reasons.append(f"year_{'match' if y_score >= 0.82 else 'weak'}")
@@ -726,6 +781,23 @@ async def _enrich_discogs_candidate(
         candidate["label"] = labels
     if detail and detail.get("year"):
         candidate["year"] = detail.get("year")
+
+    credits = _discogs_artist_credits(candidate, detail)
+    if credits:
+        candidate["_rolfsound_artist_credits"] = credits
+        candidate["_rolfsound_display_artist"] = _discogs_display_artist(credits)
+
+    artist_part, release_title = _split_discogs_title(candidate.get("title"))
+    album_title = (detail or {}).get("title") or release_title
+    if album_title:
+        candidate["_rolfsound_album"] = {
+            "title": album_title,
+            "display_artist": candidate.get("_rolfsound_display_artist") or artist_part,
+            "discogs_id": candidate_id,
+            "year": candidate.get("year"),
+            "cover": candidate.get("cover_image"),
+            "source": "discogs",
+        }
 
     return candidate, detail
 
@@ -937,7 +1009,8 @@ async def identify_track(
     result = await pipeline_identify(file_path, track_id, hints=hints)
 
     title = (result.get("title") or "").strip() or None
-    artist = (result.get("artist") or "").strip() or None
+    display_artist = (result.get("display_artist") or result.get("artist") or "").strip() or None
+    artist = display_artist
 
     if (not title or _is_generic_title(title)) and fallback_title:
         cleaned = re.sub(
@@ -956,6 +1029,7 @@ async def identify_track(
 
     if title and artist:
         artist, title = _recover_artist_from_yt_title(artist, title)
+        display_artist = artist
 
     if not title:
         return {
@@ -973,7 +1047,14 @@ async def identify_track(
     return {
         "status": result.get("status", "identified"),
         "title": title,
-        "artist": artist or "",
+        "artist": display_artist or artist or "",
+        "display_artist": display_artist or artist or "",
+        "primary_artist": result.get("primary_artist"),
+        "artists": result.get("artists") or [],
+        "album": result.get("album"),
+        "albums": result.get("albums") or [],
+        "track_number": result.get("track_number"),
+        "disc_number": result.get("disc_number"),
         "duration": result.get("duration"),
         "mb_recording_id": result.get("mb_recording_id"),
         "discogs_id": result.get("discogs_id"),
@@ -1041,9 +1122,12 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
     if meta["status"] in ("identified", "low_confidence"):
         track_update.update({
             "title": meta.get("title"),
-            "artist": meta.get("artist"),
+            "display_artist": meta.get("display_artist") or meta.get("artist"),
+            "artist": meta.get("display_artist") or meta.get("artist"),
             "duration": meta.get("duration"),
             "mb_recording_id": meta.get("mb_recording_id"),
+            "isrc": meta.get("isrc"),
+            "spotify_id": meta.get("spotify_id"),
             "discogs_id": meta.get("discogs_id"),
             "label": meta.get("label"),
             "year": meta.get("year"),
@@ -1090,12 +1174,29 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
             database.update_track_metadata(conn, track["id"], track_update)
         else:
             partial_update = {}
-            for field in ("thumbnail", "discogs_id", "label", "year", "duration", "mb_recording_id"):
+            for field in ("thumbnail", "discogs_id", "label", "year", "duration", "mb_recording_id", "isrc", "spotify_id"):
                 if track_update.get(field) and not track.get(field):
                     partial_update[field] = track_update[field]
             partial_update.update(_canonical_display_update(track, meta))
             if partial_update:
                 database.update_track_metadata(conn, track["id"], partial_update)
+        if meta["status"] in ("identified", "low_confidence"):
+            database.set_track_artist_credits(
+                conn,
+                track["id"],
+                meta.get("artists") or [],
+                display_artist=meta.get("display_artist") or meta.get("artist"),
+                source=meta.get("identity_source"),
+            )
+            albums = meta.get("albums") or ([meta.get("album")] if meta.get("album") else [])
+            database.set_track_albums(
+                conn,
+                track["id"],
+                albums,
+                track_number=meta.get("track_number"),
+                disc_number=meta.get("disc_number"),
+                source=meta.get("identity_source"),
+            )
         conn.commit()
         current_track_id = track["id"]
     except Exception as e:
@@ -1151,12 +1252,17 @@ async def index_file(track_id: str, file_path: str) -> dict:
 
 def _canonical_display_update(track: dict, meta: dict) -> dict:
     canonical_title = meta.get("canonical_title") or meta.get("title")
-    canonical_artist = meta.get("canonical_artist") or meta.get("artist")
-    if not canonical_title or not canonical_artist:
+    identity_artist = (
+        (meta.get("primary_artist") or {}).get("name")
+        if isinstance(meta.get("primary_artist"), dict)
+        else None
+    ) or meta.get("canonical_artist") or meta.get("display_artist") or meta.get("artist")
+    display_artist = meta.get("display_artist") or meta.get("artist") or identity_artist
+    if not canonical_title or not identity_artist:
         return {}
 
     existing = canonicalize(track.get("artist"), track.get("title"))
-    incoming = canonicalize(canonical_artist, canonical_title)
+    incoming = canonicalize(identity_artist, canonical_title)
     if not incoming.artist_key or not incoming.title_key:
         return {}
 
@@ -1171,8 +1277,9 @@ def _canonical_display_update(track: dict, meta: dict) -> dict:
     update: dict = {}
     if track.get("title") != incoming.canonical_title:
         update["title"] = incoming.canonical_title
-    if track.get("artist") != incoming.canonical_artist:
-        update["artist"] = incoming.canonical_artist
+    if display_artist and track.get("display_artist", track.get("artist")) != display_artist:
+        update["display_artist"] = display_artist
+        update["artist"] = display_artist
     return update
 
 

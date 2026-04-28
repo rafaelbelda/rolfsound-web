@@ -24,8 +24,7 @@ VERSION_PRIORITY = {
 }
 
 _FEAT_RE = re.compile(r"\b(?:feat\.?|ft\.?|featuring|with)\b\.?\s+([^)\]\-|,;]+)", re.IGNORECASE)
-_ARTIST_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring|with)\s+.+$", re.IGNORECASE)
-_ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\s+x\s+|\s+with\s+|\s+feat\.?\s+|\s+ft\.?\s+|\s+featuring\s+)\s+", re.IGNORECASE)
+_ARTIST_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+.+$", re.IGNORECASE)
 _BRACKET_RE = re.compile(r"[\(\[][^\)\]]+[\)\]]")
 _TRAILING_NOISE_RE = re.compile(
     r"\s*(?:[-|:]\s*)?"
@@ -57,6 +56,9 @@ _DISPLAY_NOISE_RE = re.compile(
     re.IGNORECASE,
 )
 _STOP_WORDS = {"a", "an", "and", "the", "of", "to", "by", "de", "da", "do", "dos", "das", "e"}
+_CHAR_EQUIV: dict[str, str] = {
+    "&": " and ", "$": "s", "¥": "y", "€": "e", "£": "l", "ø": "o", "ł": "l", "ß": "ss",
+}
 
 
 @dataclass
@@ -76,13 +78,16 @@ def _squash(value: str | None) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip(" -|:[]()")
 
 
-def _ascii_key(value: str | None) -> str:
+def _ascii_key(value: str | None, *, stop_words: set[str] | None = None) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = text.lower().replace("&", " and ").replace("$", "s")
+    text = text.lower()
+    for _ch, _repl in _CHAR_EQUIV.items():
+        text = text.replace(_ch, _repl)
     text = re.sub(r"\bf[\W_]*(?:u|[*x])[\W_]*(?:c|[*x])[\W_]*k\b", "fuck", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
-    tokens = [t for t in text.split() if t and t not in _STOP_WORDS]
+    excluded = _STOP_WORDS if stop_words is None else stop_words
+    tokens = [t for t in text.split() if t and t not in excluded]
     return " ".join(tokens)
 
 
@@ -106,14 +111,23 @@ def _extract_featured(*values: str | None) -> list[str]:
     return list(dict.fromkeys(featured))
 
 
-def _clean_artist(value: str | None) -> str | None:
+def artist_identity_key(value: str | None) -> str:
+    """Stable key for artist entities. Unlike title keys, keeps stop words."""
+    return _ascii_key(value, stop_words=set())
+
+
+def _clean_artist(value: str | None, featured_artists: list[str] | None = None) -> str | None:
     text = _squash(value)
     if not text:
         return None
     text = re.sub(r"\s+-\s+topic$", "", text, flags=re.IGNORECASE)
     text = _ARTIST_FEAT_RE.sub("", text)
-    parts = [p for p in _ARTIST_SPLIT_RE.split(text, maxsplit=1) if p.strip()]
-    text = parts[0] if parts else text
+    featured_keys = {artist_identity_key(name) for name in (featured_artists or []) if name}
+    if featured_keys and "," in text:
+        chunks = [_squash(part) for part in text.split(",") if _squash(part)]
+        while len(chunks) > 1 and artist_identity_key(chunks[-1]) in featured_keys:
+            chunks.pop()
+        text = ", ".join(chunks)
     text = _DISPLAY_NOISE_RE.sub(" ", text)
     text = _squash(text)
     return text or None
@@ -143,14 +157,14 @@ def _clean_title(value: str | None) -> str | None:
 
 
 def canonicalize(artist: str | None, title: str | None) -> CanonicalIdentity:
-    canonical_artist = _clean_artist(artist)
-    canonical_title = _clean_title(title)
     version_type = _version_type_from_text(artist, title)
     featured_artists = _extract_featured(artist, title)
+    canonical_artist = _clean_artist(artist, featured_artists)
+    canonical_title = _clean_title(title)
     return CanonicalIdentity(
         canonical_artist=canonical_artist,
         canonical_title=canonical_title,
-        artist_key=_ascii_key(canonical_artist),
+        artist_key=artist_identity_key(canonical_artist),
         title_key=_ascii_key(canonical_title),
         version_type=version_type,
         featured_artists=featured_artists,

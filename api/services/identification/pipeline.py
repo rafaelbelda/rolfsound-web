@@ -117,6 +117,46 @@ def _f(value, default=0.0) -> float:
         return default
 
 
+def _album_from_tags(tags: dict) -> dict | None:
+    if not tags.get("album"):
+        return None
+    return {
+        "title": tags.get("album"),
+        "display_artist": tags.get("albumartist") or tags.get("artist"),
+        "mb_release_id": tags.get("mb_release_id"),
+        "mb_release_group_id": tags.get("mb_release_group_id"),
+        "year": tags.get("year"),
+        "cover": tags.get("thumbnail"),
+        "source": "local_tags",
+    }
+
+
+def _credits_from_acoustid_recording(recording: dict | None) -> list[dict]:
+    credits: list[dict] = []
+    for idx, artist in enumerate((recording or {}).get("artists", []) or []):
+        if not isinstance(artist, dict):
+            continue
+        name = artist.get("name")
+        if not name:
+            continue
+        credits.append({
+            "name": name,
+            "mb_artist_id": artist.get("id"),
+            "role": "main",
+            "position": idx,
+            "is_primary": idx == 0,
+            "source": "acoustid",
+        })
+    return credits
+
+
+def _seed_artist_from_result(result: dict) -> str | None:
+    primary = result.get("primary_artist")
+    if isinstance(primary, dict) and primary.get("name"):
+        return primary.get("name")
+    return result.get("canonical_artist") or result.get("display_artist") or result.get("artist")
+
+
 async def _gather_local_evidence(
     file_path: str,
     track_id: str,
@@ -141,6 +181,9 @@ async def _gather_local_evidence(
             mb_recording_id=tags.get("mb_recording_id"),
             cover_image=tags.get("thumbnail"),
             label=tags.get("publisher"),
+            album=_album_from_tags(tags),
+            track_number=tags.get("track_number"),
+            disc_number=tags.get("disc_number"),
             raw=tags,
             reasons=["mutagen_tags"],
         ))
@@ -153,6 +196,8 @@ async def _gather_local_evidence(
             artist=file_hint.get("artist"),
             title=file_hint.get("title"),
             year=file_hint.get("year"),
+            album={"title": file_hint.get("album"), "year": file_hint.get("year"), "source": "filename"} if file_hint.get("album") else None,
+            track_number=file_hint.get("track_number"),
             raw=file_hint,
             reasons=["path_pattern"],
         ))
@@ -243,6 +288,10 @@ async def _isrc_lookups(isrc: str) -> list[Evidence]:
             mb_recording_id=mb_data.get("mb_recording_id"),
             label=(mb_data.get("labels") or [None])[0],
             cover_image=cover,
+            display_artist=mb_data.get("display_artist"),
+            artist_credits=mb_data.get("artist_credits") or [],
+            album=mb_data.get("album_data"),
+            albums=mb_data.get("albums") or [],
             raw=mb_data,
             reasons=["isrc_match", "musicbrainz"],
         ))
@@ -260,6 +309,10 @@ async def _isrc_lookups(isrc: str) -> list[Evidence]:
             isrc=isrc,
             spotify_id=sp_data.get("spotify_id"),
             cover_image=sp_data.get("cover_image"),
+            display_artist=sp_data.get("display_artist"),
+            artist_credits=sp_data.get("artist_credits") or [],
+            album=sp_data.get("album_data"),
+            albums=sp_data.get("albums") or [],
             raw=sp_data,
             reasons=["isrc_match", "spotify"],
         ))
@@ -290,9 +343,8 @@ async def _acoustid_lookup(file_path: str) -> tuple[Evidence | None, dict | None
         return None, None, raw_fp
 
     mb_recording_id = recording.get("id")
-    artist_name = None
-    if recording.get("artists"):
-        artist_name = recording["artists"][0].get("name")
+    artist_credits = _credits_from_acoustid_recording(recording)
+    artist_name = ", ".join(c.get("name") for c in artist_credits if c.get("name")) or None
     title = recording.get("title")
 
     evidence = Evidence(
@@ -302,6 +354,8 @@ async def _acoustid_lookup(file_path: str) -> tuple[Evidence | None, dict | None
         title=title,
         mb_recording_id=mb_recording_id,
         duration=fp.get("duration"),
+        display_artist=artist_name,
+        artist_credits=artist_credits,
         raw=recording,
         reasons=["chromaprint_match"],
     )
@@ -326,6 +380,10 @@ async def _mb_enrichment(mbid: str) -> Evidence | None:
         isrc=(data.get("isrcs") or [None])[0],
         label=(data.get("labels") or [None])[0],
         cover_image=cover,
+        display_artist=data.get("display_artist"),
+        artist_credits=data.get("artist_credits") or [],
+        album=data.get("album_data"),
+        albums=data.get("albums") or [],
         raw=data,
         reasons=["acoustid_mbid", "musicbrainz_enriched"],
     )
@@ -506,12 +564,16 @@ async def _discogs_evidence(artist: str | None, title: str | None, year, duratio
     return Evidence(
         source="discogs",
         confidence=min(0.93, confidence),
-        artist=artist_part or artist,
+        artist=discogs.get("_rolfsound_display_artist") or artist_part or artist,
         title=track_title,
         year=discogs.get("year"),
         discogs_id=discogs.get("id"),
         label=(discogs.get("label") or [None])[0] if isinstance(discogs.get("label"), list) else discogs.get("label"),
         cover_image=discogs.get("cover_image"),
+        display_artist=discogs.get("_rolfsound_display_artist") or artist_part or artist,
+        artist_credits=discogs.get("_rolfsound_artist_credits") or [],
+        album=discogs.get("_rolfsound_album"),
+        albums=[discogs.get("_rolfsound_album")] if discogs.get("_rolfsound_album") else [],
         raw=discogs,
         reasons=discogs.get("_rolfsound_reasons") or [],
     )
@@ -555,6 +617,10 @@ async def _spotify_fuzzy_evidence(artist, title, duration) -> Evidence | None:
         spotify_id=sp.get("spotify_id"),
         isrc=sp.get("isrc"),
         cover_image=sp.get("cover_image"),
+        display_artist=sp.get("display_artist"),
+        artist_credits=sp.get("artist_credits") or [],
+        album=sp.get("album_data"),
+        albums=sp.get("albums") or [],
         raw=sp,
         reasons=["spotify_fuzzy_search"],
     )
@@ -638,6 +704,10 @@ async def identify(
                 spotify_id=sp.get("spotify_id"),
                 isrc=sp.get("isrc"),
                 cover_image=sp.get("cover_image"),
+                display_artist=sp.get("display_artist"),
+                artist_credits=sp.get("artist_credits") or [],
+                album=sp.get("album_data"),
+                albums=sp.get("albums") or [],
                 raw=sp,
                 reasons=["spotify_track_url_in_yt_desc"],
             ))
@@ -662,25 +732,64 @@ async def identify(
         if sz_ev:
             evidences.append(sz_ev)
 
-    # Seed selection: when youtube_title parsed a strong "Artist - Title" split
-    # (conf >= 0.78), trust BOTH fields from that single evidence — this avoids
-    # the channel name (poisoned existing_artist) leaking into the Discogs query.
+    # P9: Downweight filename/existing_track_row evidence that shares the title
+    # but has a completely different artist than a Shazam audio result — the
+    # characteristic signature of a YouTube channel name being used as artist.
+    _sz_for_check = next(
+        (ev for ev in evidences if ev.source in ("shazam", "shazam_unverified") and ev.confidence >= 0.55),
+        None,
+    )
+    if _sz_for_check:
+        for _ev in evidences:
+            if _ev.source not in ("filename", "existing_track_row") or not _ev.canonical_artist_key:
+                continue
+            _sim = identity_similarity(_sz_for_check.artist, _sz_for_check.title, _ev.artist, _ev.title)
+            if _sim["title"] >= 0.70 and _sim["artist"] < 0.20:
+                _ev.confidence = round(_ev.confidence * 0.3, 4)
+                _ev.reasons.append("downweighted_by_audio_conflict")
+
+    # Seed selection for Discogs/Spotify queries.
+    # Run a provisional consensus first; if the gathered evidence already agrees
+    # on an identity with confidence ≥ 0.50 AND the winning cluster contains at
+    # least one reliable (non-filename, non-existing_track_row) source, use that
+    # as the seed. This avoids single-source heuristic evidence (e.g. a temp-dir
+    # name parsed as artist) from poisoning the search queries.
+    _RELIABLE_SEED_SOURCES = {
+        "acoustid", "mb_by_id", "mb_by_isrc", "shazam", "shazam_unverified",
+        "spotify_isrc", "spotify_fuzzy", "discogs", "youtube_title", "local_tags",
+        "isrc_lookup",
+    }
+    _provisional = consensus_resolve(evidences)
+    _provisional_reliable = bool(set(_provisional.get("sources", [])) & _RELIABLE_SEED_SOURCES)
     yt_title_ev = next(
         (ev for ev in evidences if ev.source == "youtube_title" and ev.confidence >= 0.78 and ev.artist and ev.title),
         None,
     )
-    if yt_title_ev:
-        seed_artist = yt_title_ev.canonical_artist or yt_title_ev.artist
-        seed_title = yt_title_ev.canonical_title or yt_title_ev.title
+    if (_provisional.get("artist") and _provisional.get("title")
+            and _provisional.get("confidence", 0) >= 0.50
+            and _provisional_reliable):
+        seed_artist = _seed_artist_from_result(_provisional)
+        seed_title = _provisional["title"]
     else:
-        seed_artist = next(
-            (ev.canonical_artist or ev.artist for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_artist or ev.artist),
+        shazam_ev = next(
+            (ev for ev in evidences if ev.source in ("shazam", "shazam_unverified") and ev.artist and ev.title),
             None,
         )
-        seed_title = next(
-            (ev.canonical_title or ev.title for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_title or ev.title),
-            None,
-        )
+        if shazam_ev:
+            seed_artist = shazam_ev.canonical_artist or shazam_ev.artist
+            seed_title = shazam_ev.canonical_title or shazam_ev.title
+        elif yt_title_ev:
+            seed_artist = yt_title_ev.canonical_artist or yt_title_ev.artist
+            seed_title = yt_title_ev.canonical_title or yt_title_ev.title
+        else:
+            seed_artist = next(
+                (ev.canonical_artist or ev.artist for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_artist or ev.artist),
+                None,
+            )
+            seed_title = next(
+                (ev.canonical_title or ev.title for ev in sorted(evidences, key=lambda e: -e.priority) if ev.canonical_title or ev.title),
+                None,
+            )
 
     # Late safety net: if the seed pair still looks like "channel + 'Real Artist - Title'"
     # (e.g. yt_title_ev was missing or weak), apply the recovery before querying.
@@ -713,6 +822,26 @@ async def identify(
             if sp_ev.isrc and sp_ev.isrc not in isrc_candidates:
                 isrc_candidates.add(sp_ev.isrc)
                 evidences.extend(await _isrc_lookups(sp_ev.isrc))
+
+    # P6: Re-evaluate any shazam_unverified against updated contexts (Discogs/Spotify
+    # are now in evidences). If the new high-confidence evidence validates what was
+    # previously only partially confirmed, promote it to full shazam. Only promote,
+    # never downgrade — avoids bouncing.
+    _sz_unverified = next(
+        (ev for ev in evidences if ev.source == "shazam_unverified" and ev.raw),
+        None,
+    )
+    if _sz_unverified:
+        _updated_contexts = _useful_shazam_contexts(evidences)
+        _re_guarded = _guard_shazam_result(_sz_unverified.raw, _updated_contexts)
+        if _re_guarded.source == "shazam":
+            evidences.remove(_sz_unverified)
+            evidences.append(_re_guarded)
+            logger.info(
+                "Shazam promoted from shazam_unverified after second guard pass: %s - %s",
+                _re_guarded.artist,
+                _re_guarded.title,
+            )
 
     interim = consensus_resolve(evidences)
     if interim["status"] == "low_confidence" and interim.get("title"):
