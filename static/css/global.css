@@ -691,6 +691,25 @@ html, body {
   opacity: 0;
 }
 
+/* ─── SEARCH MODAL BACKDROP ─────────────────────────────────────────────── */
+
+body[data-backdrop-blur="modal"]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 990;
+  background: var(--color-bg-scrim);
+  backdrop-filter: blur(var(--blur-overlay));
+  -webkit-backdrop-filter: blur(var(--blur-overlay));
+  animation: rs-search-backdrop-in 0.32s var(--ease-standard) forwards;
+  pointer-events: none;
+}
+
+@keyframes rs-search-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ─── REDUCED MOTION ──────────────────────────────────────────────────────── */
 /* Respeita prefers-reduced-motion: reduce — Apple/WCAG requirement.           */
 /* Desativa transições CSS globais. WAAPI duration é zerado via JS (ver        */

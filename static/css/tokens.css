@@ -197,6 +197,11 @@
   --search-row-h: 52px;
   --color-search-results-bg: rgba(10, 10, 10, 0.96);
 
+  /* ── Search Modal ── */
+  --search-modal-w: min(760px, calc(100vw - 64px));
+  --search-modal-max-h: min(70vh, 560px);
+  --search-modal-top: 88px;
+
   /* ── Compatibilidade com tokens legados ── */
   --black: var(--color-bg-canvas);
   --white: var(--color-text-primary);

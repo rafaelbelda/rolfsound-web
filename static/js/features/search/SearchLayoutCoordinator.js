@@ -42,6 +42,8 @@ export default class SearchLayoutCoordinator {
         window.removeEventListener('rolfsound-queue-open',   this._onQueueOpen);
         window.removeEventListener('rolfsound-queue-close',  this._onQueueClose);
         this._island.removeEventListener('rolfsound-navigate', this._onNavigate);
+        if (this._onBackdropClick) document.removeEventListener('click', this._onBackdropClick);
+        if (this._onModalKeydown)  window.removeEventListener('keydown', this._onModalKeydown);
     }
 
     _attach() {
@@ -73,6 +75,17 @@ export default class SearchLayoutCoordinator {
         document.body.dataset.backdropBlur = 'false';
 
         this._resultsEl.removeAttribute('open');
+        this._resultsEl.style.transform = '';
+
+        // Tear down modal-mode listeners
+        if (this._onBackdropClick) {
+            document.removeEventListener('click', this._onBackdropClick);
+            this._onBackdropClick = null;
+        }
+        if (this._onModalKeydown) {
+            window.removeEventListener('keydown', this._onModalKeydown);
+            this._onModalKeydown = null;
+        }
 
         // Restore player to centered/original position
         if (this._isMorphed) {
@@ -102,10 +115,9 @@ export default class SearchLayoutCoordinator {
     // ── Layout logic ─────────────────────────────────────────────
 
     _currentMode() {
-        const queueOpen = window.playbackMitosisManager?.isQueueOpen ?? false;
-        if (this._isMorphed && queueOpen) return 'player+results+queue';
-        if (this._isMorphed)              return 'player+results';
-        return 'floating';
+        // Modal supersedes floating/docked. The floating/docked branches remain
+        // available for any future variant that brings back the inline panel.
+        return 'modal';
     }
 
     _applyLayout() {
@@ -113,11 +125,44 @@ export default class SearchLayoutCoordinator {
 
         const mode = this._currentMode();
 
-        if (mode === 'floating') {
+        if (mode === 'modal') {
+            this._applyModal();
+        } else if (mode === 'floating') {
             this._applyFloating();
         } else {
             this._applyDocked(mode);
         }
+    }
+
+    _applyModal() {
+        document.body.dataset.backdropBlur = 'modal';
+
+        const top = getComputedStyle(document.documentElement)
+            .getPropertyValue('--search-modal-top').trim() || '88px';
+
+        Object.assign(this._resultsEl.style, {
+            top,
+            left: '50%',
+            width: '',
+            height: '',
+            maxHeight: '',
+            transform: 'translateX(-50%)',
+        });
+
+        this._resultsEl.setAttribute('layout-mode', 'modal');
+        this._resultsEl.setAttribute('open', '');
+
+        // Backdrop click → close
+        this._onBackdropClick = (e) => {
+            if (e.target === document.body) this._island.closeSearch?.();
+        };
+        document.addEventListener('click', this._onBackdropClick);
+
+        // ESC from anywhere → close (belt-and-suspenders: the input also handles it)
+        this._onModalKeydown = (e) => {
+            if (e.key === 'Escape') this._island.closeSearch?.();
+        };
+        window.addEventListener('keydown', this._onModalKeydown);
     }
 
     _applyFloating() {

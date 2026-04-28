@@ -360,6 +360,11 @@ class RolfsoundIsland extends HTMLElement {
                     </svg>
                 </div>
                 <input id="search-input" class="search-input" type="text" placeholder="Search..." autocomplete="off" spellcheck="false" />
+                <div class="search-state" data-state="idle" aria-live="polite">
+                    <span class="search-state-dot"></span>
+                    <span class="search-state-label"></span>
+                </div>
+                <span class="search-kbd" aria-hidden="true">esc</span>
                 <button class="search-close hover-target" aria-label="Fechar busca">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="pointer-events:none">
                         <path d="M18 6 6 18M6 6l12 12"/>
@@ -395,8 +400,24 @@ class RolfsoundIsland extends HTMLElement {
                 const offset = (btnRect.left + btnRect.width / 2) - (zoneRect.left + zoneRect.width / 2);
                 pill.style.setProperty('--search-x-offset', `${offset}px`);
 
-                // Notify layout coordinator that search is open
+                // State pill — driven by search-results events
+                const stateEl = pill.querySelector('.search-state');
+                const labelEl = pill.querySelector('.search-state-label');
+                this._searchResultsListener = (e) => {
+                    const { state = 'idle', library = [], youtube = [], error } = e.detail || {};
+                    stateEl.dataset.state = state;
+                    if      (state === 'loading')   labelEl.textContent = 'Searching';
+                    else if (state === 'streaming') labelEl.textContent = 'Streaming';
+                    else if (state === 'done')      labelEl.textContent = `${library.length + youtube.length} results`;
+                    else if (state === 'error')     labelEl.textContent = error || 'Error';
+                    else                            labelEl.textContent = '';
+                };
+                window.addEventListener('rolfsound-search-results', this._searchResultsListener);
+
+                // Notify layout coordinator that search is open; it will apply modal mode.
+                // On the next frame, add .modal to the pill so it widens to match the shell.
                 window.dispatchEvent(new CustomEvent('rolfsound-search-open', { bubbles: true }));
+                requestAnimationFrame(() => pill.classList.add('modal'));
             }
         });
     }
@@ -406,6 +427,14 @@ class RolfsoundIsland extends HTMLElement {
         if (!pill) return;
 
         this.removeAttribute('inspecting');
+
+        if (this._searchResultsListener) {
+            window.removeEventListener('rolfsound-search-results', this._searchResultsListener);
+            this._searchResultsListener = null;
+        }
+
+        // Remove modal class before the reverse mitosis so the pill narrows back
+        pill.classList.remove('modal');
 
         // Notify layout coordinator before animation so it can restore player position
         window.dispatchEvent(new CustomEvent('rolfsound-search-close', { bubbles: true }));
@@ -1064,6 +1093,10 @@ class RolfsoundIsland extends HTMLElement {
                 width: 560px;
                 border-radius: var(--pill-r, var(--default-r));
                 transform: translateX(-50%) translateY(var(--mitosis-distance, 55px)) scale(1);
+                transition: width 0.34s var(--ease-standard);
+            }
+            .mitosis-pill.search-expanded.modal {
+                width: var(--search-modal-w, min(760px, calc(100vw - 64px)));
             }
             :host([inspecting]) #btn-search { opacity: 0; pointer-events: none; transform: scale(0.7); transition: opacity 0.2s ease, transform 0.2s ease; }
             #btn-search { transition: opacity 0.2s ease, transform 0.2s ease; }
@@ -1099,6 +1132,60 @@ class RolfsoundIsland extends HTMLElement {
             }
             .search-close:hover { color: var(--white); background: var(--color-surface-card-hover); }
             .mitosis-pill.search-expanded .search-close { opacity: 1; transform: scale(1); pointer-events: auto; }
+
+            /* ── State pill ── */
+            .search-state {
+                display: flex; align-items: center; gap: 5px;
+                flex-shrink: 0;
+                padding: 2px 7px;
+                border-radius: var(--radius-full);
+                background: var(--color-surface-interactive);
+                color: var(--color-text-secondary);
+                font-family: var(--font-mono);
+                font-size: var(--fs-xs);
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                opacity: 0; transform: translateX(-4px);
+                pointer-events: none;
+                transition: opacity 0.18s ease, transform 0.22s var(--ease-spring);
+            }
+            .search-state[data-state="loading"],
+            .search-state[data-state="streaming"],
+            .search-state[data-state="done"],
+            .search-state[data-state="error"] {
+                opacity: 1; transform: translateX(0);
+            }
+            .search-state[data-state="error"] { color: var(--color-accent-danger); }
+            .search-state-dot {
+                width: 5px; height: 5px;
+                border-radius: 50%;
+                background: var(--rs-theme-glow, var(--color-text-control));
+            }
+            .search-state[data-state="loading"] .search-state-dot,
+            .search-state[data-state="streaming"] .search-state-dot {
+                animation: search-pulse 1.2s ease-in-out infinite;
+            }
+            .search-state[data-state="error"] .search-state-dot { background: var(--color-accent-danger); }
+            @keyframes search-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+            /* ── ESC kbd badge ── */
+            .search-kbd {
+                flex-shrink: 0;
+                font-family: var(--font-mono);
+                font-size: var(--fs-xs);
+                padding: 1px 5px;
+                border-radius: var(--radius-xs);
+                border: 1px solid var(--color-border-subtle);
+                background: var(--color-surface-ghost);
+                color: var(--color-text-faint);
+                letter-spacing: 0.06em;
+                opacity: 0; transform: scale(0.8);
+                transition: opacity 0.2s ease 0.4s, transform 0.25s var(--ease-spring) 0.4s;
+            }
+            .mitosis-pill.search-expanded .search-kbd { opacity: 1; transform: scale(1); }
+            .mitosis-pill.search-expanded .search-bar:has(.search-state:not([data-state="idle"])) .search-kbd {
+                opacity: 0; transform: scale(0.8); transition-delay: 0s;
+            }
 
             .mitosis-pill.toast-pill {
                 border-radius: var(--radius-dynamic-island);

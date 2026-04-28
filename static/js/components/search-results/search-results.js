@@ -27,7 +27,7 @@ class RolfsoundSearchResults extends HTMLElement {
         this._youtube = [];
         this._error   = '';
         this._query   = '';
-        this._activeTab = 'library'; // 'library' | 'youtube'
+        this._activeTab = 'all'; // 'all' | 'library' | 'youtube'
         this._focusIdx  = -1;        // keyboard focused row index
 
         this._rendered = false;
@@ -83,7 +83,10 @@ class RolfsoundSearchResults extends HTMLElement {
         this.shadowRoot.innerHTML = `
         <div class="shell" part="shell">
             <div class="tabs" role="tablist">
-                <button class="tab active" role="tab" data-tab="library" aria-selected="true">
+                <button class="tab active" role="tab" data-tab="all" aria-selected="true">
+                    All <span class="tab-count all-count"></span>
+                </button>
+                <button class="tab" role="tab" data-tab="library" aria-selected="false">
                     Library <span class="tab-count lib-count"></span>
                 </button>
                 <button class="tab" role="tab" data-tab="youtube" aria-selected="false">
@@ -172,9 +175,11 @@ class RolfsoundSearchResults extends HTMLElement {
             rows[this._focusIdx]?.focus({ preventScroll: false });
             this._scrollRowIntoView(rows[this._focusIdx]);
         } else if (e.key === 'Tab' && !e.shiftKey) {
-            // Tab switches between Library / YouTube tabs
+            // Tab cycles: all → library → youtube → all
             e.preventDefault();
-            this._setActiveTab(this._activeTab === 'library' ? 'youtube' : 'library');
+            const order = ['all', 'library', 'youtube'];
+            const next = order[(order.indexOf(this._activeTab) + 1) % order.length];
+            this._setActiveTab(next);
         } else if (e.key === 'Home') {
             e.preventDefault();
             this._focusIdx = 0;
@@ -213,10 +218,14 @@ class RolfsoundSearchResults extends HTMLElement {
     }
 
     _updateTabCounts() {
+        const allCount = this.shadowRoot.querySelector('.all-count');
         const libCount = this.shadowRoot.querySelector('.lib-count');
         const ytCount  = this.shadowRoot.querySelector('.yt-count');
-        if (libCount) libCount.textContent = this._library.length ? `(${this._library.length})` : '';
-        if (ytCount)  ytCount.textContent  = this._youtube.length ? `(${this._youtube.length})` : '';
+        const streaming = this._state === 'loading' || this._state === 'streaming';
+        const fmt = (n) => n ? `(${n}${streaming ? '+' : ''})` : '';
+        if (allCount) allCount.textContent = fmt(this._library.length + this._youtube.length);
+        if (libCount) libCount.textContent = fmt(this._library.length);
+        if (ytCount)  ytCount.textContent  = fmt(this._youtube.length);
     }
 
     _updateSpinner() {
@@ -241,58 +250,108 @@ class RolfsoundSearchResults extends HTMLElement {
     }
 
     _renderRows() {
-        const list  = this.shadowRoot.querySelector('.list');
+        const list = this.shadowRoot.querySelector('.list');
         if (!list) return;
 
-        const items = this._activeTab === 'library' ? this._library : this._youtube;
-        const source = this._activeTab === 'library' ? 'library' : 'youtube';
+        // Build sections for the active tab
+        const sections = [];
+        const isLoading   = this._state === 'loading';
+        const isStreaming  = this._state === 'streaming';
+
+        if (this._activeTab === 'all') {
+            if (this._library.length || this._state !== 'idle')
+                sections.push({ source: 'library', label: 'Library · Local · Instant', items: this._library });
+            if (this._youtube.length || isLoading || isStreaming)
+                sections.push({
+                    source: 'youtube',
+                    label: isStreaming ? 'YouTube · Streaming' : 'YouTube · Done',
+                    items: this._youtube
+                });
+        } else if (this._activeTab === 'library') {
+            sections.push({ source: 'library', label: null, items: this._library });
+        } else {
+            sections.push({ source: 'youtube', label: null, items: this._youtube });
+        }
+
+        const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
 
         // State overlays
         const loadingEl = list.querySelector('.state-loading-full');
         const emptyEl   = list.querySelector('.state-empty');
         const errorEl   = list.querySelector('.state-error');
 
-        loadingEl?.classList.toggle('visible', this._state === 'loading' && items.length === 0);
+        loadingEl?.classList.remove('visible'); // skeletons replace the spinner
         errorEl?.classList.toggle('visible', this._state === 'error');
         if (errorEl) errorEl.textContent = this._state === 'error' ? (this._error || 'Search failed') : '';
 
-        const isEmpty = items.length === 0 && this._state !== 'loading' && this._state !== 'error';
+        const showIdle      = !this._query && this._state === 'idle';
+        const showNoResults = !!this._query && totalItems === 0 && !isLoading && !isStreaming && this._state !== 'error';
+
         if (emptyEl) {
-            emptyEl.classList.toggle('visible', isEmpty);
-            if (isEmpty) {
-                emptyEl.textContent = this._query
-                    ? `No ${source === 'library' ? 'library' : 'YouTube'} results for "${this._query}"`
-                    : 'Start typing to search…';
+            emptyEl.classList.toggle('visible', showIdle || showNoResults);
+            if (showIdle) {
+                emptyEl.classList.add('idle');
+                emptyEl.innerHTML = `
+                    <div class="empty-glyph">⌘</div>
+                    <div class="empty-title">Type to search</div>
+                    <div class="empty-sub">Local instant · YouTube streams in</div>`;
+            } else if (showNoResults) {
+                emptyEl.classList.remove('idle');
+                emptyEl.innerHTML = '';
+                emptyEl.textContent = `No results for "${this._query}"`;
             }
         }
 
-        // Remove existing rows
-        list.querySelectorAll('rolfsound-track-row').forEach(r => r.remove());
+        // Clear previous rows, dividers, skeletons
+        list.querySelectorAll('.section-divider, .skeleton-row, rolfsound-track-row').forEach(n => n.remove());
 
-        if (!items.length) return;
+        if (showIdle || showNoResults || this._state === 'error') return;
 
-        // Determine which IDs are in library, queued, or playing
-        const libraryIds = new Set((this._library || []).map(t => t.id || t.track_id).filter(Boolean));
+        const libraryIds        = new Set((this._library || []).map(t => t.id || t.track_id).filter(Boolean));
         const librarySourceRefs = new Set((this._library || []).map(t => t.source_ref).filter(Boolean));
-        const queuedIds  = new Set((window.playbackMitosisManager?.state.queue || []).map(t => t.id || t.track_id).filter(Boolean));
-        const playingId  = window.playbackMitosisManager?.state.currentId || null;
+        const queuedIds         = new Set((window.playbackMitosisManager?.state.queue || []).map(t => t.id || t.track_id).filter(Boolean));
+        const playingId         = window.playbackMitosisManager?.state.currentId || null;
 
         const fragment = document.createDocumentFragment();
-        for (const track of items) {
-            const row = document.createElement('rolfsound-track-row');
-            const tid = track.id || track.track_id || '';
 
-            row.setAttribute('source', source);
+        for (const section of sections) {
+            // Section divider (only shown in 'all' tab where label is set)
+            if (section.label) {
+                const div = document.createElement('div');
+                div.className = `section-divider source-${section.source}`;
+                div.innerHTML = `<span class="source-dot"></span><span class="source-label">${section.label}</span>`;
+                fragment.appendChild(div);
+            }
 
-            let state = 'idle';
-            if (tid && tid === playingId)          state = 'playing';
-            else if (tid && queuedIds.has(tid))    state = 'queued';
-            else if (source === 'youtube' && tid && (libraryIds.has(tid) || librarySourceRefs.has(tid))) state = 'in-library';
+            // Skeletons while this section has no items yet and we're loading/streaming
+            const showSkeletons = section.items.length === 0
+                && (isLoading || (isStreaming && section.source === 'youtube'));
+            if (showSkeletons) {
+                for (let i = 0; i < 3; i++) {
+                    const sk = document.createElement('div');
+                    sk.className = 'skeleton-row';
+                    sk.innerHTML = `<div class="sk-cover"></div><div class="sk-text"><div class="sk-line sk-line-title"></div><div class="sk-line sk-line-sub"></div></div>`;
+                    fragment.appendChild(sk);
+                }
+                continue;
+            }
 
-            row.setAttribute('state', state);
-            row.track = track;
-            fragment.appendChild(row);
+            for (const track of section.items) {
+                const row = document.createElement('rolfsound-track-row');
+                const tid = track.id || track.track_id || '';
+                row.setAttribute('source', section.source);
+
+                let state = 'idle';
+                if (tid && tid === playingId)          state = 'playing';
+                else if (tid && queuedIds.has(tid))    state = 'queued';
+                else if (section.source === 'youtube' && tid && (libraryIds.has(tid) || librarySourceRefs.has(tid))) state = 'in-library';
+
+                row.setAttribute('state', state);
+                row.track = track;
+                fragment.appendChild(row);
+            }
         }
+
         list.appendChild(fragment);
     }
 
@@ -306,11 +365,12 @@ class RolfsoundSearchResults extends HTMLElement {
         this._query   = '';
         this._focusIdx = -1;
         if (this._rendered) {
+            this._setActiveTab('all');
             this._updateTabCounts();
             this._updateSpinner();
             const list = this.shadowRoot.querySelector('.list');
             if (list) {
-                list.querySelectorAll('rolfsound-track-row').forEach(r => r.remove());
+                list.querySelectorAll('.section-divider, .skeleton-row, rolfsound-track-row').forEach(r => r.remove());
                 list.querySelector('.state-loading-full')?.classList.remove('visible');
                 list.querySelector('.state-empty')?.classList.remove('visible');
                 list.querySelector('.state-error')?.classList.remove('visible');
