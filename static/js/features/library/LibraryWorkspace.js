@@ -27,6 +27,7 @@ const ICONS = {
   play: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`,
   queue: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 6h11v2H4V6Zm0 5h11v2H4v-2Zm0 5h7v2H4v-2Zm14-5V8h2v3h3v2h-3v3h-2v-3h-3v-2h3Z"/></svg>`,
   versions: icon('<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 13 9 5 9-5"/>'),
+  edit: icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
 };
 
 function escapeHtml(value) {
@@ -105,6 +106,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     this._isRendered = false;
     this._isAddMenuOpen = false;
     this._detailModal = null;
+    this._identityModal = null;
     this._detailMorph = new GeometryMorphAnimator();
     this._detailHiddenOrigins = new Set();
     this._detailCache = new Map();
@@ -157,6 +159,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
       findTrackById: (trackId) => this.store.findTrack(trackId),
       playTrack: (track, assetId) => this._playTrack(track, assetId),
       queueTrack: (track, assetId) => this._queueTrack(track, assetId),
+      editIdentity: (track, anchorEl) => this._openIdentityEditor(track, anchorEl),
     });
 
     this._renderShell();
@@ -172,6 +175,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     window.removeEventListener('rolfsound-context-build', this._onContextBuild);
     document.removeEventListener('keydown', this._onKeydown);
     this._closeDetailModal({ instant: true });
+    this._closeIdentityEditor();
   }
 
   _renderShell() {
@@ -585,6 +589,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     if (action === 'play') await this._playTrack(track);
     if (action === 'queue') await this._queueTrack(track);
     if (action === 'versions') this._versionPanel?.open?.(track, row);
+    if (action === 'edit-identity') await this._openIdentityEditor(track, row);
     if (action === 'remove-playlist-track') await this._removePlaylistTrack(row.dataset.playlistId, trackId, row);
   }
 
@@ -987,6 +992,271 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     }
   }
 
+  async _openIdentityEditor(track, sourceEl = null) {
+    const trackId = getTrackId(track);
+    if (!trackId) {
+      this._notify('Track unavailable');
+      return;
+    }
+    this._closeIdentityEditor();
+    const modal = document.createElement('div');
+    modal.className = 'identity-editor-panel';
+    modal.innerHTML = '<div class="identity-editor-backdrop" data-identity-close></div><section class="identity-editor-shell"><div class="library-loading">Loading...</div></section>';
+    document.body.appendChild(modal);
+    this._identityModal = {
+      modal,
+      shell: modal.querySelector('.identity-editor-shell'),
+      trackId,
+      track,
+      sourceEl,
+      identity: null,
+      candidates: [],
+      selectedCandidate: null,
+      searchQuery: `${getDisplayArtist(track) || ''} ${track.title || ''}`.trim(),
+      searching: false,
+      onClick: (event) => this._handleIdentityEditorClick(event),
+    };
+    modal.addEventListener('click', this._identityModal.onClick);
+    requestAnimationFrame(() => modal.classList.add('active'));
+
+    try {
+      const response = await fetch(`/api/library/tracks/${encodeURIComponent(trackId)}/identity`);
+      if (!response.ok) throw new Error(`Identity load failed (${response.status})`);
+      this._identityModal.identity = await response.json();
+      this._identityModal.track = this._identityModal.identity.track || track;
+      this._renderIdentityEditor();
+    } catch (error) {
+      console.error('Identity load error:', error);
+      this._identityModal.shell.innerHTML = `
+        <div class="identity-editor-header">
+          <strong>Edit identity</strong>
+          <button class="library-icon-btn hover-target" type="button" data-identity-close aria-label="Close">${ICONS.close}</button>
+        </div>
+        <div class="identity-editor-error">Failed to load identity</div>
+      `;
+    }
+  }
+
+  _closeIdentityEditor() {
+    const state = this._identityModal;
+    if (!state) return;
+    state.modal.removeEventListener('click', state.onClick);
+    state.modal.classList.remove('active');
+    window.setTimeout(() => state.modal.remove(), 160);
+    this._identityModal = null;
+  }
+
+  _identityFieldValue(name) {
+    const form = this._identityModal?.shell?.querySelector('[data-identity-form]');
+    if (!form) return '';
+    return form.elements[name]?.value || '';
+  }
+
+  _candidateAlbumTitle(candidate) {
+    return candidate?.album?.title || candidate?.albums?.[0]?.title || '';
+  }
+
+  _candidateCover(candidate) {
+    return candidate?.cover_image || candidate?.thumbnail || candidate?.album?.cover || candidate?.albums?.[0]?.cover || '';
+  }
+
+  _renderIdentityEditor() {
+    const state = this._identityModal;
+    if (!state?.shell) return;
+    const track = state.track || {};
+    const override = state.identity?.override;
+    const selected = state.selectedCandidate;
+    const formValues = {
+      title: selected?.title ?? (this._identityFieldValue('title') || track.title || ''),
+      display_artist: selected?.display_artist ?? (this._identityFieldValue('display_artist') || getDisplayArtist(track) || ''),
+      album_title: this._candidateAlbumTitle(selected) || this._identityFieldValue('album_title') || getAlbumTitle(track) || '',
+      year: selected?.year ?? (this._identityFieldValue('year') || track.year || ''),
+      cover_image: this._candidateCover(selected) || this._identityFieldValue('cover_image') || track.thumbnail || '',
+      spotify_id: selected?.spotify_id ?? (this._identityFieldValue('spotify_id') || track.spotify_id || ''),
+      isrc: selected?.isrc ?? (this._identityFieldValue('isrc') || track.isrc || ''),
+      mb_recording_id: selected?.mb_recording_id ?? (this._identityFieldValue('mb_recording_id') || track.mb_recording_id || ''),
+      discogs_id: selected?.discogs_id ?? (this._identityFieldValue('discogs_id') || track.discogs_id || ''),
+      label: selected?.label ?? (this._identityFieldValue('label') || track.label || ''),
+    };
+    const cover = thumbSrc(formValues.cover_image || track.thumbnail);
+    const assets = getAssets(track);
+    const fastAsset = getFastAsset(track) || assets[0] || {};
+    const audioTrackId = getTrackId(track);
+    const selectedKey = selected ? `${selected.provider || ''}:${selected.id || selected.title || ''}` : '';
+
+    state.shell.innerHTML = `
+      <div class="identity-editor-header">
+        <span class="identity-editor-cover">${cover ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy" onerror="this.remove()">` : 'Audio'}</span>
+        <span class="identity-editor-heading">
+          <strong>Edit identity</strong>
+          <em>${escapeHtml(track.title || 'Unknown')} - ${escapeHtml(getDisplayArtist(track) || 'Unknown Artist')}</em>
+        </span>
+        <button class="library-icon-btn hover-target" type="button" data-identity-close aria-label="Close">${ICONS.close}</button>
+      </div>
+      <div class="identity-editor-content">
+        <audio controls preload="none" src="/api/library/${encodeURIComponent(audioTrackId)}/download"></audio>
+        <div class="identity-editor-search">
+          <input name="identity_query" value="${escapeHtml(state.searchQuery || '')}" placeholder="Artist - Title, Spotify URL, ISRC" autocomplete="off">
+          <button class="library-toolbar-btn hover-target" type="button" data-identity-search>${state.searching ? 'Searching...' : 'Search'}</button>
+        </div>
+        <div class="identity-editor-candidates">
+          ${state.candidates.length ? state.candidates.map((candidate, index) => this._renderIdentityCandidate(candidate, index, selectedKey)).join('') : '<div class="identity-editor-empty">No candidates loaded</div>'}
+        </div>
+        <form class="identity-editor-form" data-identity-form>
+          <label>Title<input name="title" value="${escapeHtml(formValues.title)}" required></label>
+          <label>Artist<input name="display_artist" value="${escapeHtml(formValues.display_artist)}" required></label>
+          <label>Album<input name="album_title" value="${escapeHtml(formValues.album_title)}"></label>
+          <label>Year<input name="year" inputmode="numeric" value="${escapeHtml(formValues.year)}"></label>
+          <label>Cover URL<input name="cover_image" value="${escapeHtml(formValues.cover_image)}"></label>
+          <label>Spotify ID<input name="spotify_id" value="${escapeHtml(formValues.spotify_id)}"></label>
+          <label>ISRC<input name="isrc" value="${escapeHtml(formValues.isrc)}"></label>
+          <label>MusicBrainz ID<input name="mb_recording_id" value="${escapeHtml(formValues.mb_recording_id)}"></label>
+          <label>Discogs ID<input name="discogs_id" inputmode="numeric" value="${escapeHtml(formValues.discogs_id)}"></label>
+          <label>Label<input name="label" value="${escapeHtml(formValues.label)}"></label>
+        </form>
+      </div>
+      <div class="identity-editor-actions">
+        ${override ? '<button class="library-toolbar-btn hover-target" type="button" data-identity-remove>Remove override</button>' : '<span></span>'}
+        <span>
+          <button class="library-toolbar-btn hover-target" type="button" data-identity-close>Cancel</button>
+          <button class="library-toolbar-btn hover-target identity-save-btn" type="button" data-identity-save>Save</button>
+        </span>
+      </div>
+    `;
+    if (fastAsset?.id) state.shell.dataset.assetId = fastAsset.id;
+  }
+
+  _renderIdentityCandidate(candidate, index, selectedKey) {
+    const key = `${candidate.provider || ''}:${candidate.id || candidate.title || ''}`;
+    const cover = thumbSrc(this._candidateCover(candidate));
+    const confidence = candidate.confidence ? `${Math.round(Number(candidate.confidence) * 100)}%` : '';
+    const meta = [
+      candidate.provider || 'candidate',
+      this._candidateAlbumTitle(candidate),
+      candidate.year || '',
+      confidence,
+    ].filter(Boolean).join(' - ');
+    return `
+      <button class="identity-candidate hover-target ${key === selectedKey ? 'selected' : ''}" type="button" data-identity-candidate="${index}">
+        <span class="identity-candidate-cover">${cover ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy" onerror="this.remove()">` : 'Audio'}</span>
+        <span class="identity-candidate-main">
+          <strong>${escapeHtml(candidate.title || 'Unknown')}</strong>
+          <em>${escapeHtml(candidate.display_artist || 'Unknown Artist')}</em>
+          <small>${escapeHtml(meta)}</small>
+        </span>
+      </button>
+    `;
+  }
+
+  async _handleIdentityEditorClick(event) {
+    const state = this._identityModal;
+    if (!state) return;
+    if (event.target.closest('[data-identity-close]')) {
+      this._closeIdentityEditor();
+      return;
+    }
+    const candidateButton = event.target.closest('[data-identity-candidate]');
+    if (candidateButton) {
+      const index = Number(candidateButton.dataset.identityCandidate || -1);
+      state.selectedCandidate = state.candidates[index] || null;
+      this._renderIdentityEditor();
+      return;
+    }
+    if (event.target.closest('[data-identity-search]')) {
+      await this._searchIdentityCandidates();
+      return;
+    }
+    if (event.target.closest('[data-identity-save]')) {
+      await this._saveIdentityOverride();
+      return;
+    }
+    if (event.target.closest('[data-identity-remove]')) {
+      await this._removeIdentityOverride();
+    }
+  }
+
+  async _searchIdentityCandidates() {
+    const state = this._identityModal;
+    if (!state) return;
+    const input = state.shell.querySelector('input[name="identity_query"]');
+    state.searchQuery = input?.value?.trim() || '';
+    state.searching = true;
+    this._renderIdentityEditor();
+    try {
+      const response = await fetch(`/api/library/tracks/${encodeURIComponent(state.trackId)}/identity-search?q=${encodeURIComponent(state.searchQuery)}`);
+      if (!response.ok) throw new Error(`Identity search failed (${response.status})`);
+      const data = await response.json();
+      state.candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      state.selectedCandidate = state.candidates[0] || null;
+    } catch (error) {
+      console.error('Identity search error:', error);
+      this._notify('Identity search failed');
+    } finally {
+      state.searching = false;
+      this._renderIdentityEditor();
+    }
+  }
+
+  _collectIdentityForm() {
+    const state = this._identityModal;
+    const form = state?.shell?.querySelector('[data-identity-form]');
+    if (!form) return null;
+    const data = Object.fromEntries(new FormData(form).entries());
+    for (const key of ['year', 'discogs_id']) {
+      data[key] = data[key] ? Number(data[key]) : null;
+    }
+    data.candidate = state.selectedCandidate || null;
+    data.locked = true;
+    return data;
+  }
+
+  async _saveIdentityOverride() {
+    const state = this._identityModal;
+    const payload = this._collectIdentityForm();
+    if (!state || !payload) return;
+    try {
+      const response = await fetch(`/api/library/tracks/${encodeURIComponent(state.trackId)}/identity-override`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Identity save failed (${response.status})`);
+      }
+      const data = await response.json();
+      if (data.track) this.store.updateTrack(data.track);
+      this._detailCache.clear();
+      this.render();
+      this._notify('Identity saved');
+      this._closeIdentityEditor();
+      this._refreshPlaybackStatus(120);
+    } catch (error) {
+      console.error('Identity save error:', error);
+      this._notify('Identity save failed');
+    }
+  }
+
+  async _removeIdentityOverride() {
+    const state = this._identityModal;
+    if (!state) return;
+    try {
+      const response = await fetch(`/api/library/tracks/${encodeURIComponent(state.trackId)}/identity-override`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error(`Remove override failed (${response.status})`);
+      const data = await response.json();
+      if (data.track) this.store.updateTrack(data.track);
+      this._detailCache.clear();
+      this.render();
+      this._notify('Override removed');
+      this._closeIdentityEditor();
+    } catch (error) {
+      console.error('Remove override error:', error);
+      this._notify('Remove override failed');
+    }
+  }
+
   _renderPlaylistPicker() {
     return `
       <div class="playlist-picker" data-role="playlist-picker" aria-hidden="true">
@@ -1087,6 +1357,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
 
   _handleKeydown(event) {
     if (event.key !== 'Escape') return;
+    if (this._identityModal) this._closeIdentityEditor();
     if (this._detailModal) this._closeDetailModal();
     this._closePlaylistPanel();
     this._closePlaylistPicker();
@@ -1119,6 +1390,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     items.push(
       { id: `play-${trackId}`, label: 'Play', icon: ICONS.play, action: () => this._playTrack(track) },
       { id: `versions-${trackId}`, label: 'Versions', icon: ICONS.versions, action: () => this._versionPanel?.open?.(track, card) },
+      { id: `identity-${trackId}`, label: 'Edit identity', icon: ICONS.edit, action: () => this._openIdentityEditor(track, card) },
       { type: 'separator' },
       { id: `delete-${trackId}`, label: 'Delete', icon: ICONS.close, danger: true, action: () => this._deleteTrack(track) },
     );

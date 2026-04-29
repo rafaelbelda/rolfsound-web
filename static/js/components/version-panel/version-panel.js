@@ -4,7 +4,7 @@ export function initVersionPanel({
   thumbSrc, escapeHtml, getTrackId, getAssets, getFastAssetId, getFastAsset,
   normalizeAssetType, getFileFormat, assetDisplay, notify,
   updateTrackCache, renderLibrary, getCurrentSearchQuery,
-  findTrackById, playTrack, queueTrack
+  findTrackById, playTrack, queueTrack, editIdentity
 }) {
   let state = null;
 
@@ -112,6 +112,11 @@ export function initVersionPanel({
             <strong>${escapeHtml(track.title || 'Unknown')}</strong>
             <span>${escapeHtml(getDisplayArtist(track) || 'Unknown Artist')} · ${assets.length} ${assets.length === 1 ? 'version' : 'versions'}</span>
           </div>
+          <button class="version-panel-edit hover-target" type="button" data-action="edit-identity" aria-label="Edit identity" title="Edit identity">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+            </svg>
+          </button>
           <button class="version-panel-close hover-target" type="button" data-action="close-version-panel" aria-label="Close versions">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <path d="M18 6 6 18M6 6l12 12"/>
@@ -157,7 +162,7 @@ export function initVersionPanel({
 
     renderContent(panel, fullTrack);
     document.body.appendChild(panel);
-    state = { backdrop, panel, trackId };
+    state = { backdrop, panel, trackId, track: fullTrack };
 
     requestAnimationFrame(() => {
       backdrop.classList.add('active');
@@ -179,6 +184,7 @@ export function initVersionPanel({
       const data = await response.json();
       const updatedTrack = data.track || await fetchFullTrack({ id: trackId });
       updateTrackCache(updatedTrack);
+      if (state?.trackId === trackId) state.track = updatedTrack;
       renderContent(panel, updatedTrack);
       renderLibrary(getCurrentSearchQuery());
       notify('Fast Play updated');
@@ -194,6 +200,11 @@ export function initVersionPanel({
 
     const action = actionEl.dataset.action;
     if (action === 'close-version-panel') { close(); return; }
+    if (action === 'edit-identity') {
+      const track = state.track || findTrackById(state.trackId);
+      if (track && typeof editIdentity === 'function') await editIdentity(track, state.panel);
+      return;
+    }
 
     const row = actionEl.closest('.version-row');
     const assetId = row?.dataset.assetId || '';

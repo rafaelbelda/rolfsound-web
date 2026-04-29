@@ -318,6 +318,25 @@ def _create_tables(conn):
             updated_at    INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS asset_identification_results (
+            asset_id      TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+            status        TEXT,
+            confidence    REAL,
+            sources_json  TEXT NOT NULL DEFAULT '[]',
+            reasons_json  TEXT NOT NULL DEFAULT '[]',
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            updated_at    INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS track_identity_overrides (
+            track_id      TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+            payload_json  TEXT NOT NULL,
+            source        TEXT NOT NULL DEFAULT 'manual',
+            locked        INTEGER NOT NULL DEFAULT 1,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS app_preferences (
             key          TEXT PRIMARY KEY,
             value_json   TEXT NOT NULL,
@@ -347,6 +366,8 @@ def _create_tables(conn):
             ON external_lookup_cache(fetched_at);
         CREATE INDEX IF NOT EXISTS idx_identification_jobs_status
             ON identification_jobs(status, next_retry_at);
+        CREATE INDEX IF NOT EXISTS idx_track_identity_overrides_locked
+            ON track_identity_overrides(locked, updated_at);
     """)
     _ensure_column(conn, "albums", "release_type", "TEXT")
 
@@ -962,6 +983,11 @@ def set_track_albums(
         update_track_metadata(conn, track_id, {"primary_album_id": primary_album_id})
 
 
+def clear_track_albums(conn, track_id: str) -> None:
+    conn.execute("DELETE FROM album_tracks WHERE track_id = ?", (track_id,))
+    replace_track_identity_metadata(conn, track_id, {"primary_album_id": None})
+
+
 def get_track_albums(conn, track_id: str) -> list[dict]:
     rows = conn.execute("""
         SELECT al.*, at.disc_number, at.track_number, at.position, at.source AS link_source
@@ -971,6 +997,110 @@ def get_track_albums(conn, track_id: str) -> list[dict]:
         ORDER BY at.position ASC, al.year ASC, al.title ASC
     """, (track_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def record_asset_identification_result(conn, asset_id: str, meta: dict) -> None:
+    now = int(time.time())
+    sources = meta.get("all_sources") or meta.get("sources") or []
+    reasons = meta.get("discogs_reasons") or meta.get("reasons") or []
+    evidence = meta.get("evidence") or []
+    conn.execute("""
+        INSERT INTO asset_identification_results
+            (asset_id, status, confidence, sources_json, reasons_json, evidence_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(asset_id) DO UPDATE SET
+            status = excluded.status,
+            confidence = excluded.confidence,
+            sources_json = excluded.sources_json,
+            reasons_json = excluded.reasons_json,
+            evidence_json = excluded.evidence_json,
+            updated_at = excluded.updated_at
+    """, (
+        asset_id,
+        meta.get("status"),
+        meta.get("confidence"),
+        json.dumps(sources, default=str),
+        json.dumps(reasons, default=str),
+        json.dumps(evidence, default=str),
+        now,
+    ))
+
+
+def get_asset_identification_result(conn, asset_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM asset_identification_results WHERE asset_id = ?",
+        (asset_id,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    for src_key, out_key in (
+        ("sources_json", "sources"),
+        ("reasons_json", "reasons"),
+        ("evidence_json", "evidence"),
+    ):
+        try:
+            item[out_key] = json.loads(item.pop(src_key) or "[]")
+        except json.JSONDecodeError:
+            item[out_key] = []
+    return item
+
+
+def get_track_identity_override(conn, track_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM track_identity_overrides WHERE track_id = ?",
+        (track_id,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+    except json.JSONDecodeError:
+        item["payload"] = {}
+    item["locked"] = bool(item.get("locked"))
+    return item
+
+
+def set_track_identity_override(
+    conn,
+    track_id: str,
+    payload: dict,
+    *,
+    source: str = "manual",
+    locked: bool = True,
+) -> None:
+    now = int(time.time())
+    existing = conn.execute(
+        "SELECT created_at FROM track_identity_overrides WHERE track_id = ?",
+        (track_id,),
+    ).fetchone()
+    created_at = existing["created_at"] if existing else now
+    conn.execute("""
+        INSERT INTO track_identity_overrides
+            (track_id, payload_json, source, locked, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(track_id) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            source = excluded.source,
+            locked = excluded.locked,
+            updated_at = excluded.updated_at
+    """, (
+        track_id,
+        json.dumps(payload, default=str),
+        source or "manual",
+        1 if locked else 0,
+        created_at,
+        now,
+    ))
+
+
+def delete_track_identity_override(conn, track_id: str) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM track_identity_overrides WHERE track_id = ?",
+        (track_id,),
+    )
+    return cursor.rowcount > 0
 
 
 def _attach_fast_asset(conn, track: dict) -> dict:
@@ -1060,6 +1190,51 @@ def update_track_metadata(conn, track_id: str, data: dict) -> None:
         return
     fields = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [track_id]
+    conn.execute(f"UPDATE tracks SET {fields} WHERE id = ?", values)
+
+
+def replace_track_identity_metadata(conn, track_id: str, data: dict) -> None:
+    """Replace identity fields, allowing NULL to clear stale provider IDs."""
+    allowed = {
+        "title", "artist", "display_artist", "duration", "thumbnail", "status",
+        "mb_recording_id", "isrc", "spotify_id", "discogs_id", "label", "year",
+        "primary_artist_id", "primary_album_id", "canonical_title_key",
+        "primary_artist_key", "recording_key",
+    }
+    incoming = {k: v for k, v in dict(data or {}).items() if k in allowed}
+    if not incoming:
+        return
+
+    if "display_artist" in incoming and "artist" not in incoming:
+        incoming["artist"] = incoming.get("display_artist")
+    if "artist" in incoming and "display_artist" not in incoming:
+        incoming["display_artist"] = incoming.get("artist")
+
+    existing = get_track_row(conn, track_id)
+    title = incoming.get("title") if "title" in incoming else (existing["title"] if existing else None)
+    display_artist = (
+        incoming.get("display_artist")
+        if "display_artist" in incoming
+        else (existing["display_artist"] if existing and "display_artist" in existing.keys() else None)
+    )
+
+    if "title" in incoming and "canonical_title_key" not in incoming:
+        incoming["canonical_title_key"] = _title_entity_key(title)
+    if "display_artist" in incoming and "primary_artist_key" not in incoming:
+        incoming["primary_artist_key"] = _track_primary_artist_key(display_artist, title)
+    if (
+        ("title" in incoming or "display_artist" in incoming or "primary_artist_key" in incoming)
+        and "recording_key" not in incoming
+    ):
+        artist_key = (
+            incoming.get("primary_artist_key")
+            if "primary_artist_key" in incoming
+            else (existing["primary_artist_key"] if existing and "primary_artist_key" in existing.keys() else None)
+        )
+        incoming["recording_key"] = _track_recording_key(title, artist_key)
+
+    fields = ", ".join(f"{k} = ?" for k in incoming)
+    values = list(incoming.values()) + [track_id]
     conn.execute(f"UPDATE tracks SET {fields} WHERE id = ?", values)
 
 

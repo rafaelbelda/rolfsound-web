@@ -2,15 +2,19 @@
 
 import asyncio
 import os
+import time
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_asset
 from api.services.identification.jobs import enqueue as enqueue_identification, queue_stats
+from api.services.identity_editor import build_override_payload, search_identity_candidates
+from api.services.status_enricher import clear_track_cache
 
 from core.database import database
 from utils.core import core
+from utils.image_processor import cache_remote_cover_candidates_sync
 
 router = APIRouter()
 
@@ -26,6 +30,54 @@ _reindex_state = {
 
 class PreferredAssetRequest(BaseModel):
     asset_id: str | None = None
+
+
+class IdentityOverrideRequest(BaseModel):
+    candidate: dict | None = None
+    title: str | None = None
+    display_artist: str | None = None
+    artist: str | None = None
+    album_title: str | None = None
+    album_artist: str | None = None
+    album_year: int | None = None
+    cover_image: str | None = None
+    thumbnail: str | None = None
+    year: int | None = None
+    duration: float | None = None
+    mb_recording_id: str | None = None
+    isrc: str | None = None
+    spotify_id: str | None = None
+    discogs_id: int | None = None
+    label: str | None = None
+    track_number: int | None = None
+    disc_number: int | None = None
+    locked: bool = True
+
+
+async def _broadcast_track_update(track_id: str) -> dict | None:
+    from api.ws.endpoint import get_manager as get_ws_manager
+
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+    finally:
+        conn.close()
+
+    if not track:
+        return None
+
+    clear_track_cache(
+        track_id=track_id,
+        filepath=track.get("file_path") or track.get("filepath"),
+    )
+    ws_manager = get_ws_manager()
+    if ws_manager:
+        await ws_manager.broadcast({
+            "type": "event.track_updated",
+            "payload": track,
+            "ts": int(time.time() * 1000),
+        })
+    return track
 
 
 @router.post("/library/scan")
@@ -169,8 +221,147 @@ async def set_preferred_asset(track_id: str, req: PreferredAssetRequest):
         conn.close()
 
 
+@router.get("/library/tracks/{track_id}/identity")
+async def get_track_identity(track_id: str):
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        override = database.get_track_identity_override(conn, track_id)
+        assets = []
+        for asset in track.get("assets", []):
+            assets.append({
+                **asset,
+                "last_identification": database.get_asset_identification_result(conn, asset["id"]),
+            })
+        track["assets"] = assets
+        return {"track": track, "override": override}
+    finally:
+        conn.close()
+
+
+@router.get("/library/tracks/{track_id}/identity-search")
+async def search_track_identity(track_id: str, q: str = Query("")):
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        local_query = q.strip() or " ".join(
+            part for part in [track.get("display_artist") or track.get("artist"), track.get("title")] if part
+        )
+        local_tracks = database.search_tracks(conn, local_query, limit=8) if local_query else []
+    finally:
+        conn.close()
+
+    candidates = await search_identity_candidates(track, q, local_tracks)
+    return {"candidates": candidates, "total": len(candidates)}
+
+
+@router.post("/library/tracks/{track_id}/identity-override")
+async def set_track_identity_override(track_id: str, req: IdentityOverrideRequest):
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+    finally:
+        conn.close()
+
+    try:
+        if hasattr(req, "model_dump"):
+            body = req.model_dump(exclude_unset=True)
+        else:
+            body = req.dict(exclude_unset=True)
+        payload = build_override_payload(body, track)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    cover = payload.get("cover_image") or payload.get("thumbnail")
+    if cover:
+        cached = await asyncio.to_thread(
+            cache_remote_cover_candidates_sync,
+            track_id,
+            [cover],
+            "manual",
+        )
+        if cached:
+            payload["thumbnail"] = cached
+            payload["cover_image"] = cached
+
+    conn = database.get_connection()
+    try:
+        if not database.get_track(conn, track_id):
+            raise HTTPException(status_code=404, detail="Track not found")
+        update = {
+            "title": payload.get("title"),
+            "display_artist": payload.get("display_artist"),
+            "status": "identified",
+            "mb_recording_id": payload.get("mb_recording_id"),
+            "isrc": payload.get("isrc"),
+            "spotify_id": payload.get("spotify_id"),
+            "discogs_id": payload.get("discogs_id"),
+            "label": payload.get("label"),
+            "year": payload.get("year"),
+        }
+        if payload.get("duration"):
+            update["duration"] = payload.get("duration")
+        if payload.get("thumbnail") or any(key in body for key in ("cover_image", "thumbnail")):
+            update["thumbnail"] = payload.get("thumbnail")
+        database.replace_track_identity_metadata(conn, track_id, update)
+        database.set_track_artist_credits(
+            conn,
+            track_id,
+            payload.get("artists") or [],
+            display_artist=payload.get("display_artist"),
+            source=payload.get("source") or "manual",
+        )
+        if payload.get("albums"):
+            database.set_track_albums(
+                conn,
+                track_id,
+                payload.get("albums"),
+                track_number=payload.get("track_number"),
+                disc_number=payload.get("disc_number"),
+                source=payload.get("source") or "manual",
+            )
+        else:
+            database.clear_track_albums(conn, track_id)
+        database.set_track_identity_override(
+            conn,
+            track_id,
+            payload,
+            source=payload.get("source") or "manual",
+            locked=req.locked,
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    track = await _broadcast_track_update(track_id)
+    return {"ok": True, "track": track, "override": payload}
+
+
+@router.delete("/library/tracks/{track_id}/identity-override")
+async def delete_track_identity_override(track_id: str):
+    conn = database.get_connection()
+    try:
+        if not database.get_track(conn, track_id):
+            raise HTTPException(status_code=404, detail="Track not found")
+        deleted = database.delete_track_identity_override(conn, track_id)
+        conn.commit()
+    finally:
+        conn.close()
+    track = await _broadcast_track_update(track_id)
+    return {"ok": True, "deleted": deleted, "track": track}
+
+
 @router.post("/library/{track_id}/identify")
-async def identify_track_route(track_id: str):
+async def identify_track_route(track_id: str, overwrite_manual: bool = Query(False)):
     """Identifica uma faixa específica via AcoustID + Discogs."""
     conn = database.get_connection()
     try:
@@ -184,7 +375,7 @@ async def identify_track_route(track_id: str):
     finally:
         conn.close()
 
-    meta = await index_asset(asset_id, allow_identity_resolution=False)
+    meta = await index_asset(asset_id, allow_identity_resolution=False, overwrite_manual=overwrite_manual)
     return {"ok": True, "track_id": track_id, **meta}
 
 
@@ -213,7 +404,11 @@ async def identify_all_tracks():
     return {"ok": True, "total": len(pending), **results}
 
 
-async def _run_reindex(assets: list, resolve_identity: bool = True):
+async def _run_reindex(
+    assets: list,
+    resolve_identity: bool = True,
+    overwrite_manual: bool = False,
+):
     global _reindex_state
     for asset in assets:
         asset_id = asset.get("id")
@@ -222,7 +417,11 @@ async def _run_reindex(assets: list, resolve_identity: bool = True):
             _reindex_state["skipped"] += 1
             _reindex_state["done"] += 1
             continue
-        meta = await index_asset(asset_id, allow_identity_resolution=resolve_identity)
+        meta = await index_asset(
+            asset_id,
+            allow_identity_resolution=resolve_identity,
+            overwrite_manual=overwrite_manual,
+        )
         if meta["status"] == "identified":
             _reindex_state["identified"] += 1
         else:
@@ -235,6 +434,7 @@ async def _run_reindex(assets: list, resolve_identity: bool = True):
 async def reindex_all_tracks(
     background_tasks: BackgroundTasks,
     resolve_identity: bool = Query(True),
+    overwrite_manual: bool = Query(False),
 ):
     """Força reprocessamento de todas as faixas em background."""
     global _reindex_state
@@ -251,9 +451,15 @@ async def reindex_all_tracks(
         "running": True, "total": len(assets),
         "done": 0, "identified": 0, "failed": 0, "skipped": 0,
         "resolve_identity": resolve_identity,
+        "overwrite_manual": overwrite_manual,
     })
-    background_tasks.add_task(_run_reindex, assets, resolve_identity)
-    return {"ok": True, "total": len(assets), "resolve_identity": resolve_identity}
+    background_tasks.add_task(_run_reindex, assets, resolve_identity, overwrite_manual)
+    return {
+        "ok": True,
+        "total": len(assets),
+        "resolve_identity": resolve_identity,
+        "overwrite_manual": overwrite_manual,
+    }
 
 
 @router.get("/library/reindex-status")

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from api.services import indexer
 from api.services.identification import pipeline
 from api.services.identification import shazam
 from api.services.identification.cache import cached_fetch, make_cache_key
@@ -11,6 +12,7 @@ from api.services.identification.consensus import resolve
 from api.services.identification.evidence import Evidence
 from api.services.identification.filename import parse_path_hint
 from api.services.identification.youtube_meta import parse_video_title
+from api.services.identity_editor import build_override_payload
 from core.database import database
 
 
@@ -470,6 +472,13 @@ class IdentificationSmokeTests(unittest.TestCase):
         self.assertEqual(parsed["artist"], "DJ Example")
         self.assertEqual(parsed["title"], "Sunrise")
 
+        parsed = parse_video_title(
+            "Frank Ocean - Nights (feat. Kendrick Lamar) [Mixed Version]",
+            "XOXOXO",
+        )
+        self.assertEqual(parsed["artist"], "Frank Ocean")
+        self.assertEqual(parsed["title"], "Nights")
+
     def test_youtube_title_hint_beats_channel_and_internal_filename(self):
         async def run():
             captured = {}
@@ -684,6 +693,199 @@ class IdentificationSmokeTests(unittest.TestCase):
             self.assertNotIn("shazam_conflict", result["all_sources"])
 
         asyncio.run(run())
+
+    def test_index_asset_treats_uppercase_youtube_source_as_youtube(self):
+        async def run():
+            conn = database.get_connection()
+            try:
+                track_id = database.add_track(conn, {
+                    "title": "original mix",
+                    "artist": "XOXOXO",
+                    "status": "pending_identity",
+                })
+                file_path = str(self.base / "original_mix.webm")
+                Path(file_path).write_bytes(b"fake")
+                asset_id = database.add_asset(
+                    conn,
+                    track_id=track_id,
+                    file_path=file_path,
+                    source="YOUTUBE",
+                    source_ref="WQCiGlQoLa4",
+                )
+                database.upsert_download(
+                    conn,
+                    "WQCiGlQoLa4",
+                    "complete",
+                    title="Frank Ocean - Nights (feat. Kendrick Lamar) [Mixed Version]",
+                    resolved_track_id=track_id,
+                    asset_id=asset_id,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            captured = {}
+            original_identify = indexer.identify_track
+            original_bpm = indexer.detect_bpm
+
+            async def fake_identify_track(*args, **kwargs):
+                captured.update(kwargs)
+                return {
+                    "status": "identified",
+                    "title": "Nights",
+                    "artist": "Frank Ocean",
+                    "display_artist": "Frank Ocean",
+                    "artists": [{"name": "Frank Ocean", "position": 0, "is_primary": True, "role": "main"}],
+                    "albums": [{"title": "Blonde", "display_artist": "Frank Ocean", "source": "test"}],
+                    "identity_source": "youtube_title",
+                    "confidence": 0.9,
+                    "all_sources": ["youtube_title"],
+                    "evidence": [],
+                }
+
+            async def no_bpm(*args, **kwargs):
+                return None
+
+            try:
+                indexer.identify_track = fake_identify_track
+                indexer.detect_bpm = no_bpm
+                await indexer.index_asset(asset_id, allow_identity_resolution=False)
+            finally:
+                indexer.identify_track = original_identify
+                indexer.detect_bpm = original_bpm
+
+            self.assertEqual(captured["youtube_id"], "WQCiGlQoLa4")
+            self.assertEqual(
+                captured["youtube_title"],
+                "Frank Ocean - Nights (feat. Kendrick Lamar) [Mixed Version]",
+            )
+
+            conn = database.get_connection()
+            try:
+                track = database.get_track(conn, track_id)
+                self.assertEqual(track["title"], "Nights")
+                self.assertEqual(track["display_artist"], "Frank Ocean")
+                self.assertEqual(track["album"]["title"], "Blonde")
+                diag = database.get_asset_identification_result(conn, asset_id)
+                self.assertEqual(diag["status"], "identified")
+                self.assertEqual(diag["sources"], ["youtube_title"])
+            finally:
+                conn.close()
+
+        asyncio.run(run())
+
+    def test_manual_identity_override_blocks_reindex_until_explicit_overwrite(self):
+        async def run():
+            conn = database.get_connection()
+            try:
+                track_id = database.add_track(conn, {
+                    "title": "Correct Song",
+                    "artist": "Correct Artist",
+                    "status": "identified",
+                })
+                file_path = str(self.base / "correct.webm")
+                Path(file_path).write_bytes(b"fake")
+                asset_id = database.add_asset(conn, track_id=track_id, file_path=file_path, source="UPLOAD")
+                payload = {
+                    "title": "Correct Song",
+                    "display_artist": "Correct Artist",
+                    "artists": [{"name": "Correct Artist", "position": 0, "is_primary": True, "role": "main"}],
+                    "albums": [{"title": "Correct Album", "display_artist": "Correct Artist"}],
+                    "source": "manual",
+                }
+                database.set_track_identity_override(conn, track_id, payload, source="manual", locked=True)
+                conn.commit()
+            finally:
+                conn.close()
+
+            original_identify = indexer.identify_track
+            original_bpm = indexer.detect_bpm
+
+            async def wrong_identify(*args, **kwargs):
+                return {
+                    "status": "identified",
+                    "title": "Wrong Song",
+                    "artist": "Wrong Artist",
+                    "display_artist": "Wrong Artist",
+                    "artists": [{"name": "Wrong Artist", "position": 0, "is_primary": True, "role": "main"}],
+                    "albums": [{"title": "Wrong Album", "display_artist": "Wrong Artist"}],
+                    "identity_source": "test",
+                    "confidence": 0.99,
+                    "all_sources": ["test"],
+                    "evidence": [{"source": "test", "title": "Wrong Song"}],
+                }
+
+            async def no_bpm(*args, **kwargs):
+                return None
+
+            try:
+                indexer.identify_track = wrong_identify
+                indexer.detect_bpm = no_bpm
+                await indexer.index_asset(asset_id, allow_identity_resolution=False)
+                conn = database.get_connection()
+                try:
+                    track = database.get_track(conn, track_id)
+                    self.assertEqual(track["title"], "Correct Song")
+                    self.assertEqual(track["display_artist"], "Correct Artist")
+                    self.assertIsNotNone(database.get_track_identity_override(conn, track_id))
+                    self.assertEqual(database.get_asset_identification_result(conn, asset_id)["confidence"], 0.99)
+                finally:
+                    conn.close()
+
+                await indexer.index_asset(asset_id, allow_identity_resolution=False, overwrite_manual=True)
+                conn = database.get_connection()
+                try:
+                    track = database.get_track(conn, track_id)
+                    self.assertEqual(track["title"], "Wrong Song")
+                    self.assertEqual(track["display_artist"], "Wrong Artist")
+                    self.assertIsNone(database.get_track_identity_override(conn, track_id))
+                finally:
+                    conn.close()
+            finally:
+                indexer.identify_track = original_identify
+                indexer.detect_bpm = original_bpm
+
+        asyncio.run(run())
+
+    def test_build_override_payload_updates_artists_and_album_shape(self):
+        payload = build_override_payload({
+            "title": "Nights",
+            "display_artist": "Frank Ocean",
+            "album_title": "Blonde",
+            "year": 2016,
+            "spotify_id": "spotify-track-id",
+        })
+        self.assertEqual(payload["title"], "Nights")
+        self.assertEqual(payload["artists"][0]["name"], "Frank Ocean")
+        self.assertEqual(payload["albums"][0]["title"], "Blonde")
+        self.assertEqual(payload["spotify_id"], "spotify-track-id")
+
+        overridden = build_override_payload({
+            "candidate": {
+                "title": "Wrong Title",
+                "display_artist": "Wrong Artist",
+                "artists": [{"name": "Wrong Artist", "position": 0, "is_primary": True, "role": "main"}],
+                "albums": [{"title": "Wrong Album", "display_artist": "Wrong Artist"}],
+                "provider": "spotify",
+            },
+            "title": "Nights",
+            "display_artist": "Frank Ocean",
+            "album_title": "Blonde",
+        })
+        self.assertEqual(overridden["artists"][0]["name"], "Frank Ocean")
+        self.assertEqual(overridden["albums"][0]["title"], "Blonde")
+
+        cleared_album = build_override_payload({
+            "candidate": {
+                "title": "Nights",
+                "display_artist": "Frank Ocean",
+                "albums": [{"title": "Blonde", "display_artist": "Frank Ocean"}],
+            },
+            "title": "Nights",
+            "display_artist": "Frank Ocean",
+            "album_title": "",
+        })
+        self.assertEqual(cleared_album["albums"], [])
 
 
 if __name__ == "__main__":

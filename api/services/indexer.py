@@ -1079,7 +1079,11 @@ async def identify_track(
     }
 
 
-async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> dict:
+async def index_asset(
+    asset_id: str,
+    allow_identity_resolution: bool = True,
+    overwrite_manual: bool = False,
+) -> dict:
     from api.ws.endpoint import get_manager as get_ws_manager
     from api.services.status_enricher import clear_track_cache
 
@@ -1094,11 +1098,14 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         track_id = track["id"]
         file_path = asset["file_path"]
         fallback_title = track.get("title") or Path(file_path).stem
-        youtube_id = asset.get("source_ref") if asset.get("source") == "youtube" else None
+        source = str(asset.get("source") or "").strip().lower()
+        youtube_id = asset.get("source_ref") if source == "youtube" else None
         youtube_title = None
         if youtube_id:
             download = database.get_download(conn, youtube_id)
             youtube_title = (download or {}).get("title")
+        manual_override = database.get_track_identity_override(conn, track_id)
+        manual_locked = bool(manual_override and manual_override.get("locked") and not overwrite_manual)
     finally:
         conn.close()
 
@@ -1117,6 +1124,12 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         "index_asset %s: status=%s confidence=%s sources=%s",
         asset_id, meta.get("status"), meta.get("confidence"), meta.get("all_sources"),
     )
+    if manual_locked:
+        logger.info(
+            "index_asset %s: preserving manual identity override for track %s",
+            asset_id,
+            track_id,
+        )
 
     track_update: dict = {"status": meta["status"]}
     if meta["status"] in ("identified", "low_confidence"):
@@ -1157,6 +1170,7 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         if not track:
             return {"status": "failed", "reason": "track_not_found"}
 
+        database.record_asset_identification_result(conn, asset_id, meta)
         database.update_asset_analysis(conn, asset_id, {
             "analysis_status": meta["status"],
             "duration": track_update.get("duration"),
@@ -1165,38 +1179,42 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
             "asset_type": meta.get("version_type") if meta.get("version_type") != "ORIGINAL_MIX" else None,
         })
 
-        can_update_track = (
-            track.get("status") in (None, "", "pending_identity", "unidentified")
-            or not track.get("title")
-            or not track.get("artist")
-        )
-        if can_update_track:
-            database.update_track_metadata(conn, track["id"], track_update)
-        else:
-            partial_update = {}
-            for field in ("thumbnail", "discogs_id", "label", "year", "duration", "mb_recording_id", "isrc", "spotify_id"):
-                if track_update.get(field) and not track.get(field):
-                    partial_update[field] = track_update[field]
-            partial_update.update(_canonical_display_update(track, meta))
-            if partial_update:
-                database.update_track_metadata(conn, track["id"], partial_update)
-        if meta["status"] in ("identified", "low_confidence"):
-            database.set_track_artist_credits(
-                conn,
-                track["id"],
-                meta.get("artists") or [],
-                display_artist=meta.get("display_artist") or meta.get("artist"),
-                source=meta.get("identity_source"),
+        if not manual_locked:
+            if overwrite_manual and manual_override:
+                database.delete_track_identity_override(conn, track["id"])
+            can_update_track = (
+                overwrite_manual
+                or track.get("status") in (None, "", "pending_identity", "unidentified")
+                or not track.get("title")
+                or not track.get("artist")
             )
-            albums = meta.get("albums") or ([meta.get("album")] if meta.get("album") else [])
-            database.set_track_albums(
-                conn,
-                track["id"],
-                albums,
-                track_number=meta.get("track_number"),
-                disc_number=meta.get("disc_number"),
-                source=meta.get("identity_source"),
-            )
+            if can_update_track:
+                database.update_track_metadata(conn, track["id"], track_update)
+            else:
+                partial_update = {}
+                for field in ("thumbnail", "discogs_id", "label", "year", "duration", "mb_recording_id", "isrc", "spotify_id"):
+                    if track_update.get(field) and not track.get(field):
+                        partial_update[field] = track_update[field]
+                partial_update.update(_canonical_display_update(track, meta))
+                if partial_update:
+                    database.update_track_metadata(conn, track["id"], partial_update)
+            if meta["status"] in ("identified", "low_confidence"):
+                database.set_track_artist_credits(
+                    conn,
+                    track["id"],
+                    meta.get("artists") or [],
+                    display_artist=meta.get("display_artist") or meta.get("artist"),
+                    source=meta.get("identity_source"),
+                )
+                albums = meta.get("albums") or ([meta.get("album")] if meta.get("album") else [])
+                database.set_track_albums(
+                    conn,
+                    track["id"],
+                    albums,
+                    track_number=meta.get("track_number"),
+                    disc_number=meta.get("disc_number"),
+                    source=meta.get("identity_source"),
+                )
         conn.commit()
         current_track_id = track["id"]
     except Exception as e:
@@ -1206,7 +1224,7 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
         conn.close()
 
     resolved_track_id = current_track_id
-    if allow_identity_resolution and meta.get("status") == "identified":
+    if allow_identity_resolution and meta.get("status") == "identified" and not manual_locked:
         resolved_track_id = await asyncio.to_thread(_resolve_identity, asset_id, meta) or current_track_id
 
     conn = database.get_connection()
@@ -1232,6 +1250,8 @@ async def index_asset(asset_id: str, allow_identity_resolution: bool = True) -> 
 
     meta["track_id"] = resolved_track_id
     meta["asset_id"] = asset_id
+    if manual_override:
+        meta["manual_override"] = manual_override
     return meta
 
 
