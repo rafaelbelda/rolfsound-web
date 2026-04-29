@@ -12,7 +12,11 @@ from api.services.identification.consensus import resolve
 from api.services.identification.evidence import Evidence
 from api.services.identification.filename import parse_path_hint
 from api.services.identification.youtube_meta import parse_video_title
-from api.services.identity_editor import build_override_payload
+from api.services.identity_editor import (
+    build_override_payload,
+    find_override_merge_target,
+    merge_track_assets_into_target,
+)
 from core.database import database
 
 
@@ -846,6 +850,86 @@ class IdentificationSmokeTests(unittest.TestCase):
                 indexer.detect_bpm = original_bpm
 
         asyncio.run(run())
+
+    def test_manual_identity_local_candidate_merges_assets_as_alt_version(self):
+        conn = database.get_connection()
+        try:
+            target_id = database.add_track(conn, {
+                "title": "Nights",
+                "artist": "Frank Ocean",
+                "status": "identified",
+            })
+            target_asset_id = database.add_asset(
+                conn,
+                track_id=target_id,
+                file_path=str(self.base / "target-original.webm"),
+                asset_type="ORIGINAL_MIX",
+            )
+            source_id = database.add_track(conn, {
+                "title": "misidentified upload",
+                "artist": "Unknown",
+                "status": "identified",
+            })
+            source_asset_id = database.add_asset(
+                conn,
+                track_id=source_id,
+                file_path=str(self.base / "source-alt.webm"),
+                asset_type="ORIGINAL_MIX",
+            )
+            body = {
+                "candidate": {
+                    "provider": "local",
+                    "id": target_id,
+                    "track_id": target_id,
+                    "title": "Nights",
+                    "display_artist": "Frank Ocean",
+                },
+                "title": "Nights",
+                "display_artist": "Frank Ocean",
+            }
+            payload = build_override_payload(body)
+            match = find_override_merge_target(conn, source_id, payload, body)
+            self.assertIsNotNone(match)
+            self.assertEqual(match["track_id"], target_id)
+
+            moved = merge_track_assets_into_target(conn, source_id, target_id, payload, match=match)
+            conn.commit()
+
+            self.assertEqual(moved, [source_asset_id])
+            self.assertIsNone(database.get_track(conn, source_id))
+            target = database.get_track(conn, target_id)
+            self.assertEqual({asset["id"] for asset in target["assets"]}, {source_asset_id, target_asset_id})
+            merged_asset = database.get_asset(conn, source_asset_id)
+            self.assertEqual(merged_asset["track_id"], target_id)
+            self.assertEqual(merged_asset["asset_type"], "ALT_VERSION")
+        finally:
+            conn.close()
+
+    def test_manual_identity_typed_canonical_match_finds_merge_target(self):
+        conn = database.get_connection()
+        try:
+            target_id = database.add_track(conn, {
+                "title": "Nights",
+                "artist": "Frank Ocean",
+                "status": "identified",
+            })
+            source_id = database.add_track(conn, {
+                "title": "wrong file",
+                "artist": "Unknown",
+                "status": "identified",
+            })
+            payload = build_override_payload({
+                "title": "Nights",
+                "display_artist": "Frank Ocean",
+            })
+
+            match = find_override_merge_target(conn, source_id, payload, {})
+
+            self.assertIsNotNone(match)
+            self.assertEqual(match["track_id"], target_id)
+            self.assertGreaterEqual(match["score"], 0.85)
+        finally:
+            conn.close()
 
     def test_build_override_payload_updates_artists_and_album_shape(self):
         payload = build_override_payload({

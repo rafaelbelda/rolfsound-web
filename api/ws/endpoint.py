@@ -14,7 +14,7 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from api.ws.connection_manager import ConnectionManager
+from api.ws.connection_manager import ConnectionManager, QueuedFrame
 from api.ws import state_broadcaster, intent_router
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,12 @@ async def _write_loop(ws: WebSocket, q: asyncio.Queue) -> None:
         while True:
             frame = await q.get()
             try:
-                await ws.send_text(json.dumps(frame))
+                if isinstance(frame, QueuedFrame):
+                    await ws.send_text(frame.text)
+                elif isinstance(frame, str):
+                    await ws.send_text(frame)
+                else:
+                    await ws.send_text(json.dumps(frame, ensure_ascii=False, separators=(",", ":")))
             except Exception:
                 break
     except asyncio.CancelledError:

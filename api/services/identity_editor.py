@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from core.database import database
+from api.services.identification.canonical import canonicalize
 
 
 _SPOTIFY_TRACK_RE = re.compile(r"(?:open\.spotify\.com/(?:intl-[a-z]{2}/)?track/)?([A-Za-z0-9]{22})")
@@ -271,6 +272,105 @@ def build_override_payload(raw: dict, existing_track: dict | None = None) -> dic
         "disc_number": _clean_int(merged.get("disc_number")),
         "source": merged.get("provider") or merged.get("source") or "manual",
     }
+
+
+def find_override_merge_target(conn, track_id: str, payload: dict, raw: dict | None = None) -> dict | None:
+    raw = raw or {}
+    candidate = raw.get("candidate") if isinstance(raw.get("candidate"), dict) else {}
+    candidate_track_id = _clean(candidate.get("track_id") or candidate.get("id"))
+    if str(candidate.get("provider") or "").lower() == "local" and candidate_track_id and candidate_track_id != track_id:
+        target = database.get_track(conn, candidate_track_id)
+        if target:
+            return {
+                "track_id": candidate_track_id,
+                "score": 1.0,
+                "reasons": ["manual_local_candidate"],
+                "target": target,
+            }
+
+    match_meta = _override_match_meta(payload, candidate)
+    matches = database.find_identity_matches(conn, match_meta, exclude_track_id=track_id)
+    if matches and matches[0]["score"] >= 0.85:
+        return matches[0]
+    return None
+
+
+def merge_track_assets_into_target(
+    conn,
+    source_track_id: str,
+    target_track_id: str,
+    payload: dict,
+    *,
+    match: dict | None = None,
+) -> list[str]:
+    from api.services.indexer import _infer_asset_type, _move_asset_to_track_bundle
+
+    source = database.get_track(conn, source_track_id)
+    if not source:
+        return []
+
+    moved_asset_ids: list[str] = []
+    identity = canonicalize(payload.get("display_artist"), payload.get("title"))
+    version_type = identity.version_type
+    title = payload.get("title") or source.get("title") or ""
+
+    for asset in list(source.get("assets") or []):
+        asset_type = _infer_asset_type(title, asset.get("asset_type"), version_type)
+        new_path = _move_asset_to_track_bundle(asset, target_track_id, asset_type)
+        if new_path and new_path != asset["file_path"]:
+            database.update_asset_path(conn, asset["id"], new_path)
+        database.reassign_asset(
+            conn,
+            asset_id=asset["id"],
+            target_track_id=target_track_id,
+            asset_type=asset_type,
+            set_primary=False,
+        )
+        database.add_identity_candidate(
+            conn,
+            asset["id"],
+            target_track_id,
+            float((match or {}).get("score") or 1.0),
+            list((match or {}).get("reasons") or ["manual_identity_merge"]),
+            status="manual_merged",
+        )
+        moved_asset_ids.append(asset["id"])
+
+    return moved_asset_ids
+
+
+def _override_match_meta(payload: dict, candidate: dict | None = None) -> dict:
+    candidate = candidate or {}
+    identity_source = _match_identity_source(candidate, payload)
+    identity = canonicalize(payload.get("display_artist"), payload.get("title"))
+    return {
+        "title": payload.get("title"),
+        "artist": payload.get("display_artist"),
+        "display_artist": payload.get("display_artist"),
+        "primary_artist": _primary_artist(payload),
+        "duration": payload.get("duration"),
+        "mb_recording_id": payload.get("mb_recording_id"),
+        "identity_source": identity_source,
+        "all_sources": [identity_source],
+        "version_type": identity.version_type,
+    }
+
+
+def _match_identity_source(candidate: dict, payload: dict) -> str:
+    provider = str(candidate.get("provider") or payload.get("source") or "manual").strip().lower()
+    if provider == "spotify":
+        return "spotify_isrc" if payload.get("isrc") else "spotify_fuzzy"
+    if provider == "musicbrainz":
+        return "mb_by_isrc" if payload.get("isrc") else "mb_by_id"
+    if provider == "discogs":
+        return "discogs"
+    return provider or "manual"
+
+
+def _primary_artist(payload: dict) -> dict | None:
+    artists = payload.get("artists") if isinstance(payload.get("artists"), list) else []
+    primary = next((artist for artist in artists if artist.get("is_primary")), artists[0] if artists else None)
+    return primary if isinstance(primary, dict) else None
 
 
 def _clean_int(value: Any) -> int | None:

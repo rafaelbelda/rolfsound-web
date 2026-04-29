@@ -1225,10 +1225,15 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
         throw new Error(text || `Identity save failed (${response.status})`);
       }
       const data = await response.json();
+      if (data.removed_track_id) this.store.removeTrack(data.removed_track_id);
       if (data.track) this.store.updateTrack(data.track);
+      if (data.merged_into) {
+        this._versionPanel?.close?.();
+        await this.store.load();
+      }
       this._detailCache.clear();
       this.render();
-      this._notify('Identity saved');
+      this._notify(data.merged_into ? 'Identity merged as version' : 'Identity saved');
       this._closeIdentityEditor();
       this._refreshPlaybackStatus(120);
     } catch (error) {

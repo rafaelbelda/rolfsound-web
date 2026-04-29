@@ -15,10 +15,11 @@
   },
 
   "namespaces": {
-    "state":  "server → client — authoritative snapshot, idempotent",
-    "event":  "server → client — one-shot notification, must not be dropped",
-    "intent": "client → server — command",
-    "ack":    "server → client — correlated response to intent (same id)"
+    "state":     "server -> client - authoritative snapshot, idempotent",
+    "event":     "server -> client - user-visible or semantic event",
+    "telemetry": "server -> client - high-rate disposable measurements",
+    "intent":    "client -> server - command",
+    "ack":       "server -> client - correlated response to intent (same id)"
   },
 
   "server_frames": {
@@ -35,6 +36,8 @@
         "position":          "number — seconds",
         "position_updated_at": "number — unix-ms when position was sampled",
         "volume":            "number — 0..1",
+        "queue":             "array of compact queued track objects",
+        "queue_current_index": "number",
         "shuffle":           "boolean",
         "repeat_mode":       "string — off | one | all"
       }
@@ -65,8 +68,12 @@
       "payload": { "track_id": "string", "filepath": "string" }
     },
     "event.progress": {
-      "description": "1 Hz tick during playback. Clients dead-reckon between ticks.",
+      "description": "Volatile latest-only 1 Hz sync tick during playback. Clients dead-reckon between ticks.",
       "payload": { "position": "number", "duration": "number", "position_updated_at": "number" }
+    },
+    "telemetry.audio": {
+      "description": "Volatile latest-only audio envelope, emitted at <= 20 Hz. Replaces legacy audio_monitor.",
+      "payload": { "level": "number", "peak": "number" }
     },
     "ack.<intent_type>": {
       "description": "Response correlated to intent id.",
@@ -94,7 +101,15 @@
 
   "backpressure": {
     "queue_max": 32,
-    "on_full":   "drop oldest state.* frame — never drop event.*"
+    "qos": {
+      "critical": "Rare semantic events. Drop queued latest/volatile frames to make room; disconnect the slow client if the queue contains only critical frames.",
+      "latest":   "Idempotent snapshots. Keep only the newest frame per type.",
+      "volatile": "Telemetry/progress. Keep only the newest frame per type; safe to drop."
+    },
+    "critical_types": ["event.track_changed", "event.track_finished", "event.track_updated", "event.download_progress terminal states"],
+    "latest_types":   ["state.playback", "state.remix"],
+    "volatile_types": ["telemetry.audio", "event.progress", "event.download_progress non-terminal states"],
+    "on_full": "never grow memory; coalesce latest/volatile frames, drop discardable frames before critical frames, then disconnect a critically backpressured client"
   },
 
   "reconnection": {

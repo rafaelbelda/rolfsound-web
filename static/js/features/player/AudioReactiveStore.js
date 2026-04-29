@@ -29,11 +29,19 @@ class AudioReactiveStore {
 
     this._lastInputTs = 0;
     this._lastSampleTs = 0;
-    this._unsub = channel.on('audio_monitor', (data) => this._handleAudio(data));
+    this._lastComputedAt = 0;
+    this._unsubs = [
+      channel.on('telemetry.audio', (data) => this._handleAudio(data)),
+      channel.on('audio_monitor', (data) => this._handleAudio(data)),
+    ];
     this._publish();
   }
 
   getEnvelope(now = performance.now()) {
+    if (this._lastComputedAt && Math.abs(now - this._lastComputedAt) < 8) {
+      return this._state;
+    }
+
     if (!this._lastSampleTs) this._lastSampleTs = now;
 
     const dt = Math.max(0.25, Math.min(4, (now - this._lastSampleTs) / FRAME_MS));
@@ -57,6 +65,7 @@ class AudioReactiveStore {
     this._state.stale = stale && this._state.energy < 0.01 && this._state.peak < 0.01;
 
     this._publish();
+    this._lastComputedAt = now;
     return this._state;
   }
 
@@ -72,12 +81,13 @@ class AudioReactiveStore {
     this._state.rawLevel = 0;
     this._state.rawPeak = 0;
     this._state.stale = true;
+    this._lastComputedAt = 0;
     this._publish();
   }
 
   destroy() {
-    this._unsub?.();
-    this._unsub = null;
+    this._unsubs.forEach((unsub) => unsub?.());
+    this._unsubs = [];
     this.reset();
   }
 

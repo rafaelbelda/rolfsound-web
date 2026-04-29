@@ -9,7 +9,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_asset
 from api.services.identification.jobs import enqueue as enqueue_identification, queue_stats
-from api.services.identity_editor import build_override_payload, search_identity_candidates
+from api.services.identity_editor import (
+    build_override_payload,
+    find_override_merge_target,
+    merge_track_assets_into_target,
+    search_identity_candidates,
+)
 from api.services.status_enricher import clear_track_cache
 
 from core.database import database
@@ -278,72 +283,97 @@ async def set_track_identity_override(track_id: str, req: IdentityOverrideReques
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    cover = payload.get("cover_image") or payload.get("thumbnail")
-    if cover:
-        cached = await asyncio.to_thread(
-            cache_remote_cover_candidates_sync,
-            track_id,
-            [cover],
-            "manual",
-        )
-        if cached:
-            payload["thumbnail"] = cached
-            payload["cover_image"] = cached
-
     conn = database.get_connection()
+    merged_into = None
+    moved_asset_ids = []
     try:
-        if not database.get_track(conn, track_id):
+        current_track = database.get_track(conn, track_id)
+        if not current_track:
             raise HTTPException(status_code=404, detail="Track not found")
-        update = {
-            "title": payload.get("title"),
-            "display_artist": payload.get("display_artist"),
-            "status": "identified",
-            "mb_recording_id": payload.get("mb_recording_id"),
-            "isrc": payload.get("isrc"),
-            "spotify_id": payload.get("spotify_id"),
-            "discogs_id": payload.get("discogs_id"),
-            "label": payload.get("label"),
-            "year": payload.get("year"),
-        }
-        if payload.get("duration"):
-            update["duration"] = payload.get("duration")
-        if payload.get("thumbnail") or any(key in body for key in ("cover_image", "thumbnail")):
-            update["thumbnail"] = payload.get("thumbnail")
-        database.replace_track_identity_metadata(conn, track_id, update)
-        database.set_track_artist_credits(
-            conn,
-            track_id,
-            payload.get("artists") or [],
-            display_artist=payload.get("display_artist"),
-            source=payload.get("source") or "manual",
-        )
-        if payload.get("albums"):
-            database.set_track_albums(
+
+        merge_match = find_override_merge_target(conn, track_id, payload, body)
+        target_id = merge_match["track_id"] if merge_match else None
+        if target_id and target_id != track_id:
+            moved_asset_ids = merge_track_assets_into_target(
                 conn,
                 track_id,
-                payload.get("albums"),
-                track_number=payload.get("track_number"),
-                disc_number=payload.get("disc_number"),
+                target_id,
+                payload,
+                match=merge_match,
+            )
+            merged_into = target_id
+            conn.commit()
+        else:
+            cover = payload.get("cover_image") or payload.get("thumbnail")
+            if cover:
+                cached = await asyncio.to_thread(
+                    cache_remote_cover_candidates_sync,
+                    track_id,
+                    [cover],
+                    "manual",
+                )
+                if cached:
+                    payload["thumbnail"] = cached
+                    payload["cover_image"] = cached
+
+            update = {
+                "title": payload.get("title"),
+                "display_artist": payload.get("display_artist"),
+                "status": "identified",
+                "mb_recording_id": payload.get("mb_recording_id"),
+                "isrc": payload.get("isrc"),
+                "spotify_id": payload.get("spotify_id"),
+                "discogs_id": payload.get("discogs_id"),
+                "label": payload.get("label"),
+                "year": payload.get("year"),
+            }
+            if payload.get("duration"):
+                update["duration"] = payload.get("duration")
+            if payload.get("thumbnail") or any(key in body for key in ("cover_image", "thumbnail")):
+                update["thumbnail"] = payload.get("thumbnail")
+            database.replace_track_identity_metadata(conn, track_id, update)
+            database.set_track_artist_credits(
+                conn,
+                track_id,
+                payload.get("artists") or [],
+                display_artist=payload.get("display_artist"),
                 source=payload.get("source") or "manual",
             )
-        else:
-            database.clear_track_albums(conn, track_id)
-        database.set_track_identity_override(
-            conn,
-            track_id,
-            payload,
-            source=payload.get("source") or "manual",
-            locked=req.locked,
-        )
-        conn.commit()
+            if payload.get("albums"):
+                database.set_track_albums(
+                    conn,
+                    track_id,
+                    payload.get("albums"),
+                    track_number=payload.get("track_number"),
+                    disc_number=payload.get("disc_number"),
+                    source=payload.get("source") or "manual",
+                )
+            else:
+                database.clear_track_albums(conn, track_id)
+            database.set_track_identity_override(
+                conn,
+                track_id,
+                payload,
+                source=payload.get("source") or "manual",
+                locked=req.locked,
+            )
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
 
-    track = await _broadcast_track_update(track_id)
-    return {"ok": True, "track": track, "override": payload}
+    broadcast_id = merged_into or track_id
+    track = await _broadcast_track_update(broadcast_id)
+    return {
+        "ok": True,
+        "track": track,
+        "override": payload,
+        "merged_into": merged_into,
+        "removed_track_id": track_id if merged_into else None,
+        "moved_asset_ids": moved_asset_ids,
+    }
 
 
 @router.delete("/library/tracks/{track_id}/identity-override")

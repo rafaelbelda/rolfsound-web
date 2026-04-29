@@ -4,7 +4,7 @@ import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 import { measureIslandBarMitosis } from '/static/js/features/island/MitosisMetrics.js';
 import { playElasticImpact } from '/static/js/features/island/IslandImpactEngine.js';
 import MiniBirthAnimator from '/static/js/features/island/MiniBirthAnimator.js';
-import channel from '/static/js/channel/RolfsoundChannel.js';
+import audioReactiveStore from '/static/js/features/player/AudioReactiveStore.js';
 
 class RolfsoundIsland extends HTMLElement {
     constructor() {
@@ -22,6 +22,9 @@ class RolfsoundIsland extends HTMLElement {
         this._promptResolver = null;
         this._miniBirthAnimator = new MiniBirthAnimator();
         this._miniPendingReconcile = false;
+        this._audioBars = [];
+        this._audioRafId = null;
+        this._audioMeterBound = (now) => this._renderAudioMeter(now);
     }
 
     static get observedAttributes() {
@@ -39,29 +42,8 @@ class RolfsoundIsland extends HTMLElement {
         this.reset();
         this.updateActiveTab();
         this._attachMiniplayerSync();
-
-        // ─── Lógica do VU Meter Real ───
-        this._unsubAudio = channel.on('audio_monitor', (data) => {
-            // 1. Guarda de segurança
-            if (!this.hasAttribute('playing')) return;
-                
-            const bars = this.shadowRoot.querySelectorAll('.now-playing-indicator span');
-            if (!bars.length) return;
-                
-            // 2. A MÁGICA: Usar os nomes corretos que descobrimos!
-            const levelVal = data.level || 0;
-            const peakVal = data.peak || 0;
-                
-            // 3. Amplificação: Como 0.001 é minúsculo, a raiz quadrada dá ~0.03.
-            // Multiplicamos por 250 para atingir a faixa dos 8 a 10 pixels nas batidas.
-            const baseHeight = Math.sqrt(levelVal) * 250;
-            const peakHeight = Math.sqrt(peakVal) * 250;
-                
-            // 4. Aplicar o CSS. A barra central ganha o pico máximo da batida!
-            bars[0].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.8))}px`;
-            bars[1].style.height = `${Math.max(3, Math.min(10, peakHeight))}px`; 
-            bars[2].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.9))}px`;
-        });
+        this._cacheAudioMeter();
+        this._startAudioMeter();
     }
 
     disconnectedCallback() {
@@ -85,10 +67,44 @@ class RolfsoundIsland extends HTMLElement {
             this._onStoreChange = null;
         }
 
-        if (this._unsubAudio) {
-            this._unsubAudio();
-            this._unsubAudio = null;
+        this._stopAudioMeter();
+    }
+
+    _cacheAudioMeter() {
+        this._audioBars = Array.from(
+            this.shadowRoot.querySelectorAll('.now-playing-indicator span')
+        );
+    }
+
+    _startAudioMeter() {
+        if (this._audioRafId) return;
+        this._audioRafId = requestAnimationFrame(this._audioMeterBound);
+    }
+
+    _stopAudioMeter() {
+        if (!this._audioRafId) return;
+        cancelAnimationFrame(this._audioRafId);
+        this._audioRafId = null;
+    }
+
+    _renderAudioMeter(now) {
+        this._audioRafId = null;
+
+        const bars = this._audioBars;
+        if (bars.length >= 3) {
+            const env = audioReactiveStore.getEnvelope(now);
+            const active = this.hasAttribute('playing') && !env.stale;
+            const levelVal = active ? env.rawLevel || 0 : 0;
+            const peakVal = active ? env.rawPeak || levelVal : 0;
+            const baseHeight = Math.sqrt(levelVal) * 250;
+            const peakHeight = Math.sqrt(peakVal) * 250;
+
+            bars[0].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.8))}px`;
+            bars[1].style.height = `${Math.max(3, Math.min(10, peakHeight))}px`;
+            bars[2].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.9))}px`;
         }
+
+        this._audioRafId = requestAnimationFrame(this._audioMeterBound);
     }
 
     attributeChangedCallback(name, oldValue, newValue) {

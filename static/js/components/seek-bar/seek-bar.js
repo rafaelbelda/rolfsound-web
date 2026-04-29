@@ -27,6 +27,9 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._playing      = false;
     this._rafId        = null;
     this._dragging     = false;
+    this._resizeObserver = null;
+    this._lastCurrentText = '';
+    this._lastTotalText = '';
 
     // Scrubbing real-time: 80ms é o equilíbrio perfeito para o Raspberry Pi
     this._sendThrottledSeek = throttle((pos) => {
@@ -56,8 +59,14 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._elFill    = this.shadowRoot.querySelector('.fill');
     this._elThumb   = this.shadowRoot.querySelector('.thumb');
     this._elBar     = this.shadowRoot.querySelector('.bar');
+    this._elTrackOuter = this.shadowRoot.querySelector('.track-outer');
 
     this._elBar.addEventListener('pointerdown', e => this._onPointerDown(e));
+    if ('ResizeObserver' in window) {
+      this._resizeObserver = new ResizeObserver(() => this._syncTrackWidth());
+      this._resizeObserver.observe(this._elTrackOuter);
+    }
+    this._syncTrackWidth();
 
     loadCss(CSS_URL).then(sheet => {
       this.shadowRoot.adoptedStyleSheets = [sheet];
@@ -72,6 +81,8 @@ class RolfsoundSeekBar extends RolfsoundControl {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._stopRaf();
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
   }
 
   _applySnapshot(s) {
@@ -113,12 +124,23 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _renderProgress(pos, duration) {
     const pct = duration > 0 ? Math.max(0, Math.min(pos / duration, 1)) : 0;
-    const pctStr = `${(pct * 100).toFixed(2)}%`;
+    this.style.setProperty('--seek-ratio', pct.toFixed(5));
     
-    if (this._elFill)  this._elFill.style.width = pctStr;
-    if (this._elThumb) this._elThumb.style.left = pctStr;
-    if (this._elCurrent) this._elCurrent.textContent = this._fmt(pos);
-    if (this._elTotal)   this._elTotal.textContent   = this._fmt(duration);
+    const currentText = this._fmt(pos);
+    const totalText = this._fmt(duration);
+    if (this._elCurrent && currentText !== this._lastCurrentText) {
+      this._elCurrent.textContent = currentText;
+      this._lastCurrentText = currentText;
+    }
+    if (this._elTotal && totalText !== this._lastTotalText) {
+      this._elTotal.textContent = totalText;
+      this._lastTotalText = totalText;
+    }
+  }
+
+  _syncTrackWidth() {
+    if (!this._elTrackOuter) return;
+    this.style.setProperty('--seek-track-width', `${this._elTrackOuter.clientWidth}px`);
   }
 
   _fmt(s) {

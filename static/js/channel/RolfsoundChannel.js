@@ -28,6 +28,13 @@ const INTENT_ROUTES = Object.freeze({
 const WS_URL = '/api/ws';
 const HEARTBEAT_MS = 20000;
 const PONG_TIMEOUT = 10000;
+const COALESCED_TYPES = new Set([
+    'audio_monitor',
+    'telemetry.audio',
+    'event.progress',
+    'state.playback',
+    'state.remix',
+]);
 
 class RolfsoundChannel {
     constructor() {
@@ -40,6 +47,8 @@ class RolfsoundChannel {
         this._transport = 'ws';
         this._pollId = null;
         this._pollInterval = 5000; // Aumentado para 5s (fallback lento é melhor que zumbi rápido)
+        this._pendingFrames = new Map();
+        this._dispatchRafId = null;
 
         // Versão otimizada para componentes de UI (Sliders)
         // Limita a 50 envios por segundo (20ms), garantindo fluidez sem flood no socket.
@@ -126,20 +135,49 @@ class RolfsoundChannel {
         this._ws.addEventListener('message', (ev) => {
             let frame;
             try { frame = JSON.parse(ev.data); } catch { return; }
-            
-            const { type, payload } = frame;
-            
-            // O state_broadcaster do Python envia eventos aqui
-            if (type) this.publish(type, payload);
-            
-            // Tratamento do Heartbeat
-            if (type === 'event.pong' || type === 'ack.ping') this._clearPongTimer();
+            this._handleIncomingFrame(frame);
         });
 
         this._ws.addEventListener('close', () => {
             this._stopHeartbeat();
             if (this._transport !== 'ws') return;
             this._reconnector.schedule(() => this._connectWs());
+        });
+    }
+
+    _handleIncomingFrame(frame) {
+        const { type, payload } = frame || {};
+        if (!type) return;
+
+        if (type === 'event.pong' || type === 'ack.ping') this._clearPongTimer();
+
+        if (this._shouldCoalesce(type, payload)) {
+            this._queueCoalesced(type, payload);
+            return;
+        }
+
+        this.publish(type, payload);
+    }
+
+    _shouldCoalesce(type, payload = {}) {
+        if (type === 'event.download_progress') {
+            const status = String(payload?.status || '').toLowerCase();
+            return status !== 'complete' && status !== 'failed' && status !== 'error';
+        }
+        return COALESCED_TYPES.has(type);
+    }
+
+    _queueCoalesced(type, payload) {
+        this._pendingFrames.set(type, payload);
+        if (this._dispatchRafId) return;
+
+        this._dispatchRafId = requestAnimationFrame(() => {
+            this._dispatchRafId = null;
+            const frames = Array.from(this._pendingFrames.entries());
+            this._pendingFrames.clear();
+            for (const [frameType, framePayload] of frames) {
+                this.publish(frameType, framePayload);
+            }
         });
     }
 
