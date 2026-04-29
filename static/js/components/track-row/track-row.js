@@ -14,6 +14,7 @@
 
 import { adoptStyles } from '/static/js/core/adoptStyles.js';
 import { getThumbnailCandidates, cascadeImage, escapeHtml, formatDuration } from '/static/js/utils/thumbnails.js';
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
 
 const RING_R          = 18;
 const RING_CIRCUMF    = 2 * Math.PI * RING_R; // ≈ 113.1
@@ -160,7 +161,7 @@ class RolfsoundTrackRow extends HTMLElement {
 
         if (titleEl) titleEl.textContent = track.title || 'Unknown';
 
-        const channel  = track.channel || track.artist || '';
+        const channel  = getDisplayArtist(track);
         const duration = track.duration ? formatDuration(track.duration) : '';
         const subParts = [channel, duration].filter(Boolean);
         if (subEl) subEl.textContent = subParts.join(' · ');

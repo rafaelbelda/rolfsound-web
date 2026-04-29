@@ -151,6 +151,7 @@ def _normalize_recording(data: dict) -> dict:
             ),
             "release_date": rg.get("first_release_date"),
             "primary_type": rg.get("primary_type"),
+            "release_type": rg.get("primary_type"),
             "display_artist": display_artist,
             "source": "musicbrainz",
         }

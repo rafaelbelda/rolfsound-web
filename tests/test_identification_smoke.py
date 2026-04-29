@@ -241,6 +241,55 @@ class IdentificationSmokeTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_album_lists_hide_explicit_single_releases_but_keep_track_metadata(self):
+        conn = database.get_connection()
+        try:
+            single_id = database.add_track(conn, {
+                "title": "Standalone Song",
+                "display_artist": "Single Artist",
+                "status": "identified",
+            })
+            album_one_id = database.add_track(conn, {
+                "title": "Album Opener",
+                "display_artist": "Album Artist",
+                "status": "identified",
+            })
+            album_two_id = database.add_track(conn, {
+                "title": "Album Closer",
+                "display_artist": "Album Artist",
+                "status": "identified",
+            })
+            database.set_track_albums(conn, single_id, [{
+                "title": "Standalone Song",
+                "display_artist": "Single Artist",
+                "release_type": "single",
+                "source": "spotify",
+            }], source="spotify")
+            database.set_track_albums(conn, album_one_id, [{
+                "title": "Actual Album",
+                "display_artist": "Album Artist",
+                "release_type": "album",
+                "source": "spotify",
+            }], track_number=1, source="spotify")
+            database.set_track_albums(conn, album_two_id, [{
+                "title": "Actual Album",
+                "display_artist": "Album Artist",
+                "release_type": "album",
+                "source": "spotify",
+            }], track_number=2, source="spotify")
+            conn.commit()
+
+            listed = database.list_albums(conn)
+            self.assertEqual([album["title"] for album in listed], ["Actual Album"])
+            with_singles = database.list_albums(conn, include_singles=True)
+            self.assertEqual({album["title"] for album in with_singles}, {"Actual Album", "Standalone Song"})
+
+            single_track = database.get_track(conn, single_id)
+            self.assertEqual(single_track["album"]["title"], "Standalone Song")
+            self.assertEqual(single_track["album"]["release_type"], "single")
+        finally:
+            conn.close()
+
     def test_pipeline_stops_after_strong_isrc_consensus(self):
         async def run():
             originals = {

@@ -1,6 +1,7 @@
 // static/js/playback/MitosisStateMachine.js
 // Morph/unmorph animation lifecycle for PlaybackMitosisManager.
 import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+import OverlayBackdropController from '/static/js/features/overlays/OverlayBackdropController.js';
 import { measureIslandBarMitosis } from '/static/js/features/island/MitosisMetrics.js';
 
 // ── Layout geometry (exported so PlayerShell can import them) ──
@@ -138,33 +139,17 @@ export default class MitosisStateMachine {
   // ─── Backdrop ────────────────────────────────────────────────
 
   _showBackdrop() {
-    if (document.getElementById('rolfsound-player-backdrop')) return;
-    const bd = document.createElement('div');
-    bd.id = 'rolfsound-player-backdrop';
-    Object.assign(bd.style, {
-      position:            'fixed',
-      inset:               '0',
-      zIndex:              '990',
-      background:          'rgba(0,0,0,0)',
-      backdropFilter:      'blur(0px)',
-      webkitBackdropFilter:'blur(0px)',
-      transition:          'background 0.38s ease, backdrop-filter 0.38s ease, -webkit-backdrop-filter 0.38s ease',
-      pointerEvents:       'none',
+    OverlayBackdropController.show('player', {
+      zIndex: 990,
+      scrim: 'var(--color-bg-scrim)',
+      blur: 'var(--blur-playback)',
+      interactive: true,
+      duration: 380,
     });
-    document.body.appendChild(bd);
-    void bd.offsetHeight;
-    bd.style.background           = 'rgba(0,0,0,0.52)';
-    bd.style.backdropFilter       = 'blur(7px)';
-    bd.style.webkitBackdropFilter = 'blur(7px)';
   }
 
   _hideBackdrop() {
-    const bd = document.getElementById('rolfsound-player-backdrop');
-    if (!bd) return;
-    bd.style.background           = 'rgba(0,0,0,0)';
-    bd.style.backdropFilter       = 'blur(0px)';
-    bd.style.webkitBackdropFilter = 'blur(0px)';
-    setTimeout(() => bd.remove(), 420);
+    OverlayBackdropController.hide('player');
   }
 
   // ─── Morph (ilha → célula-filha) ────────────────────────────

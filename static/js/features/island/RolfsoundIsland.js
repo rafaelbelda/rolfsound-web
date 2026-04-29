@@ -1114,7 +1114,7 @@ class RolfsoundIsland extends HTMLElement {
                 flex: 1; min-width: 0;
                 background: transparent; border: none; outline: none;
                 color: var(--white); font-size: var(--fs-md, 11px); font-family: var(--font, sans-serif);
-                letter-spacing: 0.04em;
+                letter-spacing: 0;
                 opacity: 0; transform: translateX(-8px); pointer-events: none;
                 transition: opacity 0.25s ease 0.3s, transform 0.3s var(--ease-spring) 0.3s;
             }
@@ -1240,7 +1240,7 @@ class RolfsoundIsland extends HTMLElement {
                 text-overflow: ellipsis;
                 font-size: var(--fs-sm, 10px);
                 color: var(--white);
-                letter-spacing: 0.04em;
+                letter-spacing: 0;
             }
 
             .mitosis-pill.input-pill {

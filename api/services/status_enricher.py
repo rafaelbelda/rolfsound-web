@@ -108,7 +108,8 @@ def _lookup_track_by_filepath(conn, filepath: str):
 
     placeholders = ",".join("?" for _ in variants)
     row = conn.execute(f"""
-        SELECT t.id, t.title, t.artist, t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
+        SELECT t.id, t.title, COALESCE(t.display_artist, t.artist) AS display_artist,
+               t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
         FROM tracks t
         JOIN assets a ON t.id = a.track_id
         WHERE a.file_path IN ({placeholders})
@@ -120,7 +121,8 @@ def _lookup_track_by_filepath(conn, filepath: str):
     normalized = _dedupe([_normalized_path(v) for v in variants])
     placeholders = ",".join("?" for _ in normalized)
     return conn.execute(f"""
-        SELECT t.id, t.title, t.artist, t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
+        SELECT t.id, t.title, COALESCE(t.display_artist, t.artist) AS display_artist,
+               t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
         FROM tracks t
         JOIN assets a ON t.id = a.track_id
         WHERE lower(replace(a.file_path, char(92), '/')) IN ({placeholders})
@@ -165,13 +167,14 @@ def enrich_status(raw: dict) -> dict:
                     if row:
                         track_id  = row["id"]        or track_id
                         title     = row["title"]     or title
-                        artist    = row["artist"]    or ""
+                        artist    = row["display_artist"] or ""
                         thumbnail = row["thumbnail"] or ""
                         bpm       = row["bpm"]
                         _track_cache["key"] = path_key
                         _track_cache["data"] = {
                             "track_id": track_id, "title": title,
-                            "artist": artist,     "thumbnail": thumbnail,
+                            "artist": artist,     "display_artist": artist,
+                            "thumbnail": thumbnail,
                             "bpm": bpm,           "path_key": path_key,
                         }
                 finally:
@@ -186,7 +189,7 @@ def enrich_status(raw: dict) -> dict:
         if not title or title == os.path.basename(current_filepath):
             title     = np.get("title")     or title
         if not artist:
-            artist    = np.get("artist")    or ""
+            artist    = np.get("display_artist") or np.get("artist") or ""
         if not thumbnail:
             thumbnail = np.get("thumbnail") or ""
 
@@ -196,7 +199,8 @@ def enrich_status(raw: dict) -> dict:
             "track_id":  t.get("track_id",  ""),
             "title":     t.get("title",     ""),
             "thumbnail": t.get("thumbnail", ""),
-            "artist":    t.get("artist",    ""),
+            "artist":    t.get("display_artist", t.get("artist", "")),
+            "display_artist": t.get("display_artist", t.get("artist", "")),
             "filepath":  t.get("filepath",  ""),
         })
 
@@ -205,6 +209,7 @@ def enrich_status(raw: dict) -> dict:
     raw["track_id"]             = track_id
     raw["title"]                = title
     raw["artist"]               = artist
+    raw["display_artist"]       = artist
     raw["thumbnail"]            = thumbnail
     raw["bpm"]                  = bpm
     raw["position"]             = pb.get("position_s",          0)

@@ -162,6 +162,7 @@ def _normalize_track(track: dict | None) -> dict | None:
             "cover": cover,
             "year": year,
             "release_date": release_date,
+            "release_type": album.get("album_type"),
             "source": "spotify",
         }
     return {

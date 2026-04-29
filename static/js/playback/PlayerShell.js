@@ -2,6 +2,7 @@
 // HTML building, DOM caching, queue panel, and outside-click for PlaybackMitosisManager.
 import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 import { PLAYER_W, SQUARE_H, CONTROLS_H, GAP, TOTAL_H, computeLayout } from './MitosisStateMachine.js';
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
 
 export default class PlayerShell {
   constructor(manager) {
@@ -240,7 +241,7 @@ export default class PlayerShell {
                 text-overflow: ellipsis;
                 white-space: nowrap;
                 letter-spacing: 0.01em;
-              ">${m.escapeHtml(m.state.currentTrack.artist || '—')}</div>
+              ">${m.escapeHtml(getDisplayArtist(m.state.currentTrack) || '—')}</div>
             </div>
 
             <!-- Seek bar — delegado ao Web Component -->
@@ -468,7 +469,7 @@ export default class PlayerShell {
 
       // 2. Atualiza os textos do DOM (usando o cache que fizeste no cacheDomElements)
       if (m.dom.title)  m.dom.title.textContent = updatedTrack.title || incomingId;
-      if (m.dom.artist) m.dom.artist.textContent = updatedTrack.artist || '—';
+      if (m.dom.artist) m.dom.artist.textContent = getDisplayArtist(updatedTrack) || '—';
 
       // 3. Dispara o Crossfader para a nova imagem
       if (m._crossfader) {
@@ -803,7 +804,7 @@ export default class PlayerShell {
             <div class="q-thumb">${thumbHtml}</div>
             <div class="q-meta">
               <div class="q-title" style="opacity:0.7">${m.escapeHtml(h.title || '')}</div>
-              <div class="q-artist">${m.escapeHtml(h.artist || '')}</div>
+              <div class="q-artist">${m.escapeHtml(getDisplayArtist(h))}</div>
             </div>
           </div>`;
       }).join('');
@@ -825,7 +826,7 @@ export default class PlayerShell {
             <div class="q-thumb">${thumbHtml}</div>
             <div class="q-meta">
               <div class="q-title">${m.escapeHtml(track.title || track.id || '')}</div>
-              <div class="q-artist">${m.escapeHtml(track.artist || '')}</div>
+              <div class="q-artist">${m.escapeHtml(getDisplayArtist(track))}</div>
             </div>
             <button class="q-remove" data-remove-idx="${idx}" aria-label="Remove from queue">${removeIcon}</button>
           </div>`;

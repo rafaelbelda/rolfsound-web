@@ -121,6 +121,7 @@ def _create_tables(conn):
             title                TEXT NOT NULL,
             display_artist       TEXT,
             canonical_key        TEXT NOT NULL UNIQUE,
+            release_type         TEXT,
             year                 INTEGER,
             cover                TEXT,
             mb_release_id        TEXT,
@@ -317,6 +318,12 @@ def _create_tables(conn):
             updated_at    INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS app_preferences (
+            key          TEXT PRIMARY KEY,
+            value_json   TEXT NOT NULL,
+            updated_at   INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_assets_track_id ON assets(track_id);
         CREATE INDEX IF NOT EXISTS idx_assets_source ON assets(source, source_ref);
         CREATE INDEX IF NOT EXISTS idx_tracks_primary_artist ON tracks(primary_artist_id);
@@ -341,6 +348,14 @@ def _create_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_identification_jobs_status
             ON identification_jobs(status, next_retry_at);
     """)
+    _ensure_column(conn, "albums", "release_type", "TEXT")
+
+
+def _ensure_column(conn, table: str, column: str, definition: str) -> None:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    if column in {row["name"] for row in rows}:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 # Tracks and assets
@@ -812,6 +827,17 @@ def _album_key(album: dict) -> str:
     return f"{_title_entity_key(title)}||{_artist_entity_key(display_artist)}"
 
 
+def _normalize_release_type(album: dict) -> str | None:
+    value = (
+        album.get("release_type")
+        or album.get("album_type")
+        or album.get("primary_type")
+        or album.get("type")
+    )
+    text = str(value or "").strip().lower()
+    return text or None
+
+
 def _find_album_by_external_id(conn, album: dict):
     for column in ("mb_release_id", "mb_release_group_id", "spotify_album_id", "discogs_id"):
         value = album.get(column)
@@ -833,6 +859,7 @@ def upsert_album(conn, album: dict | str) -> str | None:
         return None
     album = dict(album)
     album["title"] = title
+    album["release_type"] = _normalize_release_type(album)
     canonical_key = album.get("canonical_key") or _album_key(album)
     if not canonical_key.strip("|"):
         return None
@@ -846,6 +873,7 @@ def upsert_album(conn, album: dict | str) -> str | None:
         conn.execute("""
             UPDATE albums
             SET display_artist = COALESCE(?, display_artist),
+                release_type = COALESCE(?, release_type),
                 year = COALESCE(?, year),
                 cover = COALESCE(?, cover),
                 mb_release_id = COALESCE(?, mb_release_id),
@@ -857,6 +885,7 @@ def upsert_album(conn, album: dict | str) -> str | None:
             WHERE id = ?
         """, (
             album.get("display_artist"),
+            album.get("release_type"),
             album.get("year"),
             album.get("cover"),
             album.get("mb_release_id"),
@@ -873,8 +902,9 @@ def upsert_album(conn, album: dict | str) -> str | None:
     conn.execute("""
         INSERT INTO albums
             (id, title, display_artist, canonical_key, year, cover, mb_release_id,
-             mb_release_group_id, spotify_album_id, discogs_id, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             mb_release_group_id, spotify_album_id, discogs_id, source, created_at, updated_at,
+             release_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         album_id,
         title,
@@ -889,6 +919,7 @@ def upsert_album(conn, album: dict | str) -> str | None:
         album.get("source"),
         now,
         now,
+        album.get("release_type"),
     ))
     return album_id
 
@@ -1147,6 +1178,34 @@ def delete_track(conn, track_id):
     conn.execute("DELETE FROM downloads WHERE resolved_track_id = ?", (track_id,))
 
 
+def get_app_preference(conn, key: str, default=None):
+    row = conn.execute(
+        "SELECT value_json FROM app_preferences WHERE key = ?",
+        (key,),
+    ).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["value_json"])
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Invalid JSON stored in app_preferences for key %s", key)
+        return default
+
+
+def set_app_preference(conn, key: str, value) -> None:
+    conn.execute("""
+        INSERT INTO app_preferences (key, value_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = excluded.updated_at
+    """, (key, json.dumps(value), int(time.time())))
+
+
+def delete_app_preference(conn, key: str) -> None:
+    conn.execute("DELETE FROM app_preferences WHERE key = ?", (key,))
+
+
 def list_artists(conn) -> list[dict]:
     rows = conn.execute("""
         SELECT ar.*,
@@ -1186,7 +1245,12 @@ def get_artist_tracks(conn, artist_id: str) -> list[dict]:
     return [_attach_fast_asset(conn, dict(r)) for r in rows]
 
 
-def get_artist_albums(conn, artist_id: str) -> list[dict]:
+def get_artist_albums(conn, artist_id: str, include_singles: bool = False) -> list[dict]:
+    having = ""
+    if not include_singles:
+        having = """
+        HAVING LOWER(COALESCE(al.release_type, '')) NOT IN ('single', 'track')
+        """
     rows = conn.execute("""
         SELECT al.*,
                COUNT(DISTINCT at.track_id) AS local_track_count,
@@ -1197,17 +1261,26 @@ def get_artist_albums(conn, artist_id: str) -> list[dict]:
         JOIN albums al ON al.id = at.album_id
         WHERE ta.artist_id = ?
         GROUP BY al.id
+        """ + having + """
         ORDER BY al.year IS NULL, al.year ASC, al.title COLLATE NOCASE
     """, (artist_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def list_albums(conn) -> list[dict]:
+def list_albums(conn, include_singles: bool = False) -> list[dict]:
+    having = """
+        HAVING COUNT(DISTINCT at.track_id) > 0
+    """
+    if not include_singles:
+        having += """
+           AND LOWER(COALESCE(al.release_type, '')) NOT IN ('single', 'track')
+        """
     rows = conn.execute("""
         SELECT al.*, COUNT(DISTINCT at.track_id) AS local_track_count
         FROM albums al
         LEFT JOIN album_tracks at ON at.album_id = al.id
         GROUP BY al.id
+        """ + having + """
         ORDER BY al.year IS NULL, al.year ASC, al.title COLLATE NOCASE
     """).fetchall()
     return [dict(r) for r in rows]
@@ -1635,7 +1708,9 @@ def add_history(conn, track_id, played_at, duration_played=0):
 
 def get_history(conn, limit=50):
     rows = conn.execute("""
-        SELECT h.*, t.title, t.artist, t.thumbnail, t.duration
+        SELECT h.*, t.title, COALESCE(t.display_artist, t.artist) AS artist,
+               COALESCE(t.display_artist, t.artist) AS display_artist,
+               t.thumbnail, t.duration
         FROM history h
         LEFT JOIN tracks t ON h.track_id = t.id
         ORDER BY h.played_at DESC

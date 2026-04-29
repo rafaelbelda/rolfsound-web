@@ -56,6 +56,7 @@ class StatusEnricherPathTests(unittest.TestCase):
                     id TEXT PRIMARY KEY,
                     title TEXT,
                     artist TEXT,
+                    display_artist TEXT,
                     thumbnail TEXT,
                     bpm INTEGER
                 );
@@ -67,8 +68,8 @@ class StatusEnricherPathTests(unittest.TestCase):
                 );
             """)
             conn.execute(
-                "INSERT INTO tracks (id, title, artist, thumbnail, bpm) VALUES (?, ?, ?, ?, NULL)",
-                (TRACK_ID, title, artist, thumbnail),
+                "INSERT INTO tracks (id, title, artist, display_artist, thumbnail, bpm) VALUES (?, ?, ?, ?, ?, NULL)",
+                (TRACK_ID, title, artist, artist, thumbnail),
             )
             conn.execute(
                 "INSERT INTO assets (id, track_id, file_path, bpm) VALUES ('asset-1', ?, ?, NULL)",
@@ -82,8 +83,8 @@ class StatusEnricherPathTests(unittest.TestCase):
         conn = self._connect()
         try:
             conn.execute(
-                "UPDATE tracks SET title = ?, artist = ?, thumbnail = ? WHERE id = ?",
-                (title, artist, thumbnail, TRACK_ID),
+                "UPDATE tracks SET title = ?, artist = ?, display_artist = ?, thumbnail = ? WHERE id = ?",
+                (title, artist, artist, thumbnail, TRACK_ID),
             )
             conn.commit()
         finally:

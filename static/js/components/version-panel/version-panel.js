@@ -1,3 +1,5 @@
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
+
 export function initVersionPanel({
   thumbSrc, escapeHtml, getTrackId, getAssets, getFastAssetId, getFastAsset,
   normalizeAssetType, getFileFormat, assetDisplay, notify,
@@ -108,7 +110,7 @@ export function initVersionPanel({
           </div>
           <div class="version-panel-title">
             <strong>${escapeHtml(track.title || 'Unknown')}</strong>
-            <span>${escapeHtml(track.artist || 'Unknown Artist')} · ${assets.length} ${assets.length === 1 ? 'version' : 'versions'}</span>
+            <span>${escapeHtml(getDisplayArtist(track) || 'Unknown Artist')} · ${assets.length} ${assets.length === 1 ? 'version' : 'versions'}</span>
           </div>
           <button class="version-panel-close hover-target" type="button" data-action="close-version-panel" aria-label="Close versions">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">

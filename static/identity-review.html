@@ -177,6 +177,10 @@ function coverUrl(track) {
   return "/thumbs/" + t.replace(/^.*[\\\/]music[\\\/]/, "");
 }
 
+function displayArtist(track) {
+  return (track && (track.display_artist || track["artist"] || track.channel)) || "";
+}
+
 function renderCard(c) {
   const target = c.candidate_track || {};
   const source = c.source_track || {};
@@ -188,11 +192,11 @@ function renderCard(c) {
       <div class="cover" style="background-image:url('${cover}')"></div>
       <div class="meta">
         <div class="title">${escapeHtml(target.title || "(sem título)")}</div>
-        <div class="artist">${escapeHtml(target.artist || "(sem artista)")}</div>
+        <div class="artist">${escapeHtml(displayArtist(target) || "(sem artista)")}</div>
         <div class="vs">
-          <span class="pill"><strong>De:</strong>${escapeHtml(source.title || "?")} — ${escapeHtml(source.artist || "?")}</span>
+          <span class="pill"><strong>De:</strong>${escapeHtml(source.title || "?")} — ${escapeHtml(displayArtist(source) || "?")}</span>
           <span class="arrow">→</span>
-          <span class="pill"><strong>Para:</strong>${escapeHtml(target.title || "?")} — ${escapeHtml(target.artist || "?")}</span>
+          <span class="pill"><strong>Para:</strong>${escapeHtml(target.title || "?")} — ${escapeHtml(displayArtist(target) || "?")}</span>
         </div>
         <div class="score">Confiança: ${fmtScore(c.score)} · arquivo: <code>${escapeHtml(((c.asset || {}).file_path || "").split(/[\\\/]/).pop())}</code></div>
         <div class="reasons">Motivos: ${escapeHtml(reasonsText)}</div>

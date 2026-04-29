@@ -6,6 +6,7 @@ import MiniMorphAnimator from '/static/js/features/island/MiniMorphAnimator.js';
 import MitosisStateMachine from '/static/js/playback/MitosisStateMachine.js';
 import ThumbnailCrossfader from '/static/js/playback/ThumbnailCrossfader.js';
 import PlayerShell         from '/static/js/playback/PlayerShell.js';
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
 
 class PlaybackMitosisManager {
   constructor() {
@@ -32,7 +33,7 @@ class PlaybackMitosisManager {
       shuffle: false,
       repeat_mode: 'off',
 
-      currentTrack: { title: '', artist: '', thumbnail: '' }
+      currentTrack: { title: '', display_artist: '', thumbnail: '' }
     };
 
     // ─── Animators ───
@@ -162,7 +163,7 @@ class PlaybackMitosisManager {
     if (serverTrackMatches) {
       this.state.currentTrack = {
         title:     status.title     || '',
-        artist:    status.artist    || '',
+        display_artist: getDisplayArtist(status),
         thumbnail: status.thumbnail || ''
       };
     }
@@ -238,7 +239,7 @@ class PlaybackMitosisManager {
       ...this.state.currentTrack,
       ...track,
       title:     track.title     || this.state.currentTrack.title     || '',
-      artist:    track.artist    || this.state.currentTrack.artist    || '',
+      display_artist: getDisplayArtist(track) || getDisplayArtist(this.state.currentTrack),
       thumbnail: track.thumbnail || this.state.currentTrack.thumbnail || ''
     };
 
@@ -266,7 +267,7 @@ class PlaybackMitosisManager {
 
     if (this.state.currentId) {
       if (this.dom.title)  this.dom.title.textContent  = this.state.currentTrack.title  || this.state.currentId;
-      if (this.dom.artist) this.dom.artist.textContent = this.state.currentTrack.artist || '—';
+      if (this.dom.artist) this.dom.artist.textContent = getDisplayArtist(this.state.currentTrack) || '—';
       this.updateThumbnail();
     } else {
       if (this.dom.title)  this.dom.title.textContent  = 'Nothing playing';
@@ -285,7 +286,7 @@ class PlaybackMitosisManager {
     this.state.currentQueueIdx = newIdx;
     this.state.currentTrack    = {
       title:     track.title     || '',
-      artist:    track.artist    || '',
+      display_artist: getDisplayArtist(track),
       thumbnail: track.thumbnail || ''
     };
     this.state.sliderPos      = 0;

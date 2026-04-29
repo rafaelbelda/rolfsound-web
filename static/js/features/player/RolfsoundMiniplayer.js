@@ -15,6 +15,7 @@
 //   'rolfsound-miniplayer-visibility-change' → ilha / animadores reagem
 
 import { getThumbnailCandidates } from '/static/js/utils/thumbnails.js';
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
 
 class RolfsoundMiniplayer extends HTMLElement {
   static observedAttributes = ['visible'];
@@ -490,7 +491,7 @@ class RolfsoundMiniplayer extends HTMLElement {
   _updateMeta(track) {
     if (!track) return;
     if (this.dom.title)  this.dom.title.textContent  = track.title  || 'Nada tocando';
-    if (this.dom.artist) this.dom.artist.textContent = track.artist || '—';
+    if (this.dom.artist) this.dom.artist.textContent = getDisplayArtist(track) || '—';
   }
 
   _updatePlayIcon(playing) {

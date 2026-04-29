@@ -41,13 +41,13 @@ async def get_artist_tracks(artist_id: str):
 
 
 @router.get("/artists/{artist_id}/albums")
-async def get_artist_albums(artist_id: str):
+async def get_artist_albums(artist_id: str, include_singles: bool = Query(False)):
     conn = database.get_connection()
     try:
         artist = database.get_artist(conn, artist_id)
         if not artist:
             raise HTTPException(status_code=404, detail="Artist not found")
-        albums = database.get_artist_albums(conn, artist_id)
+        albums = database.get_artist_albums(conn, artist_id, include_singles=include_singles)
         return {"artist": artist, "albums": albums, "total": len(albums)}
     finally:
         conn.close()
@@ -70,10 +70,10 @@ async def get_artist_discography(
 
 
 @router.get("/albums")
-async def list_albums():
+async def list_albums(include_singles: bool = Query(False)):
     conn = database.get_connection()
     try:
-        albums = database.list_albums(conn)
+        albums = database.list_albums(conn, include_singles=include_singles)
         return {"albums": albums, "total": len(albums)}
     finally:
         conn.close()

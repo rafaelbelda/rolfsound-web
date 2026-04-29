@@ -104,6 +104,11 @@ const MODE_CLASSES = [
   'cursor-toggle'
 ];
 
+// Elements larger than these thresholds get pointer-follow instead of magnetic snap.
+// Prevents large card rows from pulling the cursor away from where the user is pointing.
+const SNAP_MAX_W = 200;
+const SNAP_MAX_H = 72;
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -373,6 +378,18 @@ export default class Cursor {
     } else if (this.cursorMode === 'select') {
       width = Math.min(rect.width, 120);
       height = rect.height;
+    } else if (this.cursorMode === 'card') {
+      const isLarge = rect.width > SNAP_MAX_W || rect.height > SNAP_MAX_H;
+      if (isLarge) {
+        // Large card rows: keep cursor as a small dot — it follows the pointer,
+        // so expanding it to card dimensions would create a huge distracting pill.
+        width = 8;
+        height = 8;
+        radius = '999px';
+      } else {
+        width = Math.min(rect.width + 4, 160);
+        height = Math.min(rect.height + 2, 52);
+      }
     }
 
     this.targetRect = rect;
@@ -382,7 +399,13 @@ export default class Cursor {
   }
 
   targetFollowsPointer() {
-    return ['drag', 'range', 'text'].includes(this.cursorMode);
+    if (['drag', 'range', 'text'].includes(this.cursorMode)) return true;
+    // Large containers (card rows, wide lists) follow the pointer instead of snapping
+    // to their center — avoids the cursor jumping far from the actual mouse position.
+    if (this.cursorMode === 'card' && this.targetRect) {
+      return this.targetRect.width > SNAP_MAX_W || this.targetRect.height > SNAP_MAX_H;
+    }
+    return false;
   }
 
   startContextMorph(x, y) {

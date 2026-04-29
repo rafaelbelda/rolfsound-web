@@ -83,7 +83,7 @@ async def add_to_queue(req: AddRequest):
             if track_meta:
                 if not req.title: req.title = track_meta.get("title", "")
                 if not req.thumbnail: req.thumbnail = track_meta.get("thumbnail", "")
-                artist = track_meta.get("artist", "")
+                artist = track_meta.get("display_artist", track_meta.get("artist", ""))
 
             # 2. Puxa o Ficheiro Físico (A versão da música)
             if not req.filepath:

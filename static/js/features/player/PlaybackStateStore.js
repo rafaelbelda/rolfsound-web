@@ -1,4 +1,5 @@
 // static/js/PlaybackStateStore.js
+import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
 // Hub de estado de playback. Recebe snapshots do PlaybackMitosisManager
 // e emite eventos diferenciados para consumidores (miniplayer, ilha, tema).
 //
@@ -91,7 +92,7 @@ class PlaybackStateStore extends EventTarget {
     return [
       state.currentId || '',
       track.title || '',
-      track.artist || '',
+      getDisplayArtist(track),
       track.thumbnail || ''
     ].join('\u0001');
   }
