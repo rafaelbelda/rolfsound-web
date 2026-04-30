@@ -290,8 +290,5 @@ export default class ContextMenuController {
 
         this._menuEl.classList.remove('active');
         this._menuEl.classList.add('opening');
-
-        // Garante que o navegador pinte o estado inicial antes da expansão.
-        void this._menuEl.offsetWidth;
     }
 }

@@ -24,6 +24,7 @@ class RolfsoundIsland extends HTMLElement {
         this._miniPendingReconcile = false;
         this._audioBars = [];
         this._audioRafId = null;
+        this._audioMeterIdle = true;
         this._audioMeterBound = (now) => this._renderAudioMeter(now);
     }
 
@@ -43,7 +44,8 @@ class RolfsoundIsland extends HTMLElement {
         this.updateActiveTab();
         this._attachMiniplayerSync();
         this._cacheAudioMeter();
-        this._startAudioMeter();
+        if (this.hasAttribute('playing')) this._startAudioMeter();
+        else this._resetAudioMeter();
     }
 
     disconnectedCallback() {
@@ -78,6 +80,7 @@ class RolfsoundIsland extends HTMLElement {
 
     _startAudioMeter() {
         if (this._audioRafId) return;
+        if (!this.hasAttribute('playing')) return;
         this._audioRafId = requestAnimationFrame(this._audioMeterBound);
     }
 
@@ -90,21 +93,44 @@ class RolfsoundIsland extends HTMLElement {
     _renderAudioMeter(now) {
         this._audioRafId = null;
 
+        if (!this.hasAttribute('playing')) {
+            this._resetAudioMeter();
+            return;
+        }
+
         const bars = this._audioBars;
         if (bars.length >= 3) {
             const env = audioReactiveStore.getEnvelope(now);
-            const active = this.hasAttribute('playing') && !env.stale;
-            const levelVal = active ? env.rawLevel || 0 : 0;
-            const peakVal = active ? env.rawPeak || levelVal : 0;
+            if (env.stale) {
+                this._resetAudioMeter();
+                this._audioRafId = requestAnimationFrame(this._audioMeterBound);
+                return;
+            }
+
+            const levelVal = env.rawLevel || 0;
+            const peakVal = env.rawPeak || levelVal;
             const baseHeight = Math.sqrt(levelVal) * 250;
             const peakHeight = Math.sqrt(peakVal) * 250;
 
-            bars[0].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.8))}px`;
-            bars[1].style.height = `${Math.max(3, Math.min(10, peakHeight))}px`;
-            bars[2].style.height = `${Math.max(3, Math.min(10, baseHeight * 0.9))}px`;
+            bars[0].style.transform = `scaleY(${this._audioBarScale(baseHeight * 0.8)})`;
+            bars[1].style.transform = `scaleY(${this._audioBarScale(peakHeight)})`;
+            bars[2].style.transform = `scaleY(${this._audioBarScale(baseHeight * 0.9)})`;
+            this._audioMeterIdle = false;
         }
 
         this._audioRafId = requestAnimationFrame(this._audioMeterBound);
+    }
+
+    _audioBarScale(heightPx) {
+        return (Math.max(3, Math.min(10, heightPx)) / 10).toFixed(3);
+    }
+
+    _resetAudioMeter() {
+        if (this._audioMeterIdle) return;
+        this._audioBars.forEach(bar => {
+            bar.style.transform = 'scaleY(0.3)';
+        });
+        this._audioMeterIdle = true;
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
@@ -332,8 +358,11 @@ class RolfsoundIsland extends HTMLElement {
     setNowPlayingState(isPlaying) {
         if (isPlaying) {
             this.setAttribute('playing', '');
+            this._startAudioMeter();
         } else {
             this.removeAttribute('playing');
+            this._stopAudioMeter();
+            this._resetAudioMeter();
         }
     }
 
@@ -580,8 +609,7 @@ class RolfsoundIsland extends HTMLElement {
 
             if (targetView) {
                 targetView.style.display = 'flex';
-                void targetView.offsetWidth;
-                targetView.classList.add('visible');
+                requestAnimationFrame(() => targetView.classList.add('visible'));
             }
         }, 200, '_animationTimers');
 
@@ -647,10 +675,11 @@ class RolfsoundIsland extends HTMLElement {
             container.style.removeProperty('--island-height');
             container.style.removeProperty('--island-radius');
 
-            void navContent.offsetWidth;
-            navContent.classList.remove('hidden');
-            filtersDrawer.classList.remove('hidden');
-            externalIndicator.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                navContent.classList.remove('hidden');
+                filtersDrawer.classList.remove('hidden');
+                externalIndicator.classList.remove('hidden');
+            });
         }, 200, '_animationTimers');
     }
 
@@ -882,7 +911,13 @@ class RolfsoundIsland extends HTMLElement {
                 
                 opacity: 0; pointer-events: none;
                 transform: translateX(-50%) scale(0.6);
-                transition: all 0.5s var(--ease-spring);
+                transition:
+                    transform 0.5s var(--ease-spring),
+                    opacity 0.2s ease,
+                    border-radius 0.5s var(--ease-spring),
+                    background-color 0.2s ease,
+                    border-color 0.2s ease;
+                will-change: transform, opacity;
                 z-index: 900; 
                 box-shadow: var(--shadow-soft);
                 overflow: hidden;
@@ -926,7 +961,7 @@ class RolfsoundIsland extends HTMLElement {
                 font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
                 line-height: 1;
                 display: inline-flex; align-items: center; justify-content: center;
-                transition: all 0.2s ease; white-space: nowrap;
+                transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease; white-space: nowrap;
             }
             .pill-btn:hover  { color: var(--white); }
             .pill-btn.active {
@@ -949,9 +984,7 @@ class RolfsoundIsland extends HTMLElement {
                 display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
                 padding: 0 10px; box-shadow: var(--shadow-soft);
 
-                transition: width  0.5s var(--ease-spring),
-                            height 0.5s var(--ease-spring),
-                            border-radius 0.5s var(--ease-spring),
+                transition: border-radius 0.5s var(--ease-spring),
                             background-color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
 
                 position: relative; z-index: 1000;
@@ -1003,7 +1036,7 @@ class RolfsoundIsland extends HTMLElement {
                 position: absolute; bottom: 18px;
                 display: flex; gap: 6px; justify-content: center; align-items: center;
                 opacity: 0; pointer-events: none; transform: translateY(10px);
-                transition: all 0.4s var(--ease-spring);
+                transition: opacity 0.4s ease, transform 0.4s var(--ease-spring);
                 width: 100%;
             }
             #filters-drawer.hidden { display: none; }
@@ -1017,7 +1050,7 @@ class RolfsoundIsland extends HTMLElement {
                 background: var(--color-surface-interactive); border: 1px solid var(--color-border-interactive);
                 color: var(--gray); border-radius: 12px; padding: 6px 10px;
                 font-size: var(--fs-xs, 9px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-                transition: all 0.2s ease; white-space: nowrap;
+                transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease; white-space: nowrap;
             }
             .filter-btn:hover  { background: var(--color-surface-interactive-hover); color: var(--white); }
             .filter-btn.active { background: var(--color-surface-inverse); color: var(--black); border-color: var(--color-surface-inverse); }
@@ -1051,10 +1084,13 @@ class RolfsoundIsland extends HTMLElement {
             .now-playing-indicator span {
                 display: block;
                 width: 2.5px;
+                height: 10px;
                 border-radius: 1.5px;
                 background: var(--color-led);
-                height: 3px; 
-                transition: height 0.08s ease-out; 
+                transform: scaleY(0.3);
+                transform-origin: bottom center;
+                transition: transform 0.08s ease-out;
+                will-change: transform;
             }
 
             .nav-section {
@@ -1066,7 +1102,7 @@ class RolfsoundIsland extends HTMLElement {
             .nav-link {
                 color: var(--gray); text-decoration: none; font-size: var(--fs-xs, 9px); text-transform: uppercase;
                 letter-spacing: 0.1em; padding: 6px 12px; border-radius: 16px;
-                transition: all 0.2s ease; background: transparent; border: 1px solid transparent;
+                transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease; background: transparent; border: 1px solid transparent;
                 position: relative; z-index: 1200;
                 display: flex; align-items: center;
             }
@@ -1079,12 +1115,11 @@ class RolfsoundIsland extends HTMLElement {
 
             .nav-label {
                 max-width: 0; overflow: hidden; opacity: 0; white-space: nowrap; margin-left: 0;
-                transition: max-width 0.4s var(--ease-spring),
-                            opacity 0.3s ease,
-                            margin-left 0.4s var(--ease-spring);
+                transform: translateX(-4px);
+                transition: opacity 0.3s ease, transform 0.3s var(--ease-spring);
             }
             .nav-link:hover .nav-label,
-            .nav-link.active  .nav-label { max-width: 90px; opacity: 1; margin-left: 7px; }
+            .nav-link.active  .nav-label { max-width: 90px; opacity: 1; margin-left: 7px; transform: translateX(0); }
 
             /* ─── EQ Bars animados (Now Playing ativo) ─── */
             .eq-bar { transform-box: fill-box; transform-origin: bottom center; }
@@ -1109,7 +1144,10 @@ class RolfsoundIsland extends HTMLElement {
                 width: 560px;
                 border-radius: var(--pill-r, var(--default-r));
                 transform: translateX(-50%) translateY(var(--mitosis-distance, 55px)) scale(1);
-                transition: width 0.34s var(--ease-standard);
+                transition:
+                    transform 0.34s var(--ease-standard),
+                    opacity 0.2s ease,
+                    border-radius 0.34s var(--ease-standard);
             }
             .mitosis-pill.search-expanded.modal {
                 width: var(--search-modal-w, min(760px, calc(100vw - 64px)));
@@ -1323,7 +1361,7 @@ class RolfsoundIsland extends HTMLElement {
                 letter-spacing: 0.06em;
                 cursor: none;
                 white-space: nowrap;
-                transition: all 0.16s ease;
+                transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
             }
 
             .mitosis-input-btn:hover {

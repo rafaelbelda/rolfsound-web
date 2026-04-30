@@ -59,13 +59,11 @@ export default class ReactiveBackdropController {
     this._intensityStart = 0;
     this._intensityDur   = 0;
 
-    // ── RAF de interpolação RGB (cross-fade real de gradiente) ──
-    // CSS não interpola entre radial-gradient() — fazemos em JS frame-a-frame
+    // ── Crossfade de gradiente ──
+    // CSS não interpola radial-gradient() sem repintar; usamos dois buffers
+    // estáticos e animamos apenas opacity.
     this._colorRafId  = null;
-    this._colorFrom   = null;    // snapshot RGB no início da transição
-    this._colorTarget = null;    // RGB destino
-    this._colorStart  = 0;
-    this._colorDur    = 0;
+    this._colorTarget = null;
 
     // Valores RGB atualmente renderizados (atualizados tick-a-tick pelo color RAF)
     this._renderedRgb = {
@@ -79,12 +77,15 @@ export default class ReactiveBackdropController {
       accent:   null,
       contrast: null
     };
+    this._layerSets = [];
+    this._activeLayerIndex = 0;
 
     // ── Ambient breathing loop ──
     // Simula reatividade ao áudio (grave/médio/agudo) sem acesso ao stream
     // (reprodução é server-side via sounddevice). Roda só durante playback.
     this._ambientRafId = null;
     this._ambientStart = 0;
+    this._ambientLastRenderAt = 0;
     this._ambientBound = this._ambientTick.bind(this); // bound once — zero GC per frame
 
     this._ensureLayers();
@@ -148,12 +149,7 @@ export default class ReactiveBackdropController {
       contrast: ReactiveBackdropController._parseRgb(palette.contrast)
     };
 
-    // Torna as layers visíveis se ainda estão em opacity 0 (primeira faixa)
-    if (Math.abs(this._layersOpacity - 1) > 0.01) {
-      this._setLayersOpacity(1, this._intensityOnMs);
-    }
-
-    // Interpola cada canal RGB frame-a-frame → cross-fade real de gradiente
+    // Crossfade entre buffers de gradiente estático; só opacity anima.
     this._startColorTransition(targetRgb, this._transitionMs);
     this._animateIntensityTo(1, this._intensityOnMs);
     this._startAmbientLoop();
@@ -187,12 +183,13 @@ export default class ReactiveBackdropController {
   //
   // AudioReactiveStore fornece energia/pico reais via audio_monitor. As senoides
   // ficam como fallback discreto quando o stream fica stale.
-  // Tecnicamente: filter:brightness() por RAF (GPU compositor), sem layout recalc.
+  // Tecnicamente: só transform em baixa cadência; sem filtros ou gradientes por frame.
 
   _startAmbientLoop() {
     if (this._ambientRafId) return;           // já rodando (track change não reinicia)
     if (this._reducedMotion || document.hidden) return;
     this._ambientStart = performance.now();
+    this._ambientLastRenderAt = 0;
     this._ambientRafId = requestAnimationFrame(this._ambientBound);
   }
 
@@ -202,8 +199,6 @@ export default class ReactiveBackdropController {
       this._ambientRafId = null;
     }
     // Limpa o filtro residual para não travar num brightness != 1
-    if (this._layers.accent)   this._layers.accent.style.filter   = '';
-    if (this._layers.contrast) this._layers.contrast.style.filter = '';
     if (this._layers.accent)   this._layers.accent.style.transform = '';
     if (this._layers.contrast) this._layers.contrast.style.transform = '';
     if (resetAudio) this._audioStore?.reset?.();
@@ -216,6 +211,9 @@ export default class ReactiveBackdropController {
     }
 
     this._ambientRafId = requestAnimationFrame(this._ambientBound);
+    if (ts - this._ambientLastRenderAt < 66) return;
+    this._ambientLastRenderAt = ts;
+
     const t = (ts - this._ambientStart) * 0.001; // ms → segundos
     const env = this._audioStore?.getEnvelope?.(ts) ?? { energy: 0, peak: 0, punch: 0, stale: true };
     const nearBlackMode = this._paletteMode === 'near-black';
@@ -237,33 +235,17 @@ export default class ReactiveBackdropController {
     const bassC = Math.sin(t * 4.587)          * 0.038 * syntheticMix;  // grave
     const midC  = Math.sin(t * 12.38 + 1.99)   * 0.017 * syntheticMix;  // médio
 
-    const audioAccentLift = nearBlackMode
-      ? env.energy * 0.42 + env.punch * 0.34
-      : env.energy * 0.28 + env.punch * 0.22;
-    const audioContrastLift = nearBlackMode
-      ? env.peak * 0.30 + env.punch * 0.26
-      : env.peak * 0.20 + env.punch * 0.18;
-    const bAccent           = (1 + bassA + midA + hiA + audioAccentLift).toFixed(3);
-    const bContrast         = (1 + bassC + midC + audioContrastLift).toFixed(3);
-    const sAccent           = nearBlackMode || monochromeMode
-      ? '1.000'
-      : (1 + env.energy * (limitedPaletteMode ? 0.14 : 0.30) + env.punch * (limitedPaletteMode ? 0.08 : 0.18)).toFixed(3);
-    const sContrast         = nearBlackMode || monochromeMode
-      ? '1.000'
-      : (1 + env.peak * (limitedPaletteMode ? 0.10 : 0.22)).toFixed(3);
     const scaleAccent       = nearBlackMode
       ? (1 + env.energy * 0.016 + env.punch * 0.022).toFixed(4)
-      : (1 + env.energy * 0.024 + env.punch * 0.030).toFixed(4);
+      : (1 + bassA + midA + hiA + env.energy * 0.024 + env.punch * 0.030).toFixed(4);
     const scaleContrast     = nearBlackMode
       ? (1 + env.peak * 0.014).toFixed(4)
-      : (1 + env.peak * 0.018).toFixed(4);
+      : (1 + bassC + midC + env.peak * 0.018).toFixed(4);
 
     if (this._layers.accent) {
-      this._layers.accent.style.filter = `brightness(${bAccent}) saturate(${sAccent})`;
       this._layers.accent.style.transform = `scale(${scaleAccent})`;
     }
     if (this._layers.contrast) {
-      this._layers.contrast.style.filter = `brightness(${bContrast}) saturate(${sContrast})`;
       this._layers.contrast.style.transform = `scale(${scaleContrast})`;
     }
   }
@@ -275,7 +257,8 @@ export default class ReactiveBackdropController {
     this._cancelIntensityRaf();
     this._stopAmbientLoop();
 
-    Object.values(this._layers).forEach(el => el?.remove());
+    this._layerSets.forEach(set => Object.values(set).forEach(el => el?.remove()));
+    this._layerSets = [];
     this._layers = { base: null, accent: null, contrast: null };
 
     const root = document.documentElement;
@@ -300,25 +283,35 @@ export default class ReactiveBackdropController {
           z-index: ${zIndex};
           opacity: 0;
           will-change: ${willChange};
+          transform-origin: center;
         `;
         document.body.insertBefore(el, document.body.firstChild);
       }
       return el;
     };
 
-    // Accent + contrast layers animam filter:brightness() a cada frame — promove a filter
-    this._layers.base     = insert('rs-bg-base',     1, 'opacity');
-    this._layers.accent   = insert('rs-bg-accent',   2, 'opacity, filter, transform');
-    this._layers.contrast = insert('rs-bg-contrast', 3, 'opacity, filter, transform');
+    this._layerSets = [
+      {
+        base:     insert('rs-bg-base',     1, 'opacity'),
+        accent:   insert('rs-bg-accent',   2, 'opacity, transform'),
+        contrast: insert('rs-bg-contrast', 3, 'opacity, transform')
+      },
+      {
+        base:     insert('rs-bg-base-next',     1, 'opacity'),
+        accent:   insert('rs-bg-accent-next',   2, 'opacity, transform'),
+        contrast: insert('rs-bg-contrast-next', 3, 'opacity, transform')
+      }
+    ];
+    this._layers = this._layerSets[this._activeLayerIndex];
   }
 
   // Reconstrói os gradientes com os valores RGB atualmente interpolados.
   // Chamado a cada frame pelo color RAF — sem CSS transition, o browser pinta direto.
-  _applyRenderedRgbToLayers() {
-    const b = ReactiveBackdropController._fmtRgb(this._renderedRgb.base);
-    const a = ReactiveBackdropController._fmtRgb(this._renderedRgb.accent);
-    const c = ReactiveBackdropController._fmtRgb(this._renderedRgb.contrast);
-    const { base: lBase, accent: lAccent, contrast: lContrast } = this._layers;
+  _applyRenderedRgbToLayers(layerSet = this._layers, rgbSet = this._renderedRgb) {
+    const b = ReactiveBackdropController._fmtRgb(rgbSet.base);
+    const a = ReactiveBackdropController._fmtRgb(rgbSet.accent);
+    const c = ReactiveBackdropController._fmtRgb(rgbSet.contrast);
+    const { base: lBase, accent: lAccent, contrast: lContrast } = layerSet;
     const g = this._gc;
 
     if (lBase) {
@@ -374,7 +367,7 @@ export default class ReactiveBackdropController {
 
     this._cancelIntensityRaf();
     this._setLayersOpacity(0, instant ? 0 : this._intensityOffMs);
-    this._applyRenderedRgbToLayers();
+    this._layerSets.forEach(set => this._applyRenderedRgbToLayers(set));
     this._publishCssVars();
     document.documentElement.style.setProperty('--rs-theme-intensity', '0');
   }
@@ -383,35 +376,19 @@ export default class ReactiveBackdropController {
 
   _animateIntensityTo(targetIntensity, durationMs) {
     this._cancelIntensityRaf();
-
-    const root = document.documentElement;
-    const from = parseFloat(root.style.getPropertyValue('--rs-theme-intensity') || '0');
-    this._intensityFrom  = from;
-    this._intensityTo    = targetIntensity;
-    this._intensityStart = performance.now();
-    this._intensityDur   = durationMs;
-
-    const tick = (now) => {
-      const t     = Math.min(1, (now - this._intensityStart) / this._intensityDur);
-      const eased = ReactiveBackdropController._easeOut(t);
-      const val   = from + (targetIntensity - from) * eased;
-      root.style.setProperty('--rs-theme-intensity', val.toFixed(4));
-      if (t < 1) {
-        this._intensityRafId = requestAnimationFrame(tick);
-      } else {
-        this._intensityRafId = null;
-      }
-    };
-
-    this._intensityRafId = requestAnimationFrame(tick);
+    document.documentElement.style.setProperty('--rs-theme-intensity', targetIntensity.toFixed(3));
   }
 
   _setLayersOpacity(target, transitionMs) {
     this._layersOpacity = target;
-    Object.values(this._layers).forEach(el => {
+    this._layerSets.forEach(set => this._setLayerSetOpacity(set, target, transitionMs));
+  }
+
+  _setLayerSetOpacity(layerSet, target, transitionMs) {
+    Object.values(layerSet).forEach(el => {
       if (!el) return;
       el.style.transition = transitionMs > 0 ? `opacity ${transitionMs}ms ease` : 'none';
-      el.style.opacity    = target;
+      el.style.opacity = target;
     });
   }
 
@@ -427,42 +404,31 @@ export default class ReactiveBackdropController {
   _startColorTransition(targetRgb, durationMs) {
     this._cancelColorRaf();
 
-    // Congela snapshot do estado atual antes de começar a interp
-    this._colorFrom = {
-      base:     [...this._renderedRgb.base],
-      accent:   [...this._renderedRgb.accent],
-      contrast: [...this._renderedRgb.contrast]
-    };
     this._colorTarget = targetRgb;
-    this._colorStart  = performance.now();
-    this._colorDur    = durationMs;
+    this._renderedRgb = targetRgb;
 
-    const tick = (now) => {
-      const t     = Math.min(1, (now - this._colorStart) / this._colorDur);
-      const eased = ReactiveBackdropController._easeInOut(t);
+    const nextIndex = this._activeLayerIndex === 0 ? 1 : 0;
+    const currentSet = this._layerSets[this._activeLayerIndex];
+    const nextSet = this._layerSets[nextIndex];
 
-      this._renderedRgb = {
-        base:     ReactiveBackdropController._lerpRgb(this._colorFrom.base,     this._colorTarget.base,     eased),
-        accent:   ReactiveBackdropController._lerpRgb(this._colorFrom.accent,   this._colorTarget.accent,   eased),
-        contrast: ReactiveBackdropController._lerpRgb(this._colorFrom.contrast, this._colorTarget.contrast, eased)
-      };
+    this._applyRenderedRgbToLayers(nextSet, targetRgb);
+    this._publishCssVars();
 
-      this._applyRenderedRgbToLayers();
-      this._publishCssVars();
+    this._setLayerSetOpacity(nextSet, 1, durationMs);
+    this._setLayerSetOpacity(currentSet, 0, durationMs);
+    this._layersOpacity = 1;
+    this._activeLayerIndex = nextIndex;
+    this._layers = nextSet;
 
-      if (t < 1) {
-        this._colorRafId = requestAnimationFrame(tick);
-      } else {
-        this._colorRafId = null;
-      }
-    };
-
-    this._colorRafId = requestAnimationFrame(tick);
+    this._colorRafId = window.setTimeout(() => {
+      this._setLayerSetOpacity(currentSet, 0, 0);
+      this._colorRafId = null;
+    }, durationMs + 32);
   }
 
   _cancelColorRaf() {
     if (this._colorRafId) {
-      cancelAnimationFrame(this._colorRafId);
+      clearTimeout(this._colorRafId);
       this._colorRafId = null;
     }
   }

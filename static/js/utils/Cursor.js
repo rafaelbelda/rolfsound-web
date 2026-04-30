@@ -133,9 +133,11 @@ export default class Cursor {
     this.isContextMorphing = false;
     this.currentTarget = null;
     this.targetRect = null;
+    this.targetRadius = '999px';
     this.cursorMode = 'default';
     this.contextMorphTimer = null;
     this.prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    this.isCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
 
     this._renderBound = this.render.bind(this);
     this._onPointerMove = (e) => this.handlePointerMove(e);
@@ -147,19 +149,26 @@ export default class Cursor {
       this.dot?.classList.add('cursor-hidden');
     };
     this._onScroll = () => {
-      if (this.isHovering && this.isValidTarget(this.currentTarget)) {
-        this.targetRect = this.currentTarget.getBoundingClientRect();
-      }
+      if (this.isHovering) this._geometryDirty = true;
+    };
+    this._onResize = () => {
+      if (this.isHovering) this._geometryDirty = true;
     };
     this._onContextOpen = (e) => { this.startContextMorph(e.detail?.x, e.detail?.y); };
     this._onContextClose = () => this.stopContextMorph();
     this._rafId = null;
+    this._geometryDirty = false;
+    this._dotGeometry = { width: 0, height: 0, radius: '' };
 
     this.init();
   }
 
   init() {
     if (!this.dot) return;
+    if (this.isCoarsePointer) {
+      this.dot.classList.add('cursor-hidden');
+      return;
+    }
 
     window.addEventListener('pointermove', this._onPointerMove, { passive: true });
     window.addEventListener('pointerdown', this._onPointerDown, { passive: true });
@@ -168,6 +177,7 @@ export default class Cursor {
     window.addEventListener('blur', this._onPointerUp);
     document.addEventListener('mouseleave', this._onMouseLeave);
     window.addEventListener('scroll', this._onScroll, { capture: true, passive: true });
+    window.addEventListener('resize', this._onResize, { passive: true });
     window.addEventListener('rolfsound-context-open', this._onContextOpen);
     window.addEventListener('rolfsound-context-close', this._onContextClose);
 
@@ -182,6 +192,7 @@ export default class Cursor {
     window.removeEventListener('blur', this._onPointerUp);
     document.removeEventListener('mouseleave', this._onMouseLeave);
     window.removeEventListener('scroll', this._onScroll, { capture: true });
+    window.removeEventListener('resize', this._onResize);
     window.removeEventListener('rolfsound-context-open', this._onContextOpen);
     window.removeEventListener('rolfsound-context-close', this._onContextClose);
     if (this._rafId !== null) {
@@ -214,12 +225,14 @@ export default class Cursor {
 
     if (this.cursorMode === 'range' || this.cursorMode === 'drag') {
       this.dot?.classList.add('cursor-drag');
+      this._geometryDirty = true;
     }
   }
 
   releasePress() {
     this.isPressing = false;
     this.dot?.classList.remove('cursor-pressing', 'cursor-drag');
+    if (this.cursorMode === 'drag') this._geometryDirty = true;
   }
 
   resetHover() {
@@ -228,6 +241,7 @@ export default class Cursor {
     this.isHovering = false;
     this.currentTarget = null;
     this.targetRect = null;
+    this._geometryDirty = false;
     this.setCursorMode('default');
     this.dot.classList.remove('hovering');
 
@@ -240,6 +254,7 @@ export default class Cursor {
 
     this.dot.style.setProperty('--dx', '0px');
     this.dot.style.setProperty('--dy', '0px');
+    this._dotGeometry = { width: 0, height: 0, radius: '' };
   }
 
   setCursorMode(mode) {
@@ -311,21 +326,14 @@ export default class Cursor {
 
   matchesInteractiveTarget(el) {
     if (el.matches?.(INTERACTIVE_SELECTOR)) return true;
-
-    const cursor = window.getComputedStyle(el).cursor;
-    return cursor && !['auto', 'default', 'none'].includes(cursor);
+    return false;
   }
 
   isValidTarget(el) {
     if (!isElement(el) || !el.isConnected) return false;
     if (el.matches?.('[data-cursor="ignore"], :disabled, [disabled], [aria-disabled="true"]')) return false;
     if (el.closest?.('[inert], [aria-hidden="true"]')) return false;
-
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return false;
-
-    const rect = el.getBoundingClientRect();
-    return rect.width > 1 && rect.height > 1;
+    return true;
   }
 
   setHoverTarget(target) {
@@ -336,7 +344,9 @@ export default class Cursor {
       this.isHovering = true;
       this.dot.classList.add('hovering');
       this.setCursorMode(mode);
-      this.syncTargetGeometry();
+      if (!this.syncTargetGeometry()) this.resetHover();
+    } else if (!this.targetRect) {
+      this._geometryDirty = true;
     }
   }
 
@@ -354,9 +364,11 @@ export default class Cursor {
   }
 
   syncTargetGeometry() {
-    if (!this.dot || !this.currentTarget) return;
+    if (!this.dot || !this.currentTarget || !this.isValidTarget(this.currentTarget)) return false;
 
     const rect = this.currentTarget.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) return false;
+
     const style = window.getComputedStyle(this.currentTarget);
     let width = rect.width;
     let height = rect.height;
@@ -393,9 +405,20 @@ export default class Cursor {
     }
 
     this.targetRect = rect;
-    this.dot.style.width = `${width}px`;
-    this.dot.style.height = `${height}px`;
-    this.dot.style.borderRadius = radius;
+    this.targetRadius = radius;
+    this._geometryDirty = false;
+
+    if (
+      width !== this._dotGeometry.width ||
+      height !== this._dotGeometry.height ||
+      radius !== this._dotGeometry.radius
+    ) {
+      this.dot.style.width = `${width}px`;
+      this.dot.style.height = `${height}px`;
+      this.dot.style.borderRadius = radius;
+      this._dotGeometry = { width, height, radius };
+    }
+    return true;
   }
 
   targetFollowsPointer() {
@@ -456,28 +479,33 @@ export default class Cursor {
       targetY = this.pos.y;
       currentSpeed = 1;
     } else if (this.isHovering && this.currentTarget) {
-      if (!this.isValidTarget(this.currentTarget) || !this.matchesInteractiveTarget(this.currentTarget)) {
+      if (!this.isValidTarget(this.currentTarget)) {
         this.resetHover();
         targetX = this.mouse.x;
         targetY = this.mouse.y;
         currentSpeed = this.speedFree;
       } else {
-        this.syncTargetGeometry();
-
-        if (this.targetFollowsPointer()) {
+        if (this._geometryDirty && !this.syncTargetGeometry()) {
+          this.resetHover();
           targetX = this.mouse.x;
           targetY = this.mouse.y;
-          currentSpeed = this.speedFollow;
+          currentSpeed = this.speedFree;
         } else {
-          targetX = this.targetRect.left + this.targetRect.width / 2;
-          targetY = this.targetRect.top + this.targetRect.height / 2;
-          currentSpeed = this.speedMagnetic;
-        }
+          if (this.targetFollowsPointer()) {
+            targetX = this.mouse.x;
+            targetY = this.mouse.y;
+            currentSpeed = this.speedFollow;
+          } else {
+            targetX = this.targetRect.left + this.targetRect.width / 2;
+            targetY = this.targetRect.top + this.targetRect.height / 2;
+            currentSpeed = this.speedMagnetic;
+          }
 
-        const dx = (this.mouse.x - targetX) * 0.4;
-        const dy = (this.mouse.y - targetY) * 0.4;
-        this.dot.style.setProperty('--dx', `${dx}px`);
-        this.dot.style.setProperty('--dy', `${dy}px`);
+          const dx = (this.mouse.x - targetX) * 0.4;
+          const dy = (this.mouse.y - targetY) * 0.4;
+          this.dot.style.setProperty('--dx', `${dx}px`);
+          this.dot.style.setProperty('--dy', `${dy}px`);
+        }
       }
     } else {
       targetX = this.mouse.x;

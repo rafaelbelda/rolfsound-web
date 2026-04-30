@@ -30,6 +30,9 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._resizeObserver = null;
     this._lastCurrentText = '';
     this._lastTotalText = '';
+    this._trackWidth = 0;
+    this._dragRect = null;
+    this._lastRatio = -1;
 
     // Scrubbing real-time: 80ms é o equilíbrio perfeito para o Raspberry Pi
     this._sendThrottledSeek = throttle((pos) => {
@@ -124,7 +127,17 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _renderProgress(pos, duration) {
     const pct = duration > 0 ? Math.max(0, Math.min(pos / duration, 1)) : 0;
-    this.style.setProperty('--seek-ratio', pct.toFixed(5));
+    const ratio = Number(pct.toFixed(5));
+    if (ratio !== this._lastRatio) {
+      const x = this._trackWidth * ratio;
+      if (this._elFill) {
+        this._elFill.style.transform = `scale3d(${ratio}, 1, 1)`;
+      }
+      if (this._elThumb) {
+        this._elThumb.style.transform = `translate3d(${x}px, -50%, 0) translateX(-50%) scale(var(--seek-thumb-scale, 0))`;
+      }
+      this._lastRatio = ratio;
+    }
     
     const currentText = this._fmt(pos);
     const totalText = this._fmt(duration);
@@ -140,7 +153,9 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _syncTrackWidth() {
     if (!this._elTrackOuter) return;
-    this.style.setProperty('--seek-track-width', `${this._elTrackOuter.clientWidth}px`);
+    this._trackWidth = this._elTrackOuter.clientWidth || 0;
+    this._lastRatio = -1;
+    this._renderProgress(this._dragging ? this._pos : this._deadReckoned(), this._duration);
   }
 
   _fmt(s) {
@@ -154,6 +169,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
     this._dragging = true;
     this._elBar.classList.add('dragging');
     this._elBar.setPointerCapture(e.pointerId);
+    this._dragRect = this._elBar.getBoundingClientRect();
 
     if (this._elFill) this._elFill.style.transition = 'none';
     if (this._elThumb) this._elThumb.style.transition = 'none';
@@ -169,6 +185,7 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
       const position = this._pctFromEvent(ev) * this._duration;
       this._seekTo(position, false); // Envio final exato
+      this._dragRect = null;
 
       requestAnimationFrame(() => {
         if (this._elFill) this._elFill.style.transition = '';
@@ -183,11 +200,13 @@ class RolfsoundSeekBar extends RolfsoundControl {
   _applyDrag(e) {
     const pct = this._pctFromEvent(e);
     const pos = pct * this._duration;
+    this._pos = pos;
     this._renderProgress(pos, this._duration);
+    this._seekTo(pos, true);
   }
 
   _pctFromEvent(e) {
-    const rect = this._elBar.getBoundingClientRect();
+    const rect = this._dragRect || this._elBar.getBoundingClientRect();
     return Math.max(0, Math.min((e.clientX - rect.left) / rect.width, 1));
   }
 

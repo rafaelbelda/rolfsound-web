@@ -65,7 +65,7 @@ export default class UploadController extends HTMLElement {
     uploadFiles(files) {
         this.overlay.classList.add('uploading');
         this.statusText.textContent = `A enviar ${files.length} ficheiro(s)...`;
-        this.progressBar.style.width = '0%';
+        this.progressBar.style.transform = 'scale3d(0, 1, 1)';
 
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
@@ -76,7 +76,7 @@ export default class UploadController extends HTMLElement {
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
                 const pct = (e.loaded / e.total) * 100;
-                this.progressBar.style.width = `${pct}%`;
+                this.progressBar.style.transform = `scale3d(${pct / 100}, 1, 1)`;
             }
         };
 
@@ -144,7 +144,10 @@ export default class UploadController extends HTMLElement {
                 border-radius: 24px;
                 padding: 60px;
                 text-align: center;
-                transition: all 0.3s var(--ease-spring, ease);
+                transition:
+                    transform 0.3s var(--ease-spring, ease),
+                    border-color 0.3s ease,
+                    background 0.3s ease;
                 background: rgba(255, 255, 255, 0.05);
             }
 
@@ -165,7 +168,15 @@ export default class UploadController extends HTMLElement {
                 margin-top: 24px; overflow: hidden;
             }
 
-            #progress-bar { width: 0%; height: 100%; background: white; transition: width 0.1s linear; }
+            #progress-bar {
+                width: 100%;
+                height: 100%;
+                background: white;
+                transform: scale3d(0, 1, 1);
+                transform-origin: left center;
+                transition: transform 0.1s linear;
+                will-change: transform;
+            }
 
             #upload-overlay.uploading .drop-box { border-color: transparent; background: transparent; }
             #upload-overlay.uploading .icon, #upload-overlay.uploading p { display: none; }

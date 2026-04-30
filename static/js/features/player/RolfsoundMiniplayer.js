@@ -119,7 +119,7 @@ class RolfsoundMiniplayer extends HTMLElement {
           z-index: 994;
           pointer-events: auto;
           cursor: none;
-          will-change: transform, opacity, width, height;
+          will-change: transform, opacity;
         }
 
         :host([hidden]) { display: none !important; }
@@ -296,6 +296,7 @@ class RolfsoundMiniplayer extends HTMLElement {
           width: 100%;
           transform: scaleX(0);
           transform-origin: left center;
+          will-change: transform;
           background:
             linear-gradient(
               90deg,

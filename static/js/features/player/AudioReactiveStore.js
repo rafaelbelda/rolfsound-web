@@ -7,6 +7,8 @@ import channel from '/static/js/channel/RolfsoundChannel.js';
 
 const STALE_AFTER_MS = 900;
 const FRAME_MS = 16.67;
+const PUBLISH_MIN_MS = 125;
+const PUBLISH_EPSILON = 0.015;
 
 class AudioReactiveStore {
   constructor() {
@@ -30,11 +32,18 @@ class AudioReactiveStore {
     this._lastInputTs = 0;
     this._lastSampleTs = 0;
     this._lastComputedAt = 0;
+    this._lastPublishAt = 0;
+    this._publishedState = {
+      level: -1,
+      peak: -1,
+      energy: -1,
+      punch: -1,
+    };
     this._unsubs = [
       channel.on('telemetry.audio', (data) => this._handleAudio(data)),
       channel.on('audio_monitor', (data) => this._handleAudio(data)),
     ];
-    this._publish();
+    this._publish(true);
   }
 
   getEnvelope(now = performance.now()) {
@@ -64,7 +73,7 @@ class AudioReactiveStore {
     this._state.rawPeak = stale ? 0 : this._target.rawPeak;
     this._state.stale = stale && this._state.energy < 0.01 && this._state.peak < 0.01;
 
-    this._publish();
+    this._publish(false, now);
     this._lastComputedAt = now;
     return this._state;
   }
@@ -82,7 +91,7 @@ class AudioReactiveStore {
     this._state.rawPeak = 0;
     this._state.stale = true;
     this._lastComputedAt = 0;
-    this._publish();
+    this._publish(true);
   }
 
   destroy() {
@@ -102,12 +111,27 @@ class AudioReactiveStore {
     this._lastInputTs = performance.now();
   }
 
-  _publish() {
+  _publish(force = false, now = performance.now()) {
+    if (!force && now - this._lastPublishAt < PUBLISH_MIN_MS) return;
+
+    const next = {
+      level: this._state.level,
+      peak: this._state.peak,
+      energy: this._state.energy,
+      punch: this._state.punch,
+    };
+    const changed = force || Object.keys(next).some((key) => {
+      return Math.abs(next[key] - this._publishedState[key]) >= PUBLISH_EPSILON;
+    });
+    if (!changed) return;
+
     const root = document.documentElement;
-    root.style.setProperty('--rs-audio-level', this._state.level.toFixed(4));
-    root.style.setProperty('--rs-audio-peak', this._state.peak.toFixed(4));
-    root.style.setProperty('--rs-audio-energy', this._state.energy.toFixed(4));
-    root.style.setProperty('--rs-audio-punch', this._state.punch.toFixed(4));
+    root.style.setProperty('--rs-audio-level', next.level.toFixed(3));
+    root.style.setProperty('--rs-audio-peak', next.peak.toFixed(3));
+    root.style.setProperty('--rs-audio-energy', next.energy.toFixed(3));
+    root.style.setProperty('--rs-audio-punch', next.punch.toFixed(3));
+    this._publishedState = next;
+    this._lastPublishAt = now;
   }
 
   static _num(value) {

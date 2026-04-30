@@ -52,8 +52,8 @@ export default class MiniBirthAnimator {
     // Desativa a transição do CSS :host para usar apenas WAAPI
     miniEl.style.transition = 'none';
 
-    // Força reflow pra garantir que o estado inicial seja pintado
-    miniEl.getBoundingClientRect();
+    // Dá um frame para o browser pintar o estado inicial sem leitura forçada.
+    await new Promise(resolve => requestAnimationFrame(resolve));
 
     // 3. Slide-up spring com fade-in
     const duration = reduced ? 1 : BIRTH_DURATION;

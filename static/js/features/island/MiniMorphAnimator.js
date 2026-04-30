@@ -5,7 +5,7 @@
 // fullToMini(miniEl)  — full player vira mini pill
 //
 // Não usa mitose — é um FLIP direto: o player container se reposiciona e
-// redimensiona de um estado para o outro via WAAPI.
+// redimensiona visualmente de um estado para o outro via transform.
 
 import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
 
@@ -24,6 +24,14 @@ const MINI_BOTTOM = 30;
 // Duração da transição (ms)
 const MORPH_DURATION = 480;
 const EASE_SPRING = 'cubic-bezier(0.34, 1.56, 0.64, 1)'; // similar ao --ease-spring
+
+function flipTransform(fromRect, toRect) {
+  const sx = fromRect.width / toRect.width;
+  const sy = fromRect.height / toRect.height;
+  const dx = fromRect.left - toRect.left;
+  const dy = fromRect.top - toRect.top;
+  return `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})`;
+}
 
 export default class MiniMorphAnimator {
   constructor(manager) {
@@ -70,11 +78,13 @@ export default class MiniMorphAnimator {
       border-radius: var(--radius-dynamic-island);
       border: none;
       box-shadow: none;
-      will-change: transform, width, height;
-      left: ${miniRect.left}px;
-      top: ${miniRect.top}px;
-      width: ${miniRect.width}px;
-      height: ${miniRect.height}px;
+      will-change: transform, opacity;
+      transform-origin: top left;
+      left: ${fullRect.left}px;
+      top: ${fullRect.top}px;
+      width: ${fullRect.width}px;
+      height: ${fullRect.height}px;
+      transform: ${flipTransform(miniRect, fullRect)};
     `;
 
     // Esconde conteúdo interno durante a animação de morph
@@ -98,17 +108,11 @@ export default class MiniMorphAnimator {
 
     const anim = container.animate([
       {
-        left:         `${miniRect.left}px`,
-        top:          `${miniRect.top}px`,
-        width:        `${miniRect.width}px`,
-        height:       `${miniRect.height}px`,
+        transform:    flipTransform(miniRect, fullRect),
         borderRadius: 'var(--radius-dynamic-island)',
       },
       {
-        left:         `${fullRect.left}px`,
-        top:          `${fullRect.top}px`,
-        width:        `${fullRect.width}px`,
-        height:       `${fullRect.height}px`,
+        transform:    'translate3d(0, 0, 0) scale(1, 1)',
         borderRadius: 'var(--radius-dynamic-island)',
         easing:       EASE_SPRING,
       }
@@ -132,7 +136,6 @@ export default class MiniMorphAnimator {
     }
 
     // Commit estilos finais e finaliza
-    try { anim.commitStyles(); } catch {}
     anim.cancel();
 
     // Remove overrides de posicionamento — deixa o player settle no seu próprio estilo
@@ -140,6 +143,9 @@ export default class MiniMorphAnimator {
     container.style.top    = `${fullRect.top}px`;
     container.style.width  = `${fullRect.width}px`;
     container.style.height = `${fullRect.height}px`;
+    container.style.transform = 'none';
+    container.style.transformOrigin = '';
+    container.style.willChange = '';
     container.style.background    = 'transparent';
     container.style.border        = 'none';
     container.style.boxShadow     = 'none';
@@ -207,6 +213,9 @@ export default class MiniMorphAnimator {
     container.style.top          = `${fullRect.top}px`;
     container.style.width        = `${fullRect.width}px`;
     container.style.height       = `${fullRect.height}px`;
+    container.style.transform    = 'none';
+    container.style.transformOrigin = 'top left';
+    container.style.willChange   = 'transform, opacity';
 
     // ── 2. Pequena espera pra o fade do conteúdo começar ─────────────────────
     await new Promise(r => setTimeout(r, 80));
@@ -223,16 +232,10 @@ export default class MiniMorphAnimator {
 
     const anim = container.animate([
       {
-        left:   `${fullRect.left}px`,
-        top:    `${fullRect.top}px`,
-        width:  `${fullRect.width}px`,
-        height: `${fullRect.height}px`,
+        transform: 'translate3d(0, 0, 0) scale(1, 1)',
       },
       {
-        left:   `${miniRect.left}px`,
-        top:    `${miniRect.top}px`,
-        width:  `${miniRect.width}px`,
-        height: `${miniRect.height}px`,
+        transform: flipTransform(miniRect, fullRect),
         easing: EASE_SPRING,
       }
     ], {

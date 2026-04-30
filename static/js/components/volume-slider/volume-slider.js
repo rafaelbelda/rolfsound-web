@@ -23,6 +23,9 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     this._dragging     = false;
     this._guardUntilMs = 0;
     this._open         = false;
+    this._trackHeight  = 100;
+    this._dragRect     = null;
+    this._lastVisualRatio = -1;
 
     // CRIAMOS O ENVIO SUAVE USANDO A SUA PRÓPRIA ABSTRAÇÃO (this.send)
     // 50ms é seguro para o hardware de áudio processar sem engarrafar.
@@ -77,9 +80,17 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
   }
 
   _syncVisual() {
-    const pct = this._volume * 100;
-    if (this._fill)  this._fill.style.height  = `${pct}%`;
-    if (this._thumb) this._thumb.style.bottom  = `${pct}%`;
+    const ratio = Math.max(0, Math.min(1, this._volume));
+    if (ratio !== this._lastVisualRatio) {
+      if (this._fill) {
+        this._fill.style.transform = `scale3d(1, ${ratio}, 1)`;
+      }
+      if (this._thumb) {
+        const y = -this._trackHeight * ratio;
+        this._thumb.style.transform = `translate3d(-50%, ${y}px, 0) translateY(50%)`;
+      }
+      this._lastVisualRatio = ratio;
+    }
     this._updateIcon();
   }
 
@@ -95,6 +106,8 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
     e.preventDefault();
     this._dragging = true;
     this._track.setPointerCapture(e.pointerId);
+    this._dragRect = this._track.getBoundingClientRect();
+    this._trackHeight = this._dragRect.height || this._trackHeight;
     this._applyPointer(e);
 
     const onMove = (ev) => { 
@@ -110,6 +123,7 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
       this._track.removeEventListener('pointerup',   onUp);
       
       this._applyPointer(ev);
+      this._dragRect = null;
       
       // O toque final envia SEM throttle para cravar o número exato onde o dedo parou
       this.send('intent.volume.set', { value: this._volume });
@@ -121,7 +135,7 @@ class RolfsoundVolumeSlider extends RolfsoundControl {
   }
 
   _applyPointer(e) {
-    const rect   = this._track.getBoundingClientRect();
+    const rect   = this._dragRect || this._track.getBoundingClientRect();
     const relY   = e.clientY - rect.top;
     const pct    = 1 - Math.max(0, Math.min(1, relY / rect.height));
     this._volume = Math.round(pct * 100) / 100;

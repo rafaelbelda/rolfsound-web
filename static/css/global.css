@@ -237,8 +237,7 @@ html, body {
   
   /* Curva de animação luxuosa */
   transition: opacity 0.6s var(--ease-standard),
-              transform 0.6s var(--ease-standard),
-              filter 0.6s var(--ease-standard);
+              transform 0.6s var(--ease-standard);
 }
 
 /* A Tela Atual */
@@ -314,7 +313,7 @@ html, body {
 .perm-tag { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; background: var(--color-accent-success-soft); color: var(--color-accent-success); border: 1px solid var(--color-accent-success-border); }
 
 /* ── Buttons ── */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 20px; border-radius: var(--radius-lg); font-family: var(--font); font-size: var(--fs-md); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; transition: all var(--duration-base) ease; text-decoration: none; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 20px; border-radius: var(--radius-lg); font-family: var(--font); font-size: var(--fs-md); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; border: 1px solid transparent; transition: color var(--duration-base) ease, background-color var(--duration-base) ease, border-color var(--duration-base) ease, opacity var(--duration-base) ease, transform var(--duration-base) ease; text-decoration: none; }
 .btn:disabled { opacity: 0.4; pointer-events: none; }
 .btn-primary { background: var(--color-surface-inverse); color: var(--color-text-inverse); }
 .btn-primary:hover { background: var(--color-surface-inverse-hover); }
@@ -350,8 +349,7 @@ html, body {
   -webkit-backdrop-filter: blur(var(--blur-overlay));
   box-shadow: var(--shadow-overlay);
   overflow: hidden;
-  transition: width 0.28s var(--ease-snappy),
-              border-radius 0.28s var(--ease-snappy),
+  transition: border-radius 0.28s var(--ease-snappy),
               opacity 0.14s ease,
               transform 0.2s var(--ease-snappy);
   z-index: 10001;
@@ -498,9 +496,7 @@ html, body {
   -webkit-backdrop-filter: blur(0);
   transition:
     opacity var(--rs-overlay-backdrop-duration, 320ms) var(--ease-standard),
-    background var(--rs-overlay-backdrop-duration, 320ms) var(--ease-standard),
-    backdrop-filter var(--rs-overlay-backdrop-duration, 320ms) var(--ease-standard),
-    -webkit-backdrop-filter var(--rs-overlay-backdrop-duration, 320ms) var(--ease-standard);
+    background var(--rs-overlay-backdrop-duration, 320ms) var(--ease-standard);
 }
 
 .rs-overlay-backdrop.is-active {

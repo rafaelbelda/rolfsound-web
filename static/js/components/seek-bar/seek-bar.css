@@ -71,9 +71,10 @@
     );
   border-radius: 4px;
   box-shadow: 0 0 14px var(--rs-theme-glow, transparent);
-  transform: scaleX(var(--seek-ratio, 0));
+  transform: scale3d(0, 1, 1);
   transform-origin: left center;
   transition: transform 0.1s linear;
+  will-change: transform;
 }
 
 /* Thumb estilo iOS/SwiftUI */
@@ -88,10 +89,11 @@
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
   --seek-thumb-scale: 0;
   transform:
-    translate3d(calc(var(--seek-track-width, 0px) * var(--seek-ratio, 0)), -50%, 0)
+    translate3d(0, -50%, 0)
     translateX(-50%)
     scale(var(--seek-thumb-scale));
   transition: transform 0.1s linear;
+  will-change: transform;
   pointer-events: none;
 }
 

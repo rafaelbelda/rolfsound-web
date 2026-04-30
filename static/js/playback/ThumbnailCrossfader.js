@@ -66,8 +66,11 @@ export default class ThumbnailCrossfader {
 
         incoming.dataset.src = src;
         container.appendChild(incoming);
-        incoming.getBoundingClientRect(); // force reflow for transition
-        incoming.style.opacity = '1';
+        requestAnimationFrame(() => {
+          if (incoming.parentNode === container && this._currentEl === incoming) {
+            incoming.style.opacity = '1';
+          }
+        });
 
         const prev = this._currentEl;
         this._currentEl = incoming;
