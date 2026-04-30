@@ -60,6 +60,7 @@ from typing import Any
 import httpx
 
 from utils.config import get as cfg
+from utils.subprocess_text import decode_subprocess_text, utf8_subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +332,7 @@ async def _search_ytdlp(query: str, max_results: int) -> list[dict]:
             *_ytdlp_search_cmd(query, max_results),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=utf8_subprocess_env(),
         )
 
         async def _read():
@@ -338,7 +340,7 @@ async def _search_ytdlp(query: str, max_results: int) -> list[dict]:
                 raw = await proc.stdout.readline()
                 if not raw:
                     break
-                line = raw.decode(errors="replace").strip()
+                line = decode_subprocess_text(raw).strip()
                 if line:
                     track = _parse_ytdlp_line(line)
                     if track:

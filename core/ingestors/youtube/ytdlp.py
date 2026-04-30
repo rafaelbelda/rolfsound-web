@@ -33,6 +33,8 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from utils.subprocess_text import decode_subprocess_text, utf8_subprocess_env
+
 logger = logging.getLogger(__name__)
 
 _download_lock = threading.Lock()
@@ -78,8 +80,13 @@ def get_metadata(track_id: str) -> dict | None:
     url = f"https://www.youtube.com/watch?v={track_id}"
     cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-call-home", url]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        data   = json.loads(result.stdout.strip())
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=20,
+            env=utf8_subprocess_env(),
+        )
+        data = json.loads(decode_subprocess_text(result.stdout).strip())
         return {
             "id":             data.get("id", track_id),
             "title":          data.get("title", "Unknown"),
@@ -122,9 +129,7 @@ def _run_download_command(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            env=utf8_subprocess_env(),
         )
     except FileNotFoundError:
         logger.error("yt-dlp executable not found while downloading %s", track_id)
@@ -132,7 +137,7 @@ def _run_download_command(
 
     if process.stdout:
         for raw_line in process.stdout:
-            line = raw_line.strip()
+            line = decode_subprocess_text(raw_line).strip()
             if line:
                 output_lines.append(line)
             if "[download]" in line and "%" in line:
@@ -326,7 +331,7 @@ def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -
             "--output", tmp,
             f"https://www.youtube.com/watch?v={track_id}",
         ]
-        subprocess.run(cmd, capture_output=True, timeout=20)
+        subprocess.run(cmd, capture_output=True, timeout=20, env=utf8_subprocess_env())
         candidate = thumb_path / f"{track_id}.thumb.jpg"
         if candidate.exists():
             candidate.rename(dest)
