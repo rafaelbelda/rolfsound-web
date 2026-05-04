@@ -1,79 +1,70 @@
 // static/js/components/seek-bar/seek-bar.js
-import RolfsoundControl           from '../../core/RolfsoundControl.js';
+import RolfsoundControl from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
-// Caminho corrigido para subir dois níveis e entrar em channel
-import channel                    from '../../channel/RolfsoundChannel.js'; 
 
-const CSS_URL = '/static/js/components/seek-bar/seek-bar.css';
+const CSS_URL = '/static/js/components/seek-bar/seek-bar.css?v=player-knob-fix-20260501';
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const throttle = (func, limit) => {
-  let inThrottle;
+  let inThrottle = false;
   return function(...args) {
-    if (!inThrottle) {
-      func.apply(this, args);
-      inThrottle = true;
-      setTimeout(() => inThrottle = false, limit);
-    }
-  }
+    if (inThrottle) return;
+    func.apply(this, args);
+    inThrottle = true;
+    setTimeout(() => { inThrottle = false; }, limit);
+  };
 };
 
 class RolfsoundSeekBar extends RolfsoundControl {
   constructor() {
     super();
-    this._pos          = 0;
-    this._duration     = 0;
-    this._anchorMs     = 0;
+    this._pos = 0;
+    this._duration = 0;
+    this._anchorMs = 0;
     this._guardUntilMs = 0;
-    this._playing      = false;
-    this._rafId        = null;
-    this._dragging     = false;
-    this._resizeObserver = null;
-    this._lastCurrentText = '';
-    this._lastTotalText = '';
-    this._trackWidth = 0;
+    this._playing = false;
+    this._rafId = null;
+    this._dragging = false;
     this._dragRect = null;
     this._lastRatio = -1;
+    this._lastTooltipText = '';
 
-    // Scrubbing real-time: 80ms é o equilíbrio perfeito para o Raspberry Pi
-    this._sendThrottledSeek = throttle((pos) => {
-      this.send('intent.seek', { position: pos });
+    this._sendThrottledSeek = throttle((position) => {
+      this.send('intent.seek', { position });
     }, 80);
   }
 
   render() {
     this.shadowRoot.innerHTML = `
-      <div class="time-row">
-        <span class="time-current">0:00</span>
-        <span class="time-sep">/</span>
-        <span class="time-total">0:00</span>
-      </div>
-      <div class="bar" data-cursor="range" role="slider" aria-label="Seek">
-        <div class="track-outer">
-          <div class="track">
-            <div class="fill"></div>
-          </div>
-          <div class="thumb"></div>
+      <div class="bar" data-cursor="range" role="slider" tabindex="0" aria-label="Seek"
+        aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <div class="hairline"></div>
+        <div class="fill"></div>
+        <div class="magnify">
+          <div class="magnify-track"></div>
+          <div class="magnify-fill"></div>
         </div>
       </div>
+      <div class="scrub-tooltip" role="tooltip" hidden>0:00</div>
     `;
 
-    this._elCurrent = this.shadowRoot.querySelector('.time-current');
-    this._elTotal   = this.shadowRoot.querySelector('.time-total');
-    this._elFill    = this.shadowRoot.querySelector('.fill');
-    this._elThumb   = this.shadowRoot.querySelector('.thumb');
-    this._elBar     = this.shadowRoot.querySelector('.bar');
-    this._elTrackOuter = this.shadowRoot.querySelector('.track-outer');
+    this._elBar = this.shadowRoot.querySelector('.bar');
+    this._elFill = this.shadowRoot.querySelector('.fill');
+    this._elMagnifyFill = this.shadowRoot.querySelector('.magnify-fill');
+    this._tooltip = this.shadowRoot.querySelector('.scrub-tooltip');
 
+    this._elBar.addEventListener('pointerenter', () => this._onPointerEnter());
+    this._elBar.addEventListener('pointerleave', () => this._onPointerLeave());
+    this._elBar.addEventListener('pointermove', e => this._onPointerMove(e));
     this._elBar.addEventListener('pointerdown', e => this._onPointerDown(e));
-    if ('ResizeObserver' in window) {
-      this._resizeObserver = new ResizeObserver(() => this._syncTrackWidth());
-      this._resizeObserver.observe(this._elTrackOuter);
-    }
-    this._syncTrackWidth();
+    this._elBar.addEventListener('keydown', e => this._onKeyDown(e));
 
     loadCss(CSS_URL).then(sheet => {
       this.shadowRoot.adoptedStyleSheets = [sheet];
     });
+
+    this._renderProgress(this._pos, this._duration);
   }
 
   subscribe() {
@@ -84,15 +75,13 @@ class RolfsoundSeekBar extends RolfsoundControl {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._stopRaf();
-    this._resizeObserver?.disconnect();
-    this._resizeObserver = null;
   }
 
   _applySnapshot(s) {
     if (Date.now() < this._guardUntilMs) return;
-    this._pos      = s.position     ?? 0;
-    this._duration = s.duration     ?? 0;
-    this._playing  = s.state === 'playing';
+    this._pos = s.position ?? 0;
+    this._duration = s.duration ?? 0;
+    this._playing = s.state === 'playing';
     this._anchorMs = this._playing ? (s.position_updated_at ?? Date.now()) : 0;
     this._renderProgress(this._pos, this._duration);
     this._playing ? this._startRaf() : this._stopRaf();
@@ -100,9 +89,10 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _applyProgress(p) {
     if (Date.now() < this._guardUntilMs) return;
-    this._pos      = p.position ?? this._pos;
+    this._pos = p.position ?? this._pos;
     this._duration = p.duration ?? this._duration;
     this._anchorMs = p.position_updated_at ?? Date.now();
+    if (!this._playing && !this._dragging) this._renderProgress(this._pos, this._duration);
   }
 
   _deadReckoned() {
@@ -126,80 +116,104 @@ class RolfsoundSeekBar extends RolfsoundControl {
   }
 
   _renderProgress(pos, duration) {
-    const pct = duration > 0 ? Math.max(0, Math.min(pos / duration, 1)) : 0;
-    const ratio = Number(pct.toFixed(5));
-    if (ratio !== this._lastRatio) {
-      const x = this._trackWidth * ratio;
-      if (this._elFill) {
-        this._elFill.style.transform = `scale3d(${ratio}, 1, 1)`;
-      }
-      if (this._elThumb) {
-        this._elThumb.style.transform = `translate3d(${x}px, -50%, 0) translateX(-50%) scale(var(--seek-thumb-scale, 0))`;
-      }
-      this._lastRatio = ratio;
+    const ratio = duration > 0 ? clamp(pos / duration, 0, 1) : 0;
+    const stableRatio = Number(ratio.toFixed(5));
+    if (stableRatio !== this._lastRatio) {
+      this._elFill.style.transform = `scale3d(${stableRatio}, 1, 1)`;
+      this._elMagnifyFill.style.transform = `scale3d(${stableRatio}, 1, 1)`;
+      this._lastRatio = stableRatio;
     }
-    
-    const currentText = this._fmt(pos);
-    const totalText = this._fmt(duration);
-    if (this._elCurrent && currentText !== this._lastCurrentText) {
-      this._elCurrent.textContent = currentText;
-      this._lastCurrentText = currentText;
-    }
-    if (this._elTotal && totalText !== this._lastTotalText) {
-      this._elTotal.textContent = totalText;
-      this._lastTotalText = totalText;
-    }
+
+    this._elBar.setAttribute('aria-valuemax', String(Math.floor(duration || 0)));
+    this._elBar.setAttribute('aria-valuenow', String(Math.floor(pos || 0)));
+    this._elBar.setAttribute('aria-valuetext', `${this._fmt(pos)} of ${this._fmt(duration)}`);
   }
 
-  _syncTrackWidth() {
-    if (!this._elTrackOuter) return;
-    this._trackWidth = this._elTrackOuter.clientWidth || 0;
-    this._lastRatio = -1;
-    this._renderProgress(this._dragging ? this._pos : this._deadReckoned(), this._duration);
+  _onPointerEnter() {
+    this._elBar.classList.add('hover');
   }
 
-  _fmt(s) {
-    const t = Math.floor(s || 0);
-    return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  _onPointerLeave() {
+    if (this._dragging) return;
+    this._elBar.classList.remove('hover');
+    this._hideTooltip();
+  }
+
+  _onPointerMove(e) {
+    this._updateCursor(e);
   }
 
   _onPointerDown(e) {
     if (!this._duration) return;
     e.preventDefault();
     this._dragging = true;
-    this._elBar.classList.add('dragging');
+    this._elBar.classList.add('dragging', 'hover');
     this._elBar.setPointerCapture(e.pointerId);
     this._dragRect = this._elBar.getBoundingClientRect();
 
-    if (this._elFill) this._elFill.style.transition = 'none';
-    if (this._elThumb) this._elThumb.style.transition = 'none';
+    this._elFill.style.transition = 'none';
+    this._elMagnifyFill.style.transition = 'none';
 
     this._applyDrag(e);
 
-    const onMove = (ev) => { if (this._dragging) this._applyDrag(ev); };
-    const onUp = (ev) => {
+    const onMove = ev => {
+      if (!this._dragging) return;
+      this._applyDrag(ev);
+    };
+    const onRelease = ev => {
+      if (!this._dragging) return;
+      const rect = this._dragRect || this._elBar.getBoundingClientRect();
       this._dragging = false;
       this._elBar.classList.remove('dragging');
       this._elBar.removeEventListener('pointermove', onMove);
-      this._elBar.removeEventListener('pointerup',   onUp);
+      this._elBar.removeEventListener('pointerup', onRelease);
+      this._elBar.removeEventListener('pointercancel', onRelease);
+      try { this._elBar.releasePointerCapture(ev.pointerId); } catch {}
 
+      this._updateCursor(ev);
       const position = this._pctFromEvent(ev) * this._duration;
-      this._seekTo(position, false); // Envio final exato
+      this._seekTo(position, false);
       this._dragRect = null;
 
+      const inside = (
+        ev.clientX >= rect.left && ev.clientX <= rect.right &&
+        ev.clientY >= rect.top && ev.clientY <= rect.bottom
+      );
+      if (!inside) {
+        this._elBar.classList.remove('hover');
+        this._hideTooltip();
+      }
+
       requestAnimationFrame(() => {
-        if (this._elFill) this._elFill.style.transition = '';
-        if (this._elThumb) this._elThumb.style.transition = '';
+        this._elFill.style.transition = '';
+        this._elMagnifyFill.style.transition = '';
       });
     };
 
     this._elBar.addEventListener('pointermove', onMove);
-    this._elBar.addEventListener('pointerup',   onUp);
+    this._elBar.addEventListener('pointerup', onRelease);
+    this._elBar.addEventListener('pointercancel', onRelease);
+  }
+
+  _onKeyDown(e) {
+    if (!this._duration) return;
+    let next = null;
+    if (e.key === 'ArrowLeft') next = this._deadReckoned() - 5;
+    if (e.key === 'ArrowRight') next = this._deadReckoned() + 5;
+    if (e.key === 'PageDown') next = this._deadReckoned() - 30;
+    if (e.key === 'PageUp') next = this._deadReckoned() + 30;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = this._duration;
+    if (next == null) return;
+
+    e.preventDefault();
+    this._seekTo(clamp(next, 0, this._duration), false);
+    this._renderProgress(this._pos, this._duration);
   }
 
   _applyDrag(e) {
-    const pct = this._pctFromEvent(e);
-    const pos = pct * this._duration;
+    this._updateCursor(e);
+    const pos = this._pctFromEvent(e) * this._duration;
     this._pos = pos;
     this._renderProgress(pos, this._duration);
     this._seekTo(pos, true);
@@ -207,16 +221,47 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _pctFromEvent(e) {
     const rect = this._dragRect || this._elBar.getBoundingClientRect();
-    return Math.max(0, Math.min((e.clientX - rect.left) / rect.width, 1));
+    if (!rect.width) return 0;
+    return clamp((e.clientX - rect.left) / rect.width, 0, 1);
+  }
+
+  _updateCursor(e) {
+    const rect = this._dragRect || this._elBar.getBoundingClientRect();
+    if (!rect.width) return;
+    const x = clamp(e.clientX - rect.left, 0, rect.width);
+    const pct = x / rect.width;
+    const tooltipX = clamp(x, 24, Math.max(24, rect.width - 24));
+
+    this._elBar.style.setProperty('--cursor-x', `${x}px`);
+    this._tooltip.style.setProperty('--tooltip-x', `${tooltipX}px`);
+
+    if (this._duration > 0) {
+      const text = this._fmt(pct * this._duration);
+      if (text !== this._lastTooltipText) {
+        this._tooltip.textContent = text;
+        this._lastTooltipText = text;
+      }
+      this._tooltip.hidden = false;
+    }
+  }
+
+  _hideTooltip() {
+    this._tooltip.hidden = true;
+    this._lastTooltipText = '';
   }
 
   _seekTo(position, isThrottled) {
-    this._pos          = position;
-    this._anchorMs     = this._playing ? Date.now() : 0;
-    this._guardUntilMs = Date.now() + 1000; 
-    
-    if (isThrottled) this._sendThrottledSeek(position);
-    else this.send('intent.seek', { position });
+    this._pos = clamp(position, 0, this._duration || 0);
+    this._anchorMs = this._playing ? Date.now() : 0;
+    this._guardUntilMs = Date.now() + 1000;
+
+    if (isThrottled) this._sendThrottledSeek(this._pos);
+    else this.send('intent.seek', { position: this._pos });
+  }
+
+  _fmt(seconds) {
+    const total = Math.floor(seconds || 0);
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
   }
 }
 

@@ -58,10 +58,16 @@ async def lifespan(app: FastAPI):
         enqueue as enqueue_identification,
         start_worker_loop as start_identification_workers,
     )
+    from api.services.audio_analysis.jobs import (
+        enqueue as enqueue_audio_analysis,
+        start_worker_loop as start_audio_analysis_workers,
+    )
     if scanned_asset_ids:
         for asset_id in scanned_asset_ids:
             enqueue_identification(asset_id)
+            enqueue_audio_analysis(asset_id)
     await start_identification_workers()
+    await start_audio_analysis_workers()
 
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
@@ -71,7 +77,8 @@ async def lifespan(app: FastAPI):
 
     def _on_download_complete(source_ref: str, ingest_result: dict, meta: dict):
         enqueue_identification(ingest_result["asset_id"])
-        logger.info(f"Indexer scheduled for YouTube source {source_ref}")
+        enqueue_audio_analysis(ingest_result["asset_id"])
+        logger.info(f"Indexer/audio analysis scheduled for YouTube source {source_ref}")
 
     manager.on_complete(_on_download_complete)
 
@@ -126,6 +133,7 @@ async def lifespan(app: FastAPI):
 
     # ── Restore persisted queue state ─────────────────────────────────
     await _restore_queue_state()
+    await _restore_remix_flags()
 
     # ── Start scheduled queue daemon ──────────────────────────────────
     from core.library.scheduled_queue import start_scheduler as start_sq_scheduler
@@ -140,9 +148,11 @@ async def lifespan(app: FastAPI):
     await close_search_client()
     # Save queue state before closing the core connection.
     await _save_queue_state()
-    # Stop the identification worker loop so pending jobs survive to the next boot.
+    # Stop the background worker loops so pending jobs survive to the next boot.
     from api.services.identification.jobs import stop_worker_loop as stop_identification_workers
+    from api.services.audio_analysis.jobs import stop_worker_loop as stop_audio_analysis_workers
     await stop_identification_workers()
+    await stop_audio_analysis_workers()
     # Before: await core_client.close_client()
     await http_client.close_client()
     logger.info("rolfsound-control stopped")
@@ -176,6 +186,16 @@ async def _restore_queue_state() -> None:
         await core.queue_repeat(repeat_mode)
     if shuffle:
         await core.queue_shuffle(True)
+
+
+async def _restore_remix_flags() -> None:
+    """Push persisted remix preferences to core on startup."""
+    enabled = cfg.get("remix_reset_on_track_change", True)
+    try:
+        await core.remix_reset_flag(enabled)
+        logger.info(f"Restored remix_reset_on_track_change={enabled}")
+    except Exception as e:
+        logger.warning(f"Could not restore remix flags: {e}")
 
 
 async def _save_queue_state() -> None:
@@ -242,6 +262,7 @@ def _register_event_handlers(source, loop=None):
             already_registered = db.get_asset_by_path(conn, filepath)
             if not existing and not already_registered and os.path.exists(filepath):
                 from api.services.identification.jobs import enqueue as enqueue_identification
+                from api.services.audio_analysis.jobs import enqueue as enqueue_audio_analysis
                 from api.services.pipeline import LibraryManager
 
                 manager = LibraryManager(
@@ -258,6 +279,7 @@ def _register_event_handlers(source, loop=None):
                 }, schedule_index=False)
                 if ingest_result:
                     enqueue_identification(ingest_result["asset_id"])
+                    enqueue_audio_analysis(ingest_result["asset_id"])
                     logger.info(f"Auto-ingested recording into library: {ingest_result['track_id']}")
         except Exception as e:
             logger.error(f"on_track_finished ingest error: {e}")

@@ -19,6 +19,11 @@ class SeekRequest(BaseModel):
     position: float
 
 
+class RemixRequest(BaseModel):
+    pitch_semitones: float | None = None
+    tempo_ratio: float | None = None
+
+
 @router.post("/play")
 async def play(req: PlayRequest = None):
     filepath = req.filepath if req else ""
@@ -86,6 +91,25 @@ async def skip():
 @router.post("/seek")
 async def seek(req: SeekRequest):
     result = await core.seek(req.position)
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/remix")
+async def remix_set(req: RemixRequest):
+    result = await core.remix_set(
+        pitch_semitones=req.pitch_semitones,
+        tempo_ratio=req.tempo_ratio,
+    )
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/remix/reset")
+async def remix_reset():
+    result = await core.remix_reset()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

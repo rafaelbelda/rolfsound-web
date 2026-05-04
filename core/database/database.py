@@ -72,7 +72,9 @@ def _create_tables(conn):
             discogs_id          TEXT,
             label               TEXT,
             year                INTEGER,
-            bpm                 INTEGER,
+            bpm                 REAL,
+            musical_key         TEXT,
+            camelot_key         TEXT,
             fingerprint         TEXT,
             preferred_asset_id  TEXT,
             primary_artist_id   TEXT,
@@ -195,7 +197,9 @@ def _create_tables(conn):
             file_path       TEXT NOT NULL UNIQUE,
             is_primary      INTEGER NOT NULL DEFAULT 0,
             duration        REAL,
-            bpm             INTEGER,
+            bpm             REAL,
+            musical_key     TEXT,
+            camelot_key     TEXT,
             fingerprint     TEXT,
             analysis_status TEXT NOT NULL DEFAULT 'pending',
             date_added      INTEGER
@@ -318,6 +322,16 @@ def _create_tables(conn):
             updated_at    INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS audio_analysis_jobs (
+            asset_id      TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
+            status        TEXT NOT NULL DEFAULT 'pending',
+            attempts      INTEGER NOT NULL DEFAULT 0,
+            last_error    TEXT,
+            next_retry_at INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS asset_identification_results (
             asset_id      TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
             status        TEXT,
@@ -366,6 +380,8 @@ def _create_tables(conn):
             ON external_lookup_cache(fetched_at);
         CREATE INDEX IF NOT EXISTS idx_identification_jobs_status
             ON identification_jobs(status, next_retry_at);
+        CREATE INDEX IF NOT EXISTS idx_audio_analysis_jobs_status
+            ON audio_analysis_jobs(status, next_retry_at);
         CREATE INDEX IF NOT EXISTS idx_track_identity_overrides_locked
             ON track_identity_overrides(locked, updated_at);
     """)
@@ -440,12 +456,12 @@ def add_track(conn, track: dict) -> str:
         INSERT INTO tracks
             (id, title, artist, display_artist, duration, thumbnail, date_added, published_date,
              streams, status, mb_recording_id, isrc, spotify_id, discogs_id, label, year, bpm,
-             fingerprint, preferred_asset_id, primary_artist_id, primary_album_id,
+             musical_key, camelot_key, fingerprint, preferred_asset_id, primary_artist_id, primary_album_id,
              canonical_title_key, primary_artist_key, recording_key)
         VALUES
             (:id, :title, :artist, :display_artist, :duration, :thumbnail, :date_added, :published_date,
              :streams, :status, :mb_recording_id, :isrc, :spotify_id, :discogs_id, :label, :year, :bpm,
-             :fingerprint, :preferred_asset_id, :primary_artist_id, :primary_album_id,
+             :musical_key, :camelot_key, :fingerprint, :preferred_asset_id, :primary_artist_id, :primary_album_id,
              :canonical_title_key, :primary_artist_key, :recording_key)
     """, {
         "id": track_id,
@@ -465,6 +481,8 @@ def add_track(conn, track: dict) -> str:
         "label": track.get("label"),
         "year": track.get("year"),
         "bpm": track.get("bpm"),
+        "musical_key": track.get("musical_key"),
+        "camelot_key": track.get("camelot_key"),
         "fingerprint": track.get("fingerprint"),
         "preferred_asset_id": track.get("preferred_asset_id"),
         "primary_artist_id": track.get("primary_artist_id"),
@@ -487,7 +505,9 @@ def add_asset(
     asset_id: str | None = None,
     is_primary: bool | None = None,
     duration: float | None = None,
-    bpm: int | None = None,
+    bpm: float | None = None,
+    musical_key: str | None = None,
+    camelot_key: str | None = None,
     fingerprint: str | None = None,
     analysis_status: str = "pending",
 ) -> str:
@@ -508,8 +528,8 @@ def add_asset(
     conn.execute("""
         INSERT INTO assets
             (id, track_id, asset_type, source, source_ref, file_format, file_path,
-             is_primary, duration, bpm, fingerprint, analysis_status, date_added)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             is_primary, duration, bpm, musical_key, camelot_key, fingerprint, analysis_status, date_added)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         asset_id,
         track_id,
@@ -521,6 +541,8 @@ def add_asset(
         1 if is_primary else 0,
         duration,
         bpm,
+        musical_key,
+        camelot_key,
         fingerprint,
         analysis_status,
         int(time.time()),
@@ -1113,6 +1135,9 @@ def _attach_fast_asset(conn, track: dict) -> dict:
         track["file_path"] = fast_asset["file_path"]
         track["source"] = fast_asset["source"]
         track["source_ref"] = fast_asset["source_ref"]
+        for field in ("bpm", "musical_key", "camelot_key"):
+            if fast_asset.get(field) is not None:
+                track[field] = fast_asset.get(field)
     track["display_artist"] = track.get("display_artist") or track.get("artist") or ""
     track["artist"] = track["display_artist"]
     artists = get_track_artists(conn, track["id"])
@@ -1164,7 +1189,7 @@ def update_track_metadata(conn, track_id: str, data: dict) -> None:
     allowed = {
         "title", "artist", "display_artist", "duration", "thumbnail", "status",
         "mb_recording_id", "isrc", "spotify_id", "discogs_id", "label", "year", "bpm",
-        "fingerprint", "preferred_asset_id", "published_date", "primary_artist_id",
+        "musical_key", "camelot_key", "fingerprint", "preferred_asset_id", "published_date", "primary_artist_id",
         "primary_album_id", "canonical_title_key", "primary_artist_key", "recording_key",
     }
     incoming = dict(data)
@@ -1239,7 +1264,10 @@ def replace_track_identity_metadata(conn, track_id: str, data: dict) -> None:
 
 
 def update_asset_analysis(conn, asset_id: str, data: dict) -> None:
-    allowed = {"duration", "bpm", "fingerprint", "analysis_status", "asset_type"}
+    allowed = {
+        "duration", "bpm", "musical_key", "camelot_key",
+        "fingerprint", "analysis_status", "asset_type",
+    }
     updates = {k: v for k, v in data.items() if k in allowed and v is not None}
     if not updates:
         return
@@ -1250,6 +1278,25 @@ def update_asset_analysis(conn, asset_id: str, data: dict) -> None:
     conn.execute(f"UPDATE assets SET {fields} WHERE id = ?", values)
     if "asset_type" in updates:
         tag_asset(conn, asset_id, "asset_type", updates["asset_type"])
+
+
+def update_asset_audio_analysis(conn, asset_id: str, data: dict) -> None:
+    update_asset_analysis(conn, asset_id, {
+        "bpm": data.get("bpm"),
+        "musical_key": data.get("musical_key"),
+        "camelot_key": data.get("camelot_key"),
+    })
+
+
+def update_track_audio_analysis_from_asset(conn, asset_id: str, data: dict) -> None:
+    asset = get_asset(conn, asset_id)
+    if not asset:
+        return
+    update_track_metadata(conn, asset["track_id"], {
+        "bpm": data.get("bpm"),
+        "musical_key": data.get("musical_key"),
+        "camelot_key": data.get("camelot_key"),
+    })
 
 
 def update_asset_path(conn, asset_id: str, file_path: str) -> None:
@@ -2262,5 +2309,76 @@ def complete_identification_job(conn, asset_id: str, *, success: bool, error: st
 def get_identification_job(conn, asset_id: str) -> dict | None:
     row = conn.execute(
         "SELECT * FROM identification_jobs WHERE asset_id = ?", (asset_id,)
+    ).fetchone()
+    return _dict(row)
+
+
+# Audio analysis jobs (persistent retry queue for MIR metadata)
+
+def upsert_audio_analysis_job(conn, asset_id: str, *, status: str = "pending", next_retry_at: int = 0) -> None:
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO audio_analysis_jobs (asset_id, status, attempts, next_retry_at, created_at, updated_at) "
+        "VALUES (?, ?, 0, ?, ?, ?) "
+        "ON CONFLICT(asset_id) DO UPDATE SET "
+        "status = excluded.status, next_retry_at = excluded.next_retry_at, updated_at = excluded.updated_at",
+        (asset_id, status, next_retry_at, now, now),
+    )
+    conn.commit()
+
+
+def claim_audio_analysis_jobs(conn, limit: int = 1) -> list[dict]:
+    now = int(time.time())
+    rows = conn.execute(
+        "SELECT asset_id, status, attempts, last_error, next_retry_at FROM audio_analysis_jobs "
+        "WHERE status IN ('pending', 'retry') AND next_retry_at <= ? "
+        "ORDER BY next_retry_at ASC LIMIT ?",
+        (now, limit),
+    ).fetchall()
+    claimed = []
+    for row in rows:
+        cursor = conn.execute(
+            "UPDATE audio_analysis_jobs SET status = 'in_progress', updated_at = ? "
+            "WHERE asset_id = ? AND status IN ('pending', 'retry')",
+            (now, row["asset_id"]),
+        )
+        if cursor.rowcount:
+            claimed.append(dict(row))
+    conn.commit()
+    return claimed
+
+
+def complete_audio_analysis_job(conn, asset_id: str, *, success: bool, error: str | None = None) -> None:
+    now = int(time.time())
+    if success:
+        conn.execute(
+            "UPDATE audio_analysis_jobs SET status = 'done', last_error = NULL, updated_at = ? "
+            "WHERE asset_id = ?",
+            (now, asset_id),
+        )
+    else:
+        row = conn.execute(
+            "SELECT attempts FROM audio_analysis_jobs WHERE asset_id = ?", (asset_id,)
+        ).fetchone()
+        attempts = (int(row["attempts"]) if row else 0) + 1
+        backoff_table = [60, 300, 1800, 7200, 43200]
+        delay = backoff_table[min(attempts - 1, len(backoff_table) - 1)]
+        try:
+            from utils import config as cfg
+            max_attempts = int(cfg.get("audio_analysis_max_attempts", 5))
+        except Exception:
+            max_attempts = 5
+        new_status = "failed" if attempts >= max_attempts else "retry"
+        conn.execute(
+            "UPDATE audio_analysis_jobs SET status = ?, attempts = ?, last_error = ?, "
+            "next_retry_at = ?, updated_at = ? WHERE asset_id = ?",
+            (new_status, attempts, (error or "")[:500], now + delay, now, asset_id),
+        )
+    conn.commit()
+
+
+def get_audio_analysis_job(conn, asset_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM audio_analysis_jobs WHERE asset_id = ?", (asset_id,)
     ).fetchone()
     return _dict(row)

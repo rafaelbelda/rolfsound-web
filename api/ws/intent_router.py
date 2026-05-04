@@ -6,6 +6,7 @@ Single point of audit for all client-initiated commands.
 
 import logging
 
+from utils import config as cfg
 from utils.core import core
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,11 @@ async def _remix_set(p):
     )
 
 async def _remix_reset(p):        return await core.remix_reset()
-async def _remix_reset_flag(p):   return await core.remix_reset_flag(bool(p.get("enabled", True)))
+async def _remix_reset_flag(p):
+    enabled = bool(p.get("enabled", True))
+    result = await core.remix_reset_flag(enabled)
+    cfg.set_value("remix_reset_on_track_change", enabled)
+    return result
 
 async def _ping(p):         return {"pong": True}
 

@@ -730,7 +730,6 @@ class IdentificationSmokeTests(unittest.TestCase):
 
             captured = {}
             original_identify = indexer.identify_track
-            original_bpm = indexer.detect_bpm
 
             async def fake_identify_track(*args, **kwargs):
                 captured.update(kwargs)
@@ -747,16 +746,11 @@ class IdentificationSmokeTests(unittest.TestCase):
                     "evidence": [],
                 }
 
-            async def no_bpm(*args, **kwargs):
-                return None
-
             try:
                 indexer.identify_track = fake_identify_track
-                indexer.detect_bpm = no_bpm
                 await indexer.index_asset(asset_id, allow_identity_resolution=False)
             finally:
                 indexer.identify_track = original_identify
-                indexer.detect_bpm = original_bpm
 
             self.assertEqual(captured["youtube_id"], "WQCiGlQoLa4")
             self.assertEqual(
@@ -803,7 +797,6 @@ class IdentificationSmokeTests(unittest.TestCase):
                 conn.close()
 
             original_identify = indexer.identify_track
-            original_bpm = indexer.detect_bpm
 
             async def wrong_identify(*args, **kwargs):
                 return {
@@ -819,12 +812,8 @@ class IdentificationSmokeTests(unittest.TestCase):
                     "evidence": [{"source": "test", "title": "Wrong Song"}],
                 }
 
-            async def no_bpm(*args, **kwargs):
-                return None
-
             try:
                 indexer.identify_track = wrong_identify
-                indexer.detect_bpm = no_bpm
                 await indexer.index_asset(asset_id, allow_identity_resolution=False)
                 conn = database.get_connection()
                 try:
@@ -847,7 +836,6 @@ class IdentificationSmokeTests(unittest.TestCase):
                     conn.close()
             finally:
                 indexer.identify_track = original_identify
-                indexer.detect_bpm = original_bpm
 
         asyncio.run(run())
 

@@ -18,6 +18,43 @@
   #settings-app[data-app-state="disconnected"] .status-badge.disconnected,
   #settings-app[data-app-state="connecting"]   .status-badge.connecting,
   #settings-app[data-app-state="connected"]    .status-badge.connected { display: flex; }
+
+  /* ── Toggle switch ── */
+  .setting-row  { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .setting-info { display: flex; flex-direction: column; gap: 4px; }
+  .setting-label { font-size: var(--fs-xl, 13px); font-weight: 500; color: var(--color-text-primary); }
+  .setting-sub   { font-size: var(--fs-md, 11px); color: var(--color-text-muted); line-height: 1.5; }
+  .toggle-switch {
+    all: unset;
+    flex-shrink: 0;
+    position: relative;
+    width: 40px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 200ms ease;
+  }
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    transition: transform 200ms ease, background 200ms ease;
+  }
+  .toggle-switch[aria-checked="true"] {
+    background: rgb(var(--rs-theme-accent-rgb, 255 184 107) / 0.82);
+  }
+  .toggle-switch[aria-checked="true"]::after {
+    transform: translateX(18px);
+    background: #fff;
+  }
+  .toggle-switch:focus-visible {
+    outline: 2px solid rgb(var(--rs-theme-accent-rgb, 255 184 107) / 0.7);
+    outline-offset: 3px;
+  }
 </style>
 
 <div id="settings-app" data-app-state="disconnected">
@@ -77,6 +114,43 @@
       </div>
       <div class="notice">
         Your OAuth token is encrypted and stored locally in this machine's environment. It remains valid indefinitely until you manually revoke access via <a href="https://www.discogs.com/settings/applications" target="_blank" class="hover-target">discogs.com/settings/applications</a>.
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">Playback</div>
+      <div class="glass-card">
+        <div class="glass-header">
+          <div class="brand-group">
+            <div class="brand-logo" style="background: var(--color-surface-interactive);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="var(--color-text-primary)" stroke-width="2.5"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+            </div>
+            <div>
+              <div class="brand-label">Remix Engine</div>
+              <div class="brand-url">Pitch &amp; Tempo</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Preservar remix entre músicas</span>
+              <span class="setting-sub">Por padrão o pitch e o tempo resetam ao mudar de música. Ative para manter os ajustes.</span>
+            </div>
+            <button id="preserve-remix-toggle"
+                    class="toggle-switch hover-target"
+                    role="switch"
+                    aria-checked="false"
+                    title="Preservar remix entre músicas"
+                    onclick="toggleRemixPreserve(this)">
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -185,6 +259,32 @@
   }
 
   function setState(s) { app.dataset.appState = s; }
+
+  // ── Remix preserve toggle ─────────────────────────────────────────────────
+  function applyRemixState(s) {
+    const btn = document.getElementById('preserve-remix-toggle');
+    if (!btn || s?.reset_on_track_change === undefined) return;
+    btn.setAttribute('aria-checked', s.reset_on_track_change ? 'false' : 'true');
+  }
+
+  // Subscribe to live state updates from the WebSocket channel
+  window.rolfsoundChannel?.on('state.remix', applyRemixState);
+
+  window.toggleRemixPreserve = function(btn) {
+    const ch = window.rolfsoundChannel;
+    if (!ch) {
+      AnimationEngine.showNotification(globalIsland, { text: 'Servidor offline', duration: 3000 });
+      return;
+    }
+    const preserve = btn.getAttribute('aria-checked') !== 'true';
+    btn.setAttribute('aria-checked', preserve ? 'true' : 'false');
+    // preserve = true → reset_on_track_change = false (don't reset)
+    ch.send('intent.remix.reset_flag.set', { enabled: !preserve });
+    AnimationEngine.showNotification(globalIsland, {
+      text: preserve ? 'Remix preservado entre músicas' : 'Remix reseta ao mudar de música',
+      duration: 2400,
+    });
+  };
 
   (async function init() {
     try {

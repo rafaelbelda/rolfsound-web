@@ -41,10 +41,31 @@ Audio decoding is handled by **PyAV** (`pip install av`), which ships with ffmpe
 
 ```bash
 pip install -r requirements.txt
+python tools/setup_essentia.py
 python main.py
 ```
 
 Dashboard: **http://localhost:8766** or **http://raspberrypi.local:8766**
+
+### Audio analysis extractor
+
+`pip install -r requirements.txt` does not install Essentia itself. For local dev,
+run:
+
+```bash
+python tools/setup_essentia.py
+```
+
+This downloads the official prebuilt `essentia_streaming_extractor_music`
+binary into `./tools/essentia/` and updates local `config.json` so the app
+finds it automatically.
+
+Notes:
+
+- Desktop dev is supported through the bootstrap script on Windows and common
+  x86_64 platforms.
+- Raspberry Pi production should use the official Rolfsound image with Essentia
+  already provisioned, or a manually configured `essentia_extractor_path`.
 
 ## Project Structure
 

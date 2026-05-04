@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_asset
 from api.services.identification.jobs import enqueue as enqueue_identification, queue_stats
+from api.services.audio_analysis.jobs import enqueue as enqueue_audio_analysis, queue_stats as audio_queue_stats
 from api.services.identity_editor import (
     build_override_payload,
     find_override_merge_target,
@@ -98,6 +99,7 @@ async def scan_library():
         asset_ids = database.scan_and_reconcile(conn, music_dir, return_asset_ids=True)
         for asset_id in asset_ids:
             enqueue_identification(asset_id)
+            enqueue_audio_analysis(asset_id)
         return {"ok": True, "added": len(asset_ids), "asset_ids": asset_ids}
     finally:
         conn.close()
@@ -107,6 +109,12 @@ async def scan_library():
 async def identification_stats():
     """Counts of identification jobs by status — observability for the queue."""
     return {"queue": queue_stats()}
+
+
+@router.get("/library/audio-analysis-stats")
+async def audio_analysis_stats():
+    """Counts of BPM/key extraction jobs by status."""
+    return {"queue": audio_queue_stats()}
 
 
 # ── Identity candidates (low-confidence matches awaiting user confirmation) ──

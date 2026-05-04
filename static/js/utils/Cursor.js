@@ -108,6 +108,10 @@ const MODE_CLASSES = [
 // Prevents large card rows from pulling the cursor away from where the user is pointing.
 const SNAP_MAX_W = 200;
 const SNAP_MAX_H = 72;
+const LIVE_TRACK_MS = 720;
+const LIVE_TRACK_EXTEND_MS = 180;
+const TARGET_EXIT_PAD = 10;
+const MIN_INTERACTIVE_OPACITY = 0.08;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -159,6 +163,8 @@ export default class Cursor {
     this._rafId = null;
     this._geometryDirty = false;
     this._dotGeometry = { width: 0, height: 0, radius: '' };
+    this._trackGeometryUntil = 0;
+    this._lastRectKey = '';
 
     this.init();
   }
@@ -242,6 +248,8 @@ export default class Cursor {
     this.currentTarget = null;
     this.targetRect = null;
     this._geometryDirty = false;
+    this._trackGeometryUntil = 0;
+    this._lastRectKey = '';
     this.setCursorMode('default');
     this.dot.classList.remove('hovering');
 
@@ -333,7 +341,28 @@ export default class Cursor {
     if (!isElement(el) || !el.isConnected) return false;
     if (el.matches?.('[data-cursor="ignore"], :disabled, [disabled], [aria-disabled="true"]')) return false;
     if (el.closest?.('[inert], [aria-hidden="true"]')) return false;
+    if (this.isVisuallyUnavailable(el)) return false;
     return true;
+  }
+
+  isVisuallyUnavailable(el) {
+    let node = el;
+    while (node && isElement(node)) {
+      const style = window.getComputedStyle(node);
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.pointerEvents === 'none' ||
+        Number(style.opacity) <= MIN_INTERACTIVE_OPACITY
+      ) {
+        return true;
+      }
+
+      const root = node.getRootNode?.();
+      node = root instanceof ShadowRoot ? root.host : node.parentElement;
+    }
+
+    return false;
   }
 
   setHoverTarget(target) {
@@ -344,9 +373,11 @@ export default class Cursor {
       this.isHovering = true;
       this.dot.classList.add('hovering');
       this.setCursorMode(mode);
+      this.startLiveGeometryTracking(LIVE_TRACK_MS);
       if (!this.syncTargetGeometry()) this.resetHover();
     } else if (!this.targetRect) {
       this._geometryDirty = true;
+      this.startLiveGeometryTracking(LIVE_TRACK_EXTEND_MS);
     }
   }
 
@@ -407,6 +438,7 @@ export default class Cursor {
     this.targetRect = rect;
     this.targetRadius = radius;
     this._geometryDirty = false;
+    this.updateLiveGeometryWindow(rect);
 
     if (
       width !== this._dotGeometry.width ||
@@ -419,6 +451,49 @@ export default class Cursor {
       this._dotGeometry = { width, height, radius };
     }
     return true;
+  }
+
+  startLiveGeometryTracking(durationMs = LIVE_TRACK_EXTEND_MS) {
+    this._trackGeometryUntil = Math.max(
+      this._trackGeometryUntil,
+      performance.now() + durationMs
+    );
+  }
+
+  shouldTrackGeometryLive() {
+    if (!this.isHovering || !this.currentTarget) return false;
+    if (performance.now() < this._trackGeometryUntil) return true;
+
+    const animations = this.currentTarget.getAnimations?.({ subtree: false }) || [];
+    return animations.some(animation => (
+      animation.playState === 'running' ||
+      animation.playState === 'pending'
+    ));
+  }
+
+  updateLiveGeometryWindow(rect) {
+    const nextKey = [
+      rect.left.toFixed(1),
+      rect.top.toFixed(1),
+      rect.width.toFixed(1),
+      rect.height.toFixed(1)
+    ].join(',');
+
+    if (this._lastRectKey && this._lastRectKey !== nextKey) {
+      this.startLiveGeometryTracking(LIVE_TRACK_EXTEND_MS);
+    }
+
+    this._lastRectKey = nextKey;
+  }
+
+  pointerInsideRect(rect, pad = 0) {
+    if (!rect) return false;
+    return (
+      this.mouse.x >= rect.left - pad &&
+      this.mouse.x <= rect.right + pad &&
+      this.mouse.y >= rect.top - pad &&
+      this.mouse.y <= rect.bottom + pad
+    );
   }
 
   targetFollowsPointer() {
@@ -485,7 +560,12 @@ export default class Cursor {
         targetY = this.mouse.y;
         currentSpeed = this.speedFree;
       } else {
-        if (this._geometryDirty && !this.syncTargetGeometry()) {
+        if ((this._geometryDirty || this.shouldTrackGeometryLive()) && !this.syncTargetGeometry()) {
+          this.resetHover();
+          targetX = this.mouse.x;
+          targetY = this.mouse.y;
+          currentSpeed = this.speedFree;
+        } else if (!this.isPressing && !this.pointerInsideRect(this.targetRect, TARGET_EXIT_PAD)) {
           this.resetHover();
           targetX = this.mouse.x;
           targetY = this.mouse.y;

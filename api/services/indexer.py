@@ -28,17 +28,8 @@ _FPCALC = str(_ROOT / ("fpcalc.exe" if sys.platform == "win32" else "fpcalc"))
 _USER_AGENT = "Rolfsound/1.0"
 _SHAZAM_WORKER = str(Path(__file__).parent / "_shazam_worker.py")
 _SHAZAM_TIMEOUT = 30
-BPM_SEMAPHORE = asyncio.Semaphore(2)
 DISCOGS_MIN_CONFIDENCE = 0.84
 DISCOGS_COVER_REPLACE_CONFIDENCE = 0.93
-
-
-def _ffmpeg_exe() -> str:
-    try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return "ffmpeg"
 
 
 def extract_local_tags(file_path: str, track_id: str) -> dict:
@@ -949,34 +940,6 @@ def _should_use_discogs_cover(
     return confidence >= DISCOGS_COVER_REPLACE_CONFIDENCE
 
 
-async def detect_bpm(file_path: str) -> int | None:
-    async with BPM_SEMAPHORE:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                _ffmpeg_exe(),
-                "-i",
-                file_path,
-                "-af",
-                "bpm",
-                "-f",
-                "null",
-                "-",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=45.0)
-            output = stderr.decode("utf-8", errors="ignore")
-            match = re.search(r"BPM:\s*([\d.]+)", output)
-            if match:
-                return int(round(float(match.group(1))))
-        except asyncio.TimeoutError:
-            proc.kill()
-            logger.warning(f"Timeout detecting BPM for {file_path}")
-        except Exception as e:
-            logger.warning(f"Could not detect BPM for {file_path}: {e}")
-    return None
-
-
 async def identify_track(
     file_path: str,
     track_id: str,
@@ -1154,9 +1117,6 @@ async def index_asset(
             )
             track_update["thumbnail"] = cached_thumbnail or meta["thumbnail"]
 
-    bpm = await detect_bpm(file_path)
-    if bpm:
-        track_update["bpm"] = bpm
     if meta.get("raw_fp"):
         track_update["fingerprint"] = meta["raw_fp"]
 
@@ -1174,7 +1134,6 @@ async def index_asset(
         database.update_asset_analysis(conn, asset_id, {
             "analysis_status": meta["status"],
             "duration": track_update.get("duration"),
-            "bpm": track_update.get("bpm"),
             "fingerprint": track_update.get("fingerprint"),
             "asset_type": meta.get("version_type") if meta.get("version_type") != "ORIGINAL_MIX" else None,
         })

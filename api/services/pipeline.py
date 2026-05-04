@@ -224,7 +224,9 @@ class LibraryManager:
         # Hand the asset to the persistent identification queue.
         # `allow_identity_resolution` is now always honored by the queue.
         from api.services.identification.jobs import enqueue as enqueue_identification
+        from api.services.audio_analysis.jobs import enqueue as enqueue_audio_analysis
         enqueue_identification(asset_id)
+        enqueue_audio_analysis(asset_id)
 
 
 def _blank_to_none(value):

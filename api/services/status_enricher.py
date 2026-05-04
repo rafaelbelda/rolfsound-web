@@ -109,7 +109,10 @@ def _lookup_track_by_filepath(conn, filepath: str):
     placeholders = ",".join("?" for _ in variants)
     row = conn.execute(f"""
         SELECT t.id, t.title, COALESCE(t.display_artist, t.artist) AS display_artist,
-               t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
+               t.thumbnail,
+               COALESCE(a.bpm, t.bpm) AS bpm,
+               COALESCE(a.musical_key, t.musical_key) AS musical_key,
+               COALESCE(a.camelot_key, t.camelot_key) AS camelot_key
         FROM tracks t
         JOIN assets a ON t.id = a.track_id
         WHERE a.file_path IN ({placeholders})
@@ -122,7 +125,10 @@ def _lookup_track_by_filepath(conn, filepath: str):
     placeholders = ",".join("?" for _ in normalized)
     return conn.execute(f"""
         SELECT t.id, t.title, COALESCE(t.display_artist, t.artist) AS display_artist,
-               t.thumbnail, COALESCE(a.bpm, t.bpm) AS bpm
+               t.thumbnail,
+               COALESCE(a.bpm, t.bpm) AS bpm,
+               COALESCE(a.musical_key, t.musical_key) AS musical_key,
+               COALESCE(a.camelot_key, t.camelot_key) AS camelot_key
         FROM tracks t
         JOIN assets a ON t.id = a.track_id
         WHERE lower(replace(a.file_path, char(92), '/')) IN ({placeholders})
@@ -148,6 +154,8 @@ def enrich_status(raw: dict) -> dict:
     thumbnail = ""
     track_id  = os.path.basename(current_filepath) if current_filepath else ""
     bpm       = None
+    musical_key = None
+    camelot_key = None
 
     if current_filepath:
         path_key = _cache_key(current_filepath)
@@ -158,6 +166,8 @@ def enrich_status(raw: dict) -> dict:
             artist    = cached["artist"]    or ""
             thumbnail = cached["thumbnail"] or ""
             bpm       = cached.get("bpm")
+            musical_key = cached.get("musical_key")
+            camelot_key = cached.get("camelot_key")
         else:
             try:
                 conn = database.get_connection()
@@ -170,12 +180,15 @@ def enrich_status(raw: dict) -> dict:
                         artist    = row["display_artist"] or ""
                         thumbnail = row["thumbnail"] or ""
                         bpm       = row["bpm"]
+                        musical_key = row["musical_key"]
+                        camelot_key = row["camelot_key"]
                         _track_cache["key"] = path_key
                         _track_cache["data"] = {
                             "track_id": track_id, "title": title,
                             "artist": artist,     "display_artist": artist,
                             "thumbnail": thumbnail,
-                            "bpm": bpm,           "path_key": path_key,
+                            "bpm": bpm,           "musical_key": musical_key,
+                            "camelot_key": camelot_key, "path_key": path_key,
                         }
                 finally:
                     conn.close()
@@ -202,6 +215,9 @@ def enrich_status(raw: dict) -> dict:
             "artist":    t.get("display_artist", t.get("artist", "")),
             "display_artist": t.get("display_artist", t.get("artist", "")),
             "filepath":  t.get("filepath",  ""),
+            "bpm":       t.get("bpm"),
+            "musical_key": t.get("musical_key"),
+            "camelot_key": t.get("camelot_key"),
         })
 
     raw["state"]                = state
@@ -212,6 +228,8 @@ def enrich_status(raw: dict) -> dict:
     raw["display_artist"]       = artist
     raw["thumbnail"]            = thumbnail
     raw["bpm"]                  = bpm
+    raw["musical_key"]          = musical_key
+    raw["camelot_key"]          = camelot_key
     raw["position"]             = pb.get("position_s",          0)
     raw["duration"]             = pb.get("duration_s",          0)
     raw["position_updated_at"]  = int(pb.get("position_updated_at", time.time()) * 1000)

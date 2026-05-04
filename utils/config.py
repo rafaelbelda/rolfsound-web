@@ -42,7 +42,7 @@ _DEFAULTS = {
     "discogs_consumer_secret":   "",
     # MusicBrainz requires a User-Agent identifying the app + contact.
     # See: musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
-    "musicbrainz_user_agent":    "Rolfsound/1.0 ( https://github.com/lucksducks/rolfsound )",
+    "musicbrainz_user_agent":    "Rolfsound/1.0 ( https://github.com/rafaelbelda/rolfsound )",
     # Spotify Web API (Client Credentials flow). Free; create app at developer.spotify.com.
     "spotify_client_id":         "",
     "spotify_client_secret":     "",
@@ -51,6 +51,12 @@ _DEFAULTS = {
     # Identification queue worker tunables.
     "identification_workers":    2,
     "identification_max_attempts": 8,
+    # Audio analysis queue worker tunables.
+    "audio_analysis_workers":    1,
+    "audio_analysis_max_attempts": 5,
+    "audio_analysis_timeout_seconds": 240,
+    "essentia_extractor_path":   "essentia_streaming_extractor_music",
+    "essentia_profile_path":     "./config/essentia_profile.yaml",
 }
 
 _config: dict = {}

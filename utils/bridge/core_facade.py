@@ -54,10 +54,18 @@ class RolfsoundCoreFacade:
         return {"ok": True}
 
     async def remix_set(self, pitch_semitones: float | None = None, tempo_ratio: float | None = None) -> dict | None:
-        p: dict = {}
-        if pitch_semitones is not None: p["pitch_semitones"] = float(pitch_semitones)
-        if tempo_ratio is not None: p["tempo_ratio"] = float(tempo_ratio)
-        await self.ipc.send_command("set_remix", p)
+        if pitch_semitones is None or tempo_ratio is None:
+            status = await self.get_status() or {}
+            remix = status.get("remix") or {}
+            if pitch_semitones is None:
+                pitch_semitones = remix.get("pitch_semitones", 0.0)
+            if tempo_ratio is None:
+                tempo_ratio = remix.get("tempo_ratio", 1.0)
+
+        await self.ipc.send_command("set_remix", {
+            "pitch_semitones": float(pitch_semitones),
+            "tempo_ratio": float(tempo_ratio),
+        })
         return {"ok": True}
 
     async def remix_reset(self) -> dict | None:

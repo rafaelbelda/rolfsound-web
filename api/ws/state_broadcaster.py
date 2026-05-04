@@ -298,6 +298,8 @@ def _compact_playback_payload(status: dict) -> dict:
         "album": status.get("album"),
         "thumbnail": status.get("thumbnail"),
         "bpm": status.get("bpm"),
+        "musical_key": status.get("musical_key"),
+        "camelot_key": status.get("camelot_key"),
         "position": status.get("position", 0),
         "duration": status.get("duration", 0),
         "position_updated_at": status.get("position_updated_at", int(time.time() * 1000)),

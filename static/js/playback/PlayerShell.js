@@ -67,6 +67,17 @@ export default class PlayerShell {
         }
 
         /* ── Extended hover zone: captures mouse to the right of the controls pill ── */
+        #playback-controls-shell::before {
+          content: '';
+          position: absolute;
+          right: 100%;
+          top: -10px;
+          width: ${CH + 20}px;
+          height: calc(100% + 20px);
+          background: transparent;
+          pointer-events: auto;
+        }
+
         #playback-controls-shell::after {
           content: '';
           position: absolute;
@@ -83,11 +94,53 @@ export default class PlayerShell {
           pointer-events: none;
         }
 
+        #btn-remix {
+          position: absolute;
+          top: 50%;
+          right: calc(100% + 4px);
+          transform: translateY(-50%) translateX(22px) scale(0.32);
+          transform-origin: center right;
+          width: ${CH}px;
+          height: ${CH}px;
+          padding: 0;
+          border: 1px solid var(--color-border-soft);
+          border-radius: var(--radius-dynamic-island);
+          background: var(--color-playback-pill);
+          backdrop-filter: blur(var(--blur-playback));
+          -webkit-backdrop-filter: blur(var(--blur-playback));
+          color: var(--color-text-control);
+          box-shadow: var(--shadow-playback-pill);
+          pointer-events: none;
+          opacity: 0;
+          z-index: 1;
+          will-change: transform, opacity;
+          transition:
+            transform 0.45s var(--ease-spring),
+            border-radius 0.28s var(--ease-snappy),
+            opacity 0.18s ease;
+        }
+
+        #playback-controls-shell:hover #btn-remix,
+        #playback-controls-shell:focus-within #btn-remix {
+          pointer-events: auto;
+          opacity: 1;
+          transform: translateY(-50%) translateX(0) scale(1);
+        }
+
+        #btn-remix.remix-open {
+          pointer-events: none !important;
+          opacity: 0 !important;
+          transform: translateY(-50%) translateX(22px) scale(0.32) !important;
+          transition:
+            transform 0.18s ease,
+            opacity 0.18s ease !important;
+        }
+
         #btn-queue {
           position: absolute;
           top: 50%;
           left: calc(100% + 4px);
-          transform: translateY(-50%) translateX(-8px) scaleX(0.14) scaleY(0.74);
+          transform: translateY(-50%) translateX(-22px) scale(0.32);
           transform-origin: center left;
           width: ${CH}px;
           height: ${CH}px;
@@ -99,28 +152,29 @@ export default class PlayerShell {
           -webkit-backdrop-filter: blur(var(--blur-playback));
           color: var(--color-text-control);
           box-shadow: var(--shadow-playback-pill);
-          clip-path: inset(26% 76% 26% 0 round 999px);
           pointer-events: none;
+          opacity: 0;
           z-index: 1;
+          will-change: transform, opacity;
           transition:
-            clip-path 0.34s var(--ease-emphasized),
             transform 0.45s var(--ease-spring),
             border-radius 0.28s var(--ease-snappy),
+            opacity 0.18s ease,
             color 0.18s ease;
         }
 
         #playback-controls-shell:hover #btn-queue,
         #playback-controls-shell:focus-within #btn-queue {
           pointer-events: auto;
+          opacity: 1;
           transform: translateY(-50%) translateX(0) scale(1);
-          clip-path: inset(0 0 0 0 round var(--radius-dynamic-island));
         }
 
         #btn-queue.queue-open {
           pointer-events: none !important;
-          transform: translateY(-50%) translateX(0) scaleX(0.2) scaleY(0.8) !important;
-          clip-path: inset(30% 80% 30% 0 round 999px) !important;
-          transition: clip-path 0.18s ease, transform 0.18s ease !important;
+          opacity: 0 !important;
+          transform: translateY(-50%) translateX(-22px) scale(0.32) !important;
+          transition: transform 0.18s ease, opacity 0.18s ease !important;
         }
 
         #btn-queue svg {
@@ -131,6 +185,29 @@ export default class PlayerShell {
         }
 
         /* ── Queue hint label ── */
+        #btn-remix svg {
+          width: 15px;
+          height: 15px;
+          stroke-width: 1.9;
+          pointer-events: none;
+        }
+
+        #remix-btn-hint {
+          position: absolute;
+          top: 50%;
+          right: calc(100% + 4px);
+          transform: translateY(-50%);
+          width: ${CH}px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 5px;
+          pointer-events: none;
+          opacity: 1;
+          transition: opacity 0.18s ease;
+        }
+
         #queue-btn-hint {
           position: absolute;
           top: 50%;
@@ -147,12 +224,20 @@ export default class PlayerShell {
           transition: opacity 0.18s ease;
         }
 
+        #playback-controls-shell:hover #remix-btn-hint,
+        #playback-controls-shell:focus-within #remix-btn-hint,
+        #btn-remix.remix-open ~ #remix-btn-hint {
+          opacity: 0;
+          transition: opacity 0.1s ease;
+        }
+
         #playback-controls-shell:hover #queue-btn-hint,
         #playback-controls-shell:focus-within #queue-btn-hint {
           opacity: 0;
           transition: opacity 0.1s ease;
         }
 
+        .side-hint-line-v,
         .queue-hint-line-v {
           display: block;
           width: 1px;
@@ -160,6 +245,7 @@ export default class PlayerShell {
           background: rgba(255, 255, 255, 0.1);
         }
 
+        .side-hint-text,
         .queue-hint-text {
           font-size: 8px;
           letter-spacing: 1.8px;
@@ -213,7 +299,7 @@ export default class PlayerShell {
             <div style="
               position: absolute;
               bottom: 0; left: 0; right: 0;
-              padding: 40px 16px 14px 16px;
+              padding: 40px 88px 14px 16px;
               background: linear-gradient(
                 to top,
                 var(--color-playback-gradient-start) 0%,
@@ -245,26 +331,34 @@ export default class PlayerShell {
             </div>
 
             <!-- Seek bar — delegado ao Web Component -->
-            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;"></rolfsound-seek-bar>
+            <rolfsound-playback-timestamp style="position:absolute;bottom:8px;right:12px;z-index:3;"></rolfsound-playback-timestamp>
+            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;height:12px;z-index:4;"></rolfsound-seek-bar>
 
             <!-- Volume slider — delegado ao Web Component -->
-            <rolfsound-volume-slider></rolfsound-volume-slider>
           </div>
+
+          <rolfsound-volume-slider style="position:absolute;top:-42px;right:0;z-index:5;"></rolfsound-volume-slider>
         </div>
 
         <!-- ── PÍLULA DE CONTROLES ── -->
         <div id="playback-controls-shell">
+          <rolfsound-remix-button id="btn-remix"></rolfsound-remix-button>
+
+          <div id="remix-btn-hint" aria-hidden="true">
+            <span class="side-hint-line-v"></span>
+            <span class="side-hint-text">Remix</span>
+          </div>
+
           <div id="playback-controls-pill">
             <rolfsound-shuffle-toggle></rolfsound-shuffle-toggle>
             <rolfsound-skip-back></rolfsound-skip-back>
             <rolfsound-play-button></rolfsound-play-button>
             <rolfsound-skip-fwd></rolfsound-skip-fwd>
             <rolfsound-repeat-toggle></rolfsound-repeat-toggle>
-            <rolfsound-remix-button id="btn-remix"></rolfsound-remix-button>
           </div>
 
           <rolfsound-queue-button id="btn-queue"></rolfsound-queue-button>
-          <rolfsound-remix-panel id="remix-panel" style="top:100%;left:0;margin-top:6px;"></rolfsound-remix-panel>
+          <rolfsound-remix-panel id="remix-panel" style="bottom:0;right:calc(100% + 10px);--remix-panel-h:${TOTAL_H}px;"></rolfsound-remix-panel>
 
           <div id="queue-btn-hint" aria-hidden="true">
             <span class="queue-hint-line-v"></span>
@@ -621,7 +715,7 @@ export default class PlayerShell {
       m.queueContainer.remove();
     }
 
-    const btnRect    = btnEl.getBoundingClientRect();
+    const btnRect    = this._sideButtonRect('queue') || btnEl.getBoundingClientRect();
     const playerRect = m.playerContainer.getBoundingClientRect();
 
     btnEl.setQueueOpen?.(true);
@@ -714,6 +808,37 @@ export default class PlayerShell {
     }, 560, '_queueTimers');
 
     window.dispatchEvent(new CustomEvent('rolfsound-queue-open', { bubbles: true }));
+  }
+
+  _sideButtonRect(side) {
+    const shell = this._m.playerContainer?.querySelector('#playback-controls-shell');
+    const rect = shell?.getBoundingClientRect?.();
+    if (!rect?.width || !rect?.height) return null;
+
+    const size = rect.height;
+    const gap = 4;
+    const top = rect.top + rect.height / 2 - size / 2;
+    const bottom = top + size;
+
+    if (side === 'remix') {
+      return {
+        left: rect.left - size - gap,
+        top,
+        right: rect.left - gap,
+        bottom,
+        width: size,
+        height: size,
+      };
+    }
+
+    return {
+      left: rect.right + gap,
+      top,
+      right: rect.right + gap + size,
+      bottom,
+      width: size,
+      height: size,
+    };
   }
 
   closeQueuePanel() {

@@ -58,21 +58,25 @@ class StatusEnricherPathTests(unittest.TestCase):
                     artist TEXT,
                     display_artist TEXT,
                     thumbnail TEXT,
-                    bpm INTEGER
+                    bpm REAL,
+                    musical_key TEXT,
+                    camelot_key TEXT
                 );
                 CREATE TABLE assets (
                     id TEXT PRIMARY KEY,
                     track_id TEXT,
                     file_path TEXT,
-                    bpm INTEGER
+                    bpm REAL,
+                    musical_key TEXT,
+                    camelot_key TEXT
                 );
             """)
             conn.execute(
-                "INSERT INTO tracks (id, title, artist, display_artist, thumbnail, bpm) VALUES (?, ?, ?, ?, ?, NULL)",
+                "INSERT INTO tracks (id, title, artist, display_artist, thumbnail, bpm, musical_key, camelot_key) VALUES (?, ?, ?, ?, ?, NULL, 'C minor', '5A')",
                 (TRACK_ID, title, artist, artist, thumbnail),
             )
             conn.execute(
-                "INSERT INTO assets (id, track_id, file_path, bpm) VALUES ('asset-1', ?, ?, NULL)",
+                "INSERT INTO assets (id, track_id, file_path, bpm, musical_key, camelot_key) VALUES ('asset-1', ?, ?, 124.5, 'A minor', '8A')",
                 (TRACK_ID, REL_PATH),
             )
             conn.commit()
@@ -104,6 +108,9 @@ class StatusEnricherPathTests(unittest.TestCase):
             self.assertEqual(enriched["title"], "Nikes")
             self.assertEqual(enriched["artist"], "Frank Ocean")
             self.assertEqual(enriched["thumbnail"], THUMBNAIL)
+            self.assertEqual(enriched["bpm"], 124.5)
+            self.assertEqual(enriched["musical_key"], "A minor")
+            self.assertEqual(enriched["camelot_key"], "8A")
 
     def test_cache_invalidation_reloads_updated_metadata(self):
         self._update_track("", "", "")

@@ -1,94 +1,31 @@
 :host {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 3;
+  --rs-knob-size: 34px;
+  --rs-knob-inner-inset: 9px;
+  --rs-knob-notch-width: 1.35px;
+  --rs-knob-notch-len: 6px;
+  --rs-knob-notch-offset: 14.4px;
+  --rs-knob-slot-size: 12px;
+  --rs-knob-slot-color: rgba(255, 255, 255, 0.82);
+  display: block;
+  width: var(--rs-knob-size);
+  height: var(--rs-knob-size);
+  z-index: 5;
+}
+
+.vol-knob {
   display: block;
 }
 
-.vol-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: rgba(0,0,0,0.32);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: var(--radius-full, 50px);
-  color: rgba(255,255,255,0.6);
-  cursor: none;
-  transition: background 0.15s ease, color 0.15s ease, opacity 0.2s ease;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-
-button:hover { background: rgba(0,0,0,0.52); color: rgba(255,255,255,0.9); }
-button:active { transform: scale(0.94); }
-button svg { pointer-events: none; }
-
-.track-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  overflow: hidden;
-  opacity: 0;
-  transform: scaleY(0.001);
-  transform-origin: top center;
+.speaker-icon {
+  display: block;
+  width: var(--rs-knob-slot-size);
+  height: var(--rs-knob-slot-size);
+  color: rgba(255, 255, 255, 0.85);
   pointer-events: none;
-  transition: transform 0.22s var(--ease-standard, ease), opacity 0.18s ease;
-  will-change: transform, opacity;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.36));
 }
 
-:host(.open) .track-wrap {
-  opacity: 1;
-  transform: scaleY(1);
-  pointer-events: auto;
-}
-
-.vol-track {
-  width: 3px;
-  height: 100px;
-  background: rgba(255,255,255,0.12);
-  border-radius: 2px;
-  position: relative;
-  cursor: none;
-  touch-action: none;
-}
-
-.vol-fill {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.75);
-  transform: scale3d(1, 1, 1);
-  transform-origin: bottom center;
-  transition: transform 0.08s ease;
-  will-change: transform;
-  pointer-events: none;
-}
-
-.vol-thumb {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #fff;
-  transform: translate3d(-50%, -100px, 0) translateY(50%);
-  pointer-events: none;
-  transition: transform 0.08s ease;
-  will-change: transform;
+.vol-wave-2,
+.vol-wave-3 {
+  transition: opacity 120ms ease;
 }

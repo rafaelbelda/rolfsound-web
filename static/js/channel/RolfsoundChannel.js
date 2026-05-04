@@ -22,6 +22,8 @@ const INTENT_ROUTES = Object.freeze({
     'intent.pause': { method: 'POST', path: '/api/pause' },
     'intent.seek': { method: 'POST', path: '/api/seek' },
     'intent.volume.set': { method: 'POST', path: '/api/volume' },
+    'intent.remix.set': { method: 'POST', path: '/api/remix' },
+    'intent.remix.reset': { method: 'POST', path: '/api/remix/reset' },
     // ... manter as outras rotas apenas como fallback REST
 });
 
@@ -100,7 +102,7 @@ class RolfsoundChannel {
     async _fetchInitialStatus() {
         try {
             const r = await fetch('/api/status');
-            if (r.ok) this.publish('state.playback', await r.json());
+            if (r.ok) this._publishStatusSnapshot(await r.json());
         } catch (e) { console.warn('[RolfsoundChannel] Initial fetch failed'); }
     }
 
@@ -244,8 +246,19 @@ class RolfsoundChannel {
         if (document.hidden) return;
         try {
             const r = await fetch('/api/status');
-            if (r.ok) this.publish('state.playback', await r.json());
+            if (r.ok) this._publishStatusSnapshot(await r.json());
         } catch {}
+    }
+
+    _publishStatusSnapshot(status) {
+        this.publish('state.playback', status);
+        const remix = status?.remix;
+        if (!remix) return;
+        this.publish('state.remix', {
+            pitch_semitones: Number(remix.pitch_semitones ?? 0),
+            tempo_ratio: Number(remix.tempo_ratio ?? 1),
+            reset_on_track_change: Boolean(remix.reset_on_track_change ?? true),
+        });
     }
 
     async _sendRest(type, payload) {
