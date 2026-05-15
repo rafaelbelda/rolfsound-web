@@ -29,6 +29,7 @@ import json
 import logging
 import subprocess
 import threading
+import sys
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -78,7 +79,7 @@ def _parse_upload_date(data: dict) -> int | None:
 
 def get_metadata(track_id: str) -> dict | None:
     url = f"https://www.youtube.com/watch?v={track_id}"
-    cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-call-home", url]
+    cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-download", "--no-call-home", url]
     try:
         result = subprocess.run(
             cmd,
@@ -203,7 +204,9 @@ def download(
                 "ogg":  "bestaudio[ext=ogg]/bestaudio",
             }.get(audio_format, "bestaudio/best")
             cmd = [
-                "yt-dlp",
+                sys.executable,
+                "-m",
+                "yt_dlp",
                 "--format",      fmt_filter,
                 "--output",      temp_template,
                 "--no-playlist", "--no-call-home",
@@ -211,7 +214,9 @@ def download(
                 url,
             ]
             retry_cmd = [
-                "yt-dlp",
+                sys.executable,
+                "-m",
+                "yt_dlp",
                 "--format",      "bestaudio/best",
                 "--output",      temp_template,
                 "--no-playlist", "--no-call-home",
@@ -224,7 +229,9 @@ def download(
             ]
         else:
             cmd = [
-                "yt-dlp",
+                sys.executable,
+                "-m",
+                "yt_dlp",
                 "--extract-audio",
                 "--audio-format",  audio_format,
                 "--audio-quality", "0",
@@ -235,7 +242,9 @@ def download(
                 url,
             ]
             retry_cmd = [
-                "yt-dlp",
+                sys.executable, 
+                "-m",
+                "yt_dlp",
                 "--extract-audio",
                 "--audio-format",  audio_format,
                 "--audio-quality", "0",
@@ -326,7 +335,7 @@ def download_thumbnail(track_id: str, thumbnails_dir: str, thumbnail_url: str) -
     try:
         tmp = str(thumb_path / f"{track_id}.thumb")
         cmd = [
-            "yt-dlp", "--write-thumbnail", "--skip-download",
+            sys.executable, "-m", "yt_dlp", "--write-thumbnail", "--skip-download",
             "--convert-thumbnails", "jpg", "--no-call-home",
             "--output", tmp,
             f"https://www.youtube.com/watch?v={track_id}",

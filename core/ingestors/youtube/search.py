@@ -55,6 +55,7 @@ import asyncio
 import logging
 import re
 import time
+import sys
 from typing import Any
 
 import httpx
@@ -289,7 +290,9 @@ _YTDLP_PROCESS_TIMEOUT = 20
 
 def _ytdlp_search_cmd(query: str, max_results: int) -> list[str]:
     return [
-        "yt-dlp",
+        sys.executable,
+        "-m",
+        "yt_dlp",
         "--flat-playlist",
         "--no-warnings",
         "--ignore-errors",
