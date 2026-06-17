@@ -120,6 +120,11 @@ class RolfsoundMiniplayer extends HTMLElement {
           pointer-events: auto;
           cursor: none;
           will-change: transform, opacity;
+          /* Audio-reactive glow lives here (NOT on .mini-shell) so its ~8x/sec
+             updates during playback don't force the backdrop-filter below to
+             re-rasterize the blurred backdrop on every change. */
+          border-radius: var(--radius-dynamic-island, 16px);
+          box-shadow: 0 0 38px rgb(var(--rs-theme-accent-rgb, 18 18 18) / calc(var(--rs-theme-intensity, 0) * 0.12 + var(--rs-audio-punch, 0) * 0.15));
         }
 
         :host([hidden]) { display: none !important; }
@@ -134,7 +139,8 @@ class RolfsoundMiniplayer extends HTMLElement {
           -webkit-backdrop-filter: blur(var(--blur-playback, 24px));
           border: 1px solid var(--color-border-soft, rgba(255,255,255,0.07));
           border-radius: var(--radius-dynamic-island, 16px);
-          box-shadow: var(--shadow-miniplayer, 0 12px 40px rgba(0,0,0,0.65));
+          /* Static drop shadow only — the reactive glow moved to :host above. */
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
           display: flex;
           align-items: center;
           padding: 0 14px 0 12px;

@@ -66,8 +66,14 @@ class RolfsoundPlaybackTimestamp extends RolfsoundControl {
 
   _startRaf() {
     if (this._rafId) return;
-    const tick = () => {
-      this._renderTime(this._deadReckoned(), this._duration);
+    let lastRenderTs = 0;
+    const tick = (ts) => {
+      // The displayed value only changes once per second; refresh ~4x/sec
+      // instead of every frame. rAF (vs setInterval) keeps it paused on hidden tabs.
+      if (ts - lastRenderTs >= 250) {
+        lastRenderTs = ts;
+        this._renderTime(this._deadReckoned(), this._duration);
+      }
       this._rafId = requestAnimationFrame(tick);
     };
     this._rafId = requestAnimationFrame(tick);

@@ -91,19 +91,24 @@ class RolfsoundIsland extends HTMLElement {
     }
 
     _renderAudioMeter(now) {
-        this._audioRafId = null;
-
         if (!this.hasAttribute('playing')) {
+            this._audioRafId = null;
             this._resetAudioMeter();
             return;
         }
+
+        this._audioRafId = requestAnimationFrame(this._audioMeterBound);
+
+        // Throttle to ~30fps — the three bars move subtly and 60fps writes are
+        // wasteful main-thread/compositor work during every second of playback.
+        if (now - (this._audioMeterLastRenderAt || 0) < 33) return;
+        this._audioMeterLastRenderAt = now;
 
         const bars = this._audioBars;
         if (bars.length >= 3) {
             const env = audioReactiveStore.getEnvelope(now);
             if (env.stale) {
                 this._resetAudioMeter();
-                this._audioRafId = requestAnimationFrame(this._audioMeterBound);
                 return;
             }
 
@@ -117,8 +122,6 @@ class RolfsoundIsland extends HTMLElement {
             bars[2].style.transform = `scaleY(${this._audioBarScale(baseHeight * 0.9)})`;
             this._audioMeterIdle = false;
         }
-
-        this._audioRafId = requestAnimationFrame(this._audioMeterBound);
     }
 
     _audioBarScale(heightPx) {

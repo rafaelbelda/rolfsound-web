@@ -27,6 +27,11 @@ export default class ColorPaletteExtractor {
       const pixels = await ColorPaletteExtractor._sampleImage(srcUrl);
       if (!pixels) return null;
 
+      // The clustering below is a synchronous CPU burst. Yield to idle time first
+      // so it doesn't compete with the track-change animation frame. The theme
+      // crossfade is multi-second, so a sub-frame deferral is invisible.
+      await ColorPaletteExtractor._whenIdle();
+
       const nearBlack = ColorPaletteExtractor._detectNearBlack(pixels);
       if (nearBlack) {
         const palette = ColorPaletteExtractor._nearBlackPalette(nearBlack.confidence);
@@ -48,6 +53,17 @@ export default class ColorPaletteExtractor {
       }
       return null;
     }
+  }
+
+  // Resolve on the next idle slot (capped), falling back where unsupported.
+  static _whenIdle() {
+    return new Promise((resolve) => {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => resolve(), { timeout: 200 });
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
   }
 
   // ─── Baixa + samplea a imagem para um array de pixels RGB ───────────────

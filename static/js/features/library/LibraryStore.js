@@ -239,6 +239,12 @@ export default class LibraryStore extends EventTarget {
   }
 
   _setState(patch) {
+    // Skip no-op patches: re-rendering the whole library is expensive, and
+    // some callers (e.g. setQuery on every search-results streaming frame)
+    // re-apply identical values dozens of times in a row.
+    if (patch && Object.keys(patch).every((key) => Object.is(this.state[key], patch[key]))) {
+      return;
+    }
     this.state = { ...this.state, ...patch };
     this.dispatchEvent(new CustomEvent('change', { detail: this.state }));
   }

@@ -290,16 +290,22 @@ export default class ReactiveBackdropController {
       return el;
     };
 
+    // Base layers only ever crossfade opacity (a slow, infrequent CSS transition
+    // that the compositor handles without a hint), so they don't need a permanent
+    // promoted layer. Accent/contrast keep will-change because the ambient loop
+    // mutates their transform every frame during playback — without the hint those
+    // continuous JS-driven changes would repaint the radial gradient instead of
+    // compositing it.
     this._layerSets = [
       {
-        base:     insert('rs-bg-base',     1, 'opacity'),
-        accent:   insert('rs-bg-accent',   2, 'opacity, transform'),
-        contrast: insert('rs-bg-contrast', 3, 'opacity, transform')
+        base:     insert('rs-bg-base',     1, 'auto'),
+        accent:   insert('rs-bg-accent',   2, 'transform'),
+        contrast: insert('rs-bg-contrast', 3, 'transform')
       },
       {
-        base:     insert('rs-bg-base-next',     1, 'opacity'),
-        accent:   insert('rs-bg-accent-next',   2, 'opacity, transform'),
-        contrast: insert('rs-bg-contrast-next', 3, 'opacity, transform')
+        base:     insert('rs-bg-base-next',     1, 'auto'),
+        accent:   insert('rs-bg-accent-next',   2, 'transform'),
+        contrast: insert('rs-bg-contrast-next', 3, 'transform')
       }
     ];
     this._layers = this._layerSets[this._activeLayerIndex];

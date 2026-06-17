@@ -218,6 +218,7 @@ export default class Cursor {
     this.mouse.x = e.clientX;
     this.mouse.y = e.clientY;
     this.checkHoverState(e);
+    this._ensureRender();
   }
 
   handlePointerDown(e) {
@@ -233,12 +234,23 @@ export default class Cursor {
       this.dot?.classList.add('cursor-drag');
       this._geometryDirty = true;
     }
+    this._ensureRender();
   }
 
   releasePress() {
     this.isPressing = false;
     this.dot?.classList.remove('cursor-pressing', 'cursor-drag');
     if (this.cursorMode === 'drag') this._geometryDirty = true;
+    this._ensureRender();
+  }
+
+  // Restart the render loop if it idled itself to a stop. The loop halts when
+  // the cursor has converged and nothing is animating; any input that can move
+  // or morph the cursor must wake it back up.
+  _ensureRender() {
+    if (this._rafId === null) {
+      this._rafId = requestAnimationFrame(this._renderBound);
+    }
   }
 
   resetHover() {
@@ -327,7 +339,10 @@ export default class Cursor {
     for (const node of path) {
       if (!isElement(node) || node === this.dot || node.id === 'cursor-dot') continue;
       if (node.closest?.('[data-cursor="ignore"]')) return null;
-      if (this.isValidTarget(node) && this.matchesInteractiveTarget(node)) return node;
+      // Cheap selector test first; isValidTarget walks the ancestor chain with
+      // getComputedStyle, so only run it on nodes that actually match. This runs
+      // for every node in the composed path on every pointermove.
+      if (this.matchesInteractiveTarget(node) && this.isValidTarget(node)) return node;
     }
     return null;
   }
@@ -532,6 +547,8 @@ export default class Cursor {
       this.isContextMorphing = false;
       this.contextMorphTimer = null;
     }, 220, 'contextMorphTimer');
+
+    this._ensureRender();
   }
 
   stopContextMorph() {
@@ -542,6 +559,7 @@ export default class Cursor {
 
     this.isContextMorphing = false;
     this.dot.classList.remove('context-morphing');
+    this._ensureRender();
   }
 
   render() {
@@ -602,6 +620,19 @@ export default class Cursor {
     }
 
     this.dot.style.transform = `translate3d(calc(${this.pos.x}px - 50%), calc(${this.pos.y}px - 50%), 0) scale(var(--cursor-scale, 1))`;
+
+    // Idle-stop: when the cursor has settled and nothing is animating, halt the
+    // loop instead of writing the same transform 60x/sec forever. Pointer and
+    // context events call _ensureRender() to wake it back up.
+    const settled =
+      Math.abs(targetX - this.pos.x) < 0.1 &&
+      Math.abs(targetY - this.pos.y) < 0.1;
+    if (settled && !this.isHovering && !this.isPressing && !this.isContextMorphing) {
+      this.pos.x = targetX;
+      this.pos.y = targetY;
+      this._rafId = null;
+      return;
+    }
 
     this._rafId = requestAnimationFrame(this._renderBound);
   }

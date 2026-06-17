@@ -31,6 +31,7 @@ class RolfsoundSearchResults extends HTMLElement {
         this._focusIdx  = -1;        // keyboard focused row index
 
         this._rendered = false;
+        this._updateRafId = null;
 
         this._onResults       = this._onResults.bind(this);
         this._onLayout        = this._onLayout.bind(this);
@@ -64,6 +65,10 @@ class RolfsoundSearchResults extends HTMLElement {
         window.removeEventListener('rolfsound-layout-applied',  this._onLayout);
         window.removeEventListener('track-row-action', this._onTrackRowAction);
         this.shadowRoot.removeEventListener('keydown', this._onKeydown);
+        if (this._updateRafId !== null) {
+            cancelAnimationFrame(this._updateRafId);
+            this._updateRafId = null;
+        }
     }
 
     attributeChangedCallback(name, oldVal, newVal) {
@@ -142,7 +147,18 @@ class RolfsoundSearchResults extends HTMLElement {
         this._query   = query || '';
 
         if (!this._rendered) return; // data stored; _updateUI called after render completes
-        this._updateUI();
+        this._scheduleUpdate();
+    }
+
+    // Coalesce updates to one render per animation frame. SSE search streams
+    // dispatch a results event per incoming item, so without this the entire
+    // row list is torn down and rebuilt dozens of times in quick succession.
+    _scheduleUpdate() {
+        if (this._updateRafId !== null) return;
+        this._updateRafId = requestAnimationFrame(() => {
+            this._updateRafId = null;
+            this._updateUI();
+        });
     }
 
     _onLayout(e) {
@@ -358,6 +374,10 @@ class RolfsoundSearchResults extends HTMLElement {
     // ── Reset on close ───────────────────────────────────────────
 
     _resetState() {
+        if (this._updateRafId !== null) {
+            cancelAnimationFrame(this._updateRafId);
+            this._updateRafId = null;
+        }
         this._state   = 'idle';
         this._library = [];
         this._youtube = [];

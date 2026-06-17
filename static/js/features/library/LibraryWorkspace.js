@@ -290,7 +290,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
     return `
       <button class="album-card hover-target" type="button" data-album-id="${escapeHtml(album.id || '')}" title="${escapeHtml(title)}">
         <span class="album-cover">
-          ${cover ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy" onerror="this.remove()">` : '<span>Album</span>'}
+          ${cover ? `<img src="${escapeHtml(cover)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : '<span>Album</span>'}
         </span>
         <span class="album-title">${escapeHtml(title)}</span>
         <span class="album-meta">${escapeHtml(meta)}</span>
@@ -359,7 +359,7 @@ class RolfsoundLibraryWorkspace extends HTMLElement {
                data-track-id="${escapeHtml(trackId)}"
                ${removablePlaylistId ? `data-playlist-id="${escapeHtml(removablePlaylistId)}"` : ''}>
         <span class="track-index">${String(index + 1).padStart(2, '0')}</span>
-        <span class="track-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" onerror="this.remove()">` : 'Audio'}</span>
+        <span class="track-thumb">${img ? `<img src="${escapeHtml(img)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : 'Audio'}</span>
         <span class="track-main">
           <strong>${escapeHtml(track.title || 'Unknown')}</strong>
           <span>${escapeHtml(artist)}</span>

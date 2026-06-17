@@ -103,8 +103,15 @@ class RolfsoundSeekBar extends RolfsoundControl {
 
   _startRaf() {
     if (this._rafId) return;
-    const tick = () => {
-      if (!this._dragging) this._renderProgress(this._deadReckoned(), this._duration);
+    let lastRenderTs = 0;
+    const tick = (ts) => {
+      // The fill has a `transform 100ms linear` CSS transition, so refreshing
+      // ~10x/sec stays visually smooth while avoiding 60x/sec transform + aria
+      // writes for a bar that advances sub-pixel amounts per frame.
+      if (!this._dragging && ts - lastRenderTs >= 100) {
+        lastRenderTs = ts;
+        this._renderProgress(this._deadReckoned(), this._duration);
+      }
       this._rafId = requestAnimationFrame(tick);
     };
     this._rafId = requestAnimationFrame(tick);

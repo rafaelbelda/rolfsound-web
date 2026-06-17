@@ -3,6 +3,10 @@
 :host {
   display: block;
   box-sizing: border-box;
+  /* Skip rendering rows scrolled out of the results list. focus()/scrollIntoView
+     used by keyboard nav still force on-demand layout when a row is targeted. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
 }
 
 .row {

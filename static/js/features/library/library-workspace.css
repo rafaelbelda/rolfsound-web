@@ -385,6 +385,10 @@
   gap: 10px;
   min-height: 40px;
   padding: 5px 8px;
+  /* Track lists can run to thousands of rows. Let the browser skip layout/paint
+     for off-screen rows; the intrinsic-size hint keeps the scrollbar stable. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: var(--color-surface-ghost);

@@ -639,9 +639,14 @@ const textureLRU = {
         atualizarJanelaVirtual();
 
         // ─── O NOVO CÉREBRO DO RAYCASTER E HOVER ───
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(estanteGroup.children, true);
-        
+        // O raycast (recursivo sobre toda a estante) só é consumido no ramo
+        // "!inspectedRecord" abaixo — pulamos o teste por completo durante a inspeção.
+        let intersects = [];
+        if (!inspectedRecord) {
+          raycaster.setFromCamera(mouse, camera);
+          intersects = raycaster.intersectObjects(estanteGroup.children, true);
+        }
+
         if (!inspectedRecord) {
             // 1. MODO NORMAL (Prateleira Livre)
             // Procura quem está sob o mouse e aplica o hover normalmente
@@ -712,8 +717,16 @@ const textureLRU = {
   };
   animate();
 
+  let _resizeTimer = null;
   window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    // Debounce: setSize reallocates renderer buffers; firing it on every resize
+    // event during a window drag is needlessly expensive.
+    _resizeTimer = setTimeout(() => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }, 120);
   });
 
   // ─── 8. MOTOR DE SYNC (Background Polling) ───

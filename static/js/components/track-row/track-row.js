@@ -179,6 +179,7 @@ class RolfsoundTrackRow extends HTMLElement {
             img.src = candidates[0];
             img.alt = '';
             img.loading = 'lazy';
+            img.decoding = 'async';
             if (thumbEl) {
                 thumbEl.innerHTML = '';
                 thumbEl.appendChild(img);

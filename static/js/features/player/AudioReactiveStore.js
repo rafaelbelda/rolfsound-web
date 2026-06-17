@@ -7,8 +7,13 @@ import channel from '/static/js/channel/RolfsoundChannel.js';
 
 const STALE_AFTER_MS = 900;
 const FRAME_MS = 16.67;
-const PUBLISH_MIN_MS = 125;
-const PUBLISH_EPSILON = 0.015;
+// These CSS vars live on :root and feed ambient gradients/shadows/glows across
+// the document, so each publish triggers a broad style recalc. The values only
+// drive subtle ambient lighting, so a coarser cadence/threshold is imperceptible
+// while roughly halving the recalc frequency during playback. The audio
+// visualizer reads getEnvelope() directly and is unaffected by these.
+const PUBLISH_MIN_MS = 200;
+const PUBLISH_EPSILON = 0.03;
 
 class AudioReactiveStore {
   constructor() {
