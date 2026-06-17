@@ -191,18 +191,59 @@
 }
 
 /* ── Touch: the desktop panel docks off the pill's left edge, which is
-   unreachable / off-screen on a phone. Surface it as a centered popup over the
-   player instead (same panel chrome, just re-anchored). !important overrides the
-   inline bottom/right PlayerShell sets on the host for the desktop dock. ── */
+   unreachable / off-screen on a phone. Re-anchor it centered just above the
+   controls pill so it rises over the cover and stays in the visible area (above
+   the browser toolbar). Absolute (vs fixed) keeps it tied to the pill and out of
+   the viewport's bottom-of-page quirks. !important overrides the inline
+   bottom/right PlayerShell sets on the host for the desktop dock. The host's
+   stacking context is lifted above the cover by PlayerShell (see #playback-
+   controls-shell rule), so a plain z-index here is enough. ── */
 @media (hover: none) {
   :host {
-    position: fixed !important;
+    position: absolute !important;
     left: 50% !important;
-    top: 50% !important;
     right: auto !important;
-    bottom: auto !important;
-    transform: translate(-50%, -50%) !important;
+    top: auto !important;
+    bottom: calc(100% + 10px) !important;
+    transform: translateX(-50%) !important;
+    width: min(88vw, 268px) !important;
+    height: auto !important;
+    max-height: 80vh !important;
     z-index: 60 !important;
+
+    /* Bigger knobs for comfortable touch dragging. Custom properties inherit
+       through the shadow boundary into the nested rolfsound-knob elements. */
+    --rs-knob-size: 88px;
+    --rs-knob-inner-inset: 28px;
+    --rs-knob-notch-offset: 37px;
+    --rs-knob-notch-len: 15px;
+  }
+
+  .panel {
+    padding: 16px 16px 14px !important;
+  }
+
+  /* Lay the two knobs side by side: a wide, short card that fits over the cover
+     instead of a tall narrow column. */
+  .knob-stack {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 14px !important;
+    margin: 22px 0 18px !important;
+  }
+
+  .knob-copy { min-height: 18px; }
+  .pitch-value,
+  .tempo-value { font-size: 12px; }
+
+  /* Larger tap targets for the close and reset controls. */
+  .panel-close-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .reset-btn {
+    padding: 9px 16px;
+    font-size: 11px;
   }
 }
 

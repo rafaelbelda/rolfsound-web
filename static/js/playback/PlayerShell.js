@@ -272,6 +272,22 @@ export default class PlayerShell {
           #playback-controls-shell::before,
           #playback-controls-shell::after { display: none; }
 
+          /* While the remix popup is open it rises over the cover; lift the
+             controls-shell stacking context above the cover (z-index 2) so the
+             panel — nested inside the shell — isn't painted behind the artwork. */
+          #playback-controls-shell:has(#btn-remix.remix-open) { z-index: 3; }
+
+          /* The volume knob defaults to top:-42px, floating above the cover in a
+             negative-margin strip where iOS hit-testing is unreliable (works only
+             when extra space pushes it clear of the top chrome). Anchor it inside
+             the cover's top-right corner — a solid, always-hittable region — and
+             pin touch-action so the drag is never stolen for a scroll gesture. */
+          rolfsound-volume-slider {
+            top: 8px !important;
+            right: 8px !important;
+            touch-action: none;
+          }
+
           #btn-remix,
           #btn-queue {
             position: absolute;
