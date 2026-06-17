@@ -1,8 +1,13 @@
 // static/js/playback/PlayerShell.js
 // HTML building, DOM caching, queue panel, and outside-click for PlaybackMitosisManager.
 import AnimationEngine from '/static/js/features/animations/AnimationEngine.js';
+import OverlayBackdropController from '/static/js/features/overlays/OverlayBackdropController.js';
 import { PLAYER_W, SQUARE_H, CONTROLS_H, GAP, TOTAL_H, computeLayout } from './MitosisStateMachine.js';
 import { getDisplayArtist } from '/static/js/utils/trackMeta.js';
+
+// Touch / coarse-pointer devices have no room for the desktop side-by-side
+// remix & queue slots, so those panels are surfaced as centered popups instead.
+const isCoarsePointer = () => window.matchMedia?.('(hover: none)')?.matches ?? false;
 
 export default class PlayerShell {
   constructor(manager) {
@@ -646,7 +651,12 @@ export default class PlayerShell {
       const inPlayer = m.playerContainer?.contains(e.target);
       const inQueue  = m.queueContainer?.contains(e.target);
       const inIsland = e.composedPath?.().some(el => el.tagName === 'ROLFSOUND-ISLAND');
-      if (!inPlayer && !inQueue && !inIsland) m._mitosis.unmorph({ reason: 'outside-click' });
+      if (inPlayer || inQueue || inIsland) return;
+      // On touch the queue is a popup floating over a backdrop — an outside tap
+      // (including the backdrop itself) should dismiss only the popup, not
+      // collapse the whole player.
+      if (isCoarsePointer() && m.isQueueOpen) { this.closeQueuePanel(); return; }
+      m._mitosis.unmorph({ reason: 'outside-click' });
     };
     document.addEventListener('mousedown', m._onOutsideClick);
   }
@@ -752,7 +762,8 @@ export default class PlayerShell {
       m.queueContainer.remove();
     }
 
-    const btnRect    = this._sideButtonRect('queue') || btnEl.getBoundingClientRect();
+    const coarse     = isCoarsePointer();
+    const btnRect    = (coarse ? null : this._sideButtonRect('queue')) || btnEl.getBoundingClientRect();
     const playerRect = m.playerContainer.getBoundingClientRect();
 
     btnEl.setQueueOpen?.(true);
@@ -761,7 +772,22 @@ export default class PlayerShell {
 
     // Use mode-aware layout so 3-col works when search is also open
     const mode             = this._currentMode(); // 'player+queue' or 'player+results+queue'
-    const { playerLeft: targetPlayerLeft, queueLeft: targetQueueLeft, targetTop } = computeLayout(mode);
+    const slots            = computeLayout(mode);
+    const targetPlayerLeft = slots.playerLeft;
+    // On touch there is no room for a side slot — center the queue as a popup
+    // over the player and dim the rest with a tap-to-close backdrop.
+    const targetTop        = coarse ? Math.max(8, slots.targetTop) : slots.targetTop;
+    const targetQueueLeft  = coarse
+      ? Math.max(8, (window.innerWidth - PLAYER_W) / 2)
+      : slots.queueLeft;
+
+    if (coarse) {
+      OverlayBackdropController.show('player-panel', {
+        zIndex: 1000,
+        interactive: true,
+        onBackdropClick: () => this.closeQueuePanel(),
+      });
+    }
 
     const panel = document.createElement('div');
     panel.id = 'queue-panel-container';
@@ -777,7 +803,7 @@ export default class PlayerShell {
       -webkit-backdrop-filter: blur(var(--blur-playback));
       border: 1px solid var(--color-border-soft);
       box-shadow: var(--shadow-playback-pill);
-      z-index: 995;
+      z-index: ${coarse ? 1001 : 995};
       overflow: hidden;
       pointer-events: none;
       will-change: transform;
@@ -799,15 +825,19 @@ export default class PlayerShell {
       { transform: 'none' }
     ], { duration: 520, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
 
-    const currentPlayerLeft = playerRect.left;
-    m.playerContainer.style.transition = 'none';
-    m.playerContainer.style.left       = `${currentPlayerLeft}px`;
-    m.playerContainer.style.transform  = 'none';
+    // On touch the player stays centered (queue floats over it as a popup);
+    // on desktop it slides left to make room for the side-by-side queue slot.
+    if (!coarse) {
+      const currentPlayerLeft = playerRect.left;
+      m.playerContainer.style.transition = 'none';
+      m.playerContainer.style.left       = `${currentPlayerLeft}px`;
+      m.playerContainer.style.transform  = 'none';
 
-    m._animator.play(m.playerContainer, [
-      { transform: 'none' },
-      { transform: `translateX(${targetPlayerLeft - currentPlayerLeft}px)` }
-    ], { duration: 480, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+      m._animator.play(m.playerContainer, [
+        { transform: 'none' },
+        { transform: `translateX(${targetPlayerLeft - currentPlayerLeft}px)` }
+      ], { duration: 480, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+    }
 
     // If search results panel needs to shift (3-col), notify via layout-applied
     const { resultsLeft } = computeLayout(mode);
@@ -818,9 +848,11 @@ export default class PlayerShell {
     AnimationEngine.schedule(m, () => {
       if (!panel.parentNode || panel !== m.queueContainer) return;
 
-      m._animator.releaseAll(m.playerContainer);
-      m.playerContainer.style.left      = `${targetPlayerLeft}px`;
-      m.playerContainer.style.transform = 'none';
+      if (!coarse) {
+        m._animator.releaseAll(m.playerContainer);
+        m.playerContainer.style.left      = `${targetPlayerLeft}px`;
+        m.playerContainer.style.transform = 'none';
+      }
 
       m._animator.releaseAll(panel);
       panel.style.willChange    = '';
@@ -884,11 +916,15 @@ export default class PlayerShell {
     m.isQueueOpen = false;
     AnimationEngine.clearScheduled(m, '_queueTimers');
 
+    const coarse = isCoarsePointer();
     const panel = m.queueContainer;
 
-    m.playerContainer?.querySelector('#btn-queue')?.setQueueOpen?.(false);
+    const btnEl = m.playerContainer?.querySelector('#btn-queue');
+    btnEl?.setQueueOpen?.(false);
     const hint = m.playerContainer?.querySelector('#queue-btn-hint');
     if (hint) hint.style.opacity = '';
+
+    if (coarse) OverlayBackdropController.hide('player-panel');
 
     // After queue closes, the remaining mode may still be player+results
     const modeAfter        = this._currentMode(); // computed with isQueueOpen=false already
@@ -903,7 +939,9 @@ export default class PlayerShell {
       detail: { mode: modeAfter, playerLeft: targetPlayerLeft, resultsLeft: slots.resultsLeft, queueLeft: null, targetTop }
     }));
 
-    if (m.playerContainer) {
+    // On touch the player never moved, so leave it put and collapse the popup
+    // back toward the real (below-pill) queue button.
+    if (m.playerContainer && !coarse) {
       const currentLeft  = parseFloat(m.playerContainer.style.left) || targetPlayerLeft;
       m._animator.play(m.playerContainer, [
         { transform: 'none' },
@@ -911,15 +949,17 @@ export default class PlayerShell {
       ], { duration: 460, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
     }
 
+    const liveBtn      = coarse ? btnEl?.getBoundingClientRect?.() : null;
+    const btnSize      = liveBtn?.width || CONTROLS_H;
     const panelRect    = panel.getBoundingClientRect();
     const panelCenterX = panelRect.left + panelRect.width  / 2;
     const panelCenterY = panelRect.top  + panelRect.height / 2;
-    const btnCenterX   = finalBtnLeft + CONTROLS_H / 2;
-    const btnCenterY   = finalBtnTop  + CONTROLS_H / 2;
+    const btnCenterX   = liveBtn ? liveBtn.left + liveBtn.width  / 2 : finalBtnLeft + CONTROLS_H / 2;
+    const btnCenterY   = liveBtn ? liveBtn.top  + liveBtn.height / 2 : finalBtnTop  + CONTROLS_H / 2;
     const dx           = btnCenterX - panelCenterX;
     const dy           = btnCenterY - panelCenterY;
-    const scaleX       = CONTROLS_H / PLAYER_W;
-    const scaleY       = CONTROLS_H / TOTAL_H;
+    const scaleX       = btnSize / PLAYER_W;
+    const scaleY       = btnSize / TOTAL_H;
 
     panel.style.pointerEvents = 'none';
     panel.style.overflow      = 'hidden';
@@ -931,7 +971,7 @@ export default class PlayerShell {
     ], { duration: 420, easing: 'cubic-bezier(0.3, 0, 1, 1)' });
 
     AnimationEngine.schedule(m, () => {
-      if (m.playerContainer) {
+      if (m.playerContainer && !coarse) {
         m._animator.releaseAll(m.playerContainer);
         m.playerContainer.style.left      = `${targetPlayerLeft}px`;
         m.playerContainer.style.transform = 'none';

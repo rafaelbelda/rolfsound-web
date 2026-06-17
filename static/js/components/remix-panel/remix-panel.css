@@ -190,3 +190,19 @@
   transform: scale(0.94);
 }
 
+/* ── Touch: the desktop panel docks off the pill's left edge, which is
+   unreachable / off-screen on a phone. Surface it as a centered popup over the
+   player instead (same panel chrome, just re-anchored). !important overrides the
+   inline bottom/right PlayerShell sets on the host for the desktop dock. ── */
+@media (hover: none) {
+  :host {
+    position: fixed !important;
+    left: 50% !important;
+    top: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+    z-index: 60 !important;
+  }
+}
+

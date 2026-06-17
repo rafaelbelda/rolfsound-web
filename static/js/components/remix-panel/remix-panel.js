@@ -222,6 +222,14 @@ class RolfsoundRemixPanel extends RolfsoundControl {
 
   _buttonRect({ expanded = false } = {}) {
     const btn = this.parentElement?.querySelector('#btn-remix');
+
+    // On touch the button is below the pill — collapse toward its real position
+    // rather than the desktop side dock.
+    if (window.matchMedia?.('(hover: none)')?.matches) {
+      const r = btn?.getBoundingClientRect?.();
+      if (r?.width && r?.height) return this._plainRect(r);
+    }
+
     const shellRect = this.parentElement?.getBoundingClientRect?.();
     if (expanded && shellRect?.width && shellRect?.height) {
       const size = shellRect.height;

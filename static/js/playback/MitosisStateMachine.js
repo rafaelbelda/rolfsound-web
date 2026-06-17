@@ -302,6 +302,7 @@ export default class MitosisStateMachine {
 
     if (m.isQueueOpen) {
       AnimationEngine.clearScheduled(m, '_queueTimers');
+      OverlayBackdropController.hide('player-panel');
       if (m.queueContainer?.parentNode) m.queueContainer.remove();
       m.queueContainer = null;
       m.isQueueOpen    = false;

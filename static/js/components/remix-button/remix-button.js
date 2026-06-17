@@ -61,6 +61,10 @@ class RolfsoundRemixButton extends RolfsoundControl {
   }
 
   _fullButtonRect() {
+    // On touch the button sits below the pill (not docked off its side), so the
+    // popup should morph from its real on-screen position.
+    if (window.matchMedia?.('(hover: none)')?.matches) return this.getBoundingClientRect();
+
     const shellRect = this.parentElement?.getBoundingClientRect?.();
     if (shellRect?.width && shellRect?.height) {
       const size = shellRect.height;
