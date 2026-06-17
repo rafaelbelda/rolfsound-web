@@ -1,0 +1,102 @@
+/* device-toggle.css — "Play on this device" output-routing toggle.
+   Sits in the cover/volume corner; styled to sit beside the volume knob. */
+:host {
+  display: block;
+  width: 34px;
+  height: 34px;
+  z-index: 5;
+}
+
+button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-round, 50%);
+  color: var(--color-text-control, rgba(255, 255, 255, 0.74));
+  cursor: none;
+  position: relative;
+  transition: color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+button svg {
+  width: 17px;
+  height: 17px;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.36));
+}
+
+button:hover {
+  color: var(--color-text-control-strong, rgba(255, 255, 255, 0.96));
+  background: var(--rs-theme-hover-bg, rgba(255, 255, 255, 0.07));
+}
+
+button:active { transform: scale(0.94); }
+
+/* ── Playing on this device: lit + accent glow ── */
+button.active {
+  color: var(--color-control-active, rgba(255, 255, 255, 0.95));
+  background: var(--rs-theme-active-bg, rgba(255, 255, 255, 0.1));
+}
+button.active svg {
+  filter: drop-shadow(0 0 8px var(--rs-theme-glow, rgba(255, 255, 255, 0.4)));
+}
+button.active .wave { opacity: 1; }
+
+/* Animate the soundwaves while audible. */
+.wave { transition: opacity 0.18s ease; }
+button.active .wave-1 { animation: dt-wave 1.6s var(--ease-standard, ease) infinite; }
+button.active .wave-2 { animation: dt-wave 1.6s var(--ease-standard, ease) infinite 0.2s; }
+
+@keyframes dt-wave {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+/* ── Disconnected after handoff: warning tint ── */
+button.paused {
+  color: var(--color-accent-warning, #fbbf24);
+}
+
+/* ── Playing elsewhere / busy: muted ── */
+button.elsewhere {
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+/* ── Connecting / handing off: hide glyph, show spinner ── */
+button.busy { color: var(--color-text-control, rgba(255, 255, 255, 0.74)); }
+button.busy svg { opacity: 0; }
+
+.spinner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong, rgba(255, 255, 255, 0.12));
+  border-top-color: var(--color-text-control-strong, rgba(255, 255, 255, 0.96));
+  opacity: 0;
+  pointer-events: none;
+}
+button.busy .spinner {
+  opacity: 1;
+  animation: dt-spin 0.7s linear infinite;
+}
+
+@keyframes dt-spin { to { transform: rotate(360deg); } }
+
+/* ── Touch: guarantee a 44px target, never depend on hover ── */
+@media (hover: none) {
+  :host { width: 44px; height: 44px; }
+  button svg { width: 20px; height: 20px; }
+  button:hover { background: transparent; } /* no hover affordance on touch */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.active .wave-1,
+  button.active .wave-2 { animation: none; }
+  button.busy .spinner { animation-duration: 1.2s; }
+}

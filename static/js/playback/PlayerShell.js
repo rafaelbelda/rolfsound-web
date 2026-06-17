@@ -288,6 +288,14 @@ export default class PlayerShell {
             touch-action: none;
           }
 
+          /* Device toggle anchored inside the cover too, clear of the volume
+             knob (knob is 34px at right:8px → occupies ~8–42px). */
+          rolfsound-device-toggle {
+            top: 4px !important;
+            right: 50px !important;
+            touch-action: manipulation;
+          }
+
           #btn-remix,
           #btn-queue {
             position: absolute;
@@ -396,6 +404,7 @@ export default class PlayerShell {
           </div>
 
           <rolfsound-volume-slider style="position:absolute;top:-42px;right:0;z-index:5;"></rolfsound-volume-slider>
+          <rolfsound-device-toggle style="position:absolute;top:-42px;right:42px;z-index:5;"></rolfsound-device-toggle>
         </div>
 
         <!-- ── PÍLULA DE CONTROLES ── -->
