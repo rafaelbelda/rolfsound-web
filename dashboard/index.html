@@ -38,11 +38,11 @@
   <rolfsound-search-results></rolfsound-search-results>
   <div class="bg-layer active"></div>
 
-  <section id="view-vinyl-library" class="view-layer active">
+  <section id="view-vinyl-library" class="view-layer">
     {% include 'views/vinyl-library.html' %}
   </section>
 
-  <section id="view-digital-library" class="view-layer">
+  <section id="view-digital-library" class="view-layer active">
     {% include 'views/digital-library.html' %}
   </section>
 
@@ -77,14 +77,14 @@
     island.setAttribute('library-mode', libraryMode);
 
     function normalizeLibraryMode(mode) {
-      return mode === 'digital' ? 'digital' : 'vinyl';
+      return mode === 'vinyl' ? 'vinyl' : 'digital';
     }
 
     function readStoredLibraryMode() {
       try {
         return normalizeLibraryMode(localStorage.getItem(STORAGE_KEYS.libraryMode));
       } catch (_) {
-        return 'vinyl';
+        return 'digital';
       }
     }
 

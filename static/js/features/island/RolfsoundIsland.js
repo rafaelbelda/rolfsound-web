@@ -12,7 +12,7 @@ class RolfsoundIsland extends HTMLElement {
         this.attachShadow({ mode: 'open' });
 
         this.activeTab   = this.getAttribute('active-tab') || 'library';
-        this.libraryMode = this.getAttribute('library-mode') === 'digital' ? 'digital' : 'vinyl';
+        this.libraryMode = this.getAttribute('library-mode') === 'vinyl' ? 'vinyl' : 'digital';
         this.isLocked    = false;
         this._listenersAttached = false;
         this._onShadowClick = null;
