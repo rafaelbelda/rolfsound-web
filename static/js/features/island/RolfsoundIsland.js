@@ -26,6 +26,11 @@ class RolfsoundIsland extends HTMLElement {
         this._audioRafId = null;
         this._audioMeterIdle = true;
         this._audioMeterBound = (now) => this._renderAudioMeter(now);
+
+        // Touch-only: the filters drawer opens on hover on desktop, which is
+        // unreachable on touch. On coarse pointers we toggle it via tap instead.
+        this._isCoarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+        this._onDocPointerDownForFilters = null;
     }
 
     static get observedAttributes() {
@@ -57,6 +62,8 @@ class RolfsoundIsland extends HTMLElement {
             this.shadowRoot.removeEventListener('click', this._onShadowClick);
             this._onShadowClick = null;
         }
+
+        this.setFiltersOpen(false); // detaches the document outside-tap listener
 
         this.hideNotification({ immediate: true });
         this.cancelPlaylistNamePrompt(null, true);
@@ -138,6 +145,7 @@ class RolfsoundIsland extends HTMLElement {
 
     attributeChangedCallback(name, oldValue, newValue) {
         if (name === 'active-tab' && oldValue !== newValue) {
+            this.setFiltersOpen(false); // drawer is library/vinyl-only; close on any tab change
             this.activeTab = newValue;
             this.updateActiveTab();
             this.reconcileMini();
@@ -150,6 +158,7 @@ class RolfsoundIsland extends HTMLElement {
         }
 
         if (name === 'library-mode' && oldValue !== newValue) {
+            this.setFiltersOpen(false); // close when leaving vinyl mode (drawer is vinyl-only)
             this.libraryMode = newValue === 'digital' ? 'digital' : 'vinyl';
             this.syncLibraryModeToggle();
         }
@@ -176,10 +185,20 @@ class RolfsoundIsland extends HTMLElement {
                 const tab = navLink.dataset.tab;
                 if (!tab || this.activeTab === tab) return;
 
+                this.setFiltersOpen(false);
                 this.setAttribute('active-tab', tab);
                 this.dispatchEvent(new CustomEvent('rolfsound-navigate', {
                     bubbles: true, composed: true, detail: { view: tab }
                 }));
+                return;
+            }
+
+            // ── Filters indicator (touch only) ──
+            // On desktop the drawer opens on hover; coarse pointers tap the
+            // "Filters" hint below the bar to toggle the same expanded state.
+            if (this._isCoarsePointer && e.target.closest('#external-indicator')) {
+                e.preventDefault();
+                this.toggleFiltersDrawer();
                 return;
             }
 
@@ -192,10 +211,43 @@ class RolfsoundIsland extends HTMLElement {
                 this.dispatchEvent(new CustomEvent('rolfsound-filter', {
                     bubbles: true, composed: true, detail: { filter: filterBtn.dataset.filter }
                 }));
+                // Touch: collapse the drawer once a filter is chosen (desktop keeps
+                // it open as long as the pointer hovers).
+                if (this._isCoarsePointer) this.setFiltersOpen(false);
                 return;
             }
         };
         this.shadowRoot.addEventListener('click', this._onShadowClick);
+    }
+
+    // ── Filters drawer (touch tap-toggle) ───────────────────────────────────
+    // Mirrors the desktop hover state via the [filters-open] attribute. The CSS
+    // that reacts to it is gated behind @media (hover: none), and this is only
+    // ever called on coarse pointers, so desktop behavior is untouched.
+
+    toggleFiltersDrawer() {
+        this.setFiltersOpen(!this.hasAttribute('filters-open'));
+    }
+
+    setFiltersOpen(open) {
+        const isOpen = this.hasAttribute('filters-open');
+        if (open === isOpen) return;
+
+        if (open) {
+            this.setAttribute('filters-open', '');
+            // Close on a tap anywhere outside the island. Registered on the next
+            // tick so the opening tap itself doesn't immediately close it.
+            this._onDocPointerDownForFilters = (ev) => {
+                if (!ev.composedPath().includes(this)) this.setFiltersOpen(false);
+            };
+            document.addEventListener('pointerdown', this._onDocPointerDownForFilters, true);
+        } else {
+            this.removeAttribute('filters-open');
+            if (this._onDocPointerDownForFilters) {
+                document.removeEventListener('pointerdown', this._onDocPointerDownForFilters, true);
+                this._onDocPointerDownForFilters = null;
+            }
+        }
     }
 
     updateActiveTab() {
@@ -872,10 +924,11 @@ class RolfsoundIsland extends HTMLElement {
                 --gray: var(--color-text-muted);
                 --border-metal: var(--color-border-subtle);
                 --border-metal-bright: var(--color-border-strong);
-                position: fixed; top: 15px; left: 50%; transform: translateX(-50%);
+                position: fixed; top: calc(15px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
                 z-index: 1000; pointer-events: none;
 
-                --default-w: 450px;
+                /* min() keeps the desktop 450px and only shrinks below ~474px viewports */
+                --default-w: min(450px, calc(100vw - 24px));
                 --default-h: 38px;
                 --default-r: var(--radius-dynamic-island);
             }
@@ -1049,6 +1102,32 @@ class RolfsoundIsland extends HTMLElement {
                 opacity: 1; pointer-events: auto; transform: translateY(0);
             }
 
+            /* ── Touch: tap-to-toggle the filters drawer ──
+               Mirrors the hover rules above but keyed on [filters-open] (set by
+               tapping the "Filters" hint). Gated to (hover: none) so desktop is
+               untouched. Slightly taller open height + larger chips for fingers. */
+            @media (hover: none) {
+                #external-indicator {
+                    padding: 10px 16px;
+                    min-height: 44px;
+                    justify-content: center;
+                }
+                :host([active-tab="library"][library-mode="vinyl"][filters-open]:not([inspecting])) #bar-container:not(.notifying) {
+                    --default-h: 104px;
+                    --default-r: var(--radius-dynamic-island-expanded);
+                }
+                :host([active-tab="library"][library-mode="vinyl"][filters-open]:not([inspecting])) #bar-container:not(.notifying) #filters-drawer {
+                    opacity: 1; pointer-events: auto; transform: translateY(0);
+                }
+                :host([active-tab="library"][library-mode="vinyl"][filters-open]:not([inspecting])) #external-indicator {
+                    opacity: 0; transform: translateY(10px); pointer-events: none;
+                }
+                .filter-btn {
+                    padding: 10px 12px;
+                    min-height: 40px;
+                }
+            }
+
             .filter-btn {
                 background: var(--color-surface-interactive); border: 1px solid var(--color-border-interactive);
                 color: var(--gray); border-radius: 12px; padding: 6px 10px;
@@ -1144,7 +1223,7 @@ class RolfsoundIsland extends HTMLElement {
                 opacity: 1; pointer-events: auto;
             }
             .mitosis-pill.search-expanded {
-                width: 560px;
+                width: min(560px, calc(100vw - 24px));
                 border-radius: var(--pill-r, var(--default-r));
                 transform: translateX(-50%) translateY(var(--mitosis-distance, 55px)) scale(1);
                 transition:
@@ -1176,6 +1255,14 @@ class RolfsoundIsland extends HTMLElement {
                 transition: opacity 0.25s ease 0.3s, transform 0.3s var(--ease-spring) 0.3s;
             }
             .search-input::placeholder { color: var(--gray); }
+
+            /* Touch devices: inputs <16px trigger iOS Safari auto-zoom on focus. */
+            @media (pointer: coarse) {
+                .search-input,
+                input {
+                    font-size: 16px;
+                }
+            }
             .mitosis-pill.search-expanded .search-input { opacity: 1; transform: translateX(0); pointer-events: auto; }
             .search-close {
                 flex-shrink: 0; background: none; border: none;

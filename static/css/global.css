@@ -226,7 +226,8 @@ html, body {
   inset: 0;
   width: 100vw;
   height: 100vh;
-  
+  height: 100dvh; /* avoids the iOS/Android dynamic-toolbar 100vh jump; falls back to 100vh */
+
   /* Estado Inicial: Escondido, levemente menor e borrado */
   opacity: 0;
   transform: scale(0.95);
@@ -552,5 +553,24 @@ body[data-backdrop-blur="modal"]::before {
   /* O cursor DOM permanece visível mas sem slow-lerp — já é gerenciado via JS */
   #cursor-dot {
     transition: none !important;
+  }
+}
+
+/* ─── TOUCH INPUT ZOOM GUARD ──────────────────────────────────────────────── */
+/* iOS Safari auto-zooms when focusing an input with font-size < 16px. Only      */
+/* affects coarse pointers, so desktop sizing is untouched. (Shadow-DOM inputs   */
+/* such as the island search box set this within their own stylesheets.)         */
+
+@media (pointer: coarse) {
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="number"],
+  input[type="password"],
+  input[type="url"],
+  input:not([type]),
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

@@ -111,10 +111,12 @@ class RolfsoundMiniplayer extends HTMLElement {
         :host {
           display: block;
           position: fixed;
-          bottom: var(--mini-bottom, 30px);
+          /* env() inset is 0 on desktop / non-notched, so this is desktop-safe. */
+          bottom: calc(var(--mini-bottom, 30px) + env(safe-area-inset-bottom, 0px));
           left: 50%;
           transform: translateX(-50%);
-          width: var(--mini-width, 460px);
+          /* min() keeps the desktop 460px and only shrinks on narrow viewports. */
+          width: min(var(--mini-width, 460px), calc(100vw - 24px));
           height: var(--mini-height, 58px);
           z-index: 994;
           pointer-events: auto;

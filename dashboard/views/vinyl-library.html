@@ -1,6 +1,6 @@
 <style>
   /* ─── CSS ESPECÍFICO DO MOTOR 3D ─── */
-  #webgl-container { position: absolute; inset: 0; width: 100vw; height: 100vh; display: block; cursor: none; z-index: 10; }
+  #webgl-container { position: absolute; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; cursor: none; z-index: 10; }
   #webgl-container:active { cursor: none; }
     #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 2px; text-transform: uppercase; font-size: var(--fs-md, 11px); opacity: 0.6; z-index: 50; pointer-events: none; color: var(--white); transition: opacity 0.5s ease; }
         #pull-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); letter-spacing: 3px; text-transform: uppercase; font-size: var(--fs-sm, 10px); color: var(--color-text-muted); z-index: 50; pointer-events: none; opacity: 0; transition: color 0.2s ease; }
@@ -150,11 +150,15 @@ const textureLRU = {
   camera.position.set(0, 0, 30); 
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  // Touch devices get a lighter profile: no MSAA, cheaper shadow filtering, and a
+  // tighter pixel-ratio cap. Soft shadows + antialias at DPR 2-3 are the heaviest
+  // part of this scene and the most likely to make a phone GPU stutter.
+  const _coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  const renderer = new THREE.WebGLRenderer({ antialias: !_coarsePointer, alpha: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, _coarsePointer ? 1.5 : 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = _coarsePointer ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   // Iluminação

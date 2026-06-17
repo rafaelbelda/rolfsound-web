@@ -3,6 +3,7 @@
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain; /* stop scroll chaining / Android pull-to-refresh */
   padding: 72px 20px 28px;
 }
 
@@ -484,6 +485,13 @@
 
 .library-track-row:hover .track-row-actions {
   opacity: 1;
+}
+
+/* Touch devices have no hover to reveal actions — keep them fully visible. */
+@media (hover: none) {
+  .track-row-actions {
+    opacity: 1;
+  }
 }
 
 .detail-stack {

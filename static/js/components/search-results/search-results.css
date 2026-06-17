@@ -103,6 +103,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain; /* stop scroll chaining / Android pull-to-refresh */
   padding: 4px 5px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.1) transparent;
