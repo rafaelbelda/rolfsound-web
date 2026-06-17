@@ -254,6 +254,43 @@ export default class PlayerShell {
           white-space: nowrap;
           font-weight: 500;
         }
+
+        /* ── Touch: Remix/Queue are hover-revealed and positioned off the pill's
+           left/right edges — unreachable on touch and off-screen once the pill is
+           near full-width. On coarse pointers, surface them as an always-visible
+           pair directly below the controls pill. Desktop hover behavior is
+           untouched (these rules are gated to hover:none and come last in source). ── */
+        @media (hover: none) {
+          /* Drop the desktop side hint labels and the off-pill hover catchers. */
+          #remix-btn-hint,
+          #queue-btn-hint { display: none; }
+          #playback-controls-shell::before,
+          #playback-controls-shell::after { display: none; }
+
+          #btn-remix,
+          #btn-queue {
+            position: absolute;
+            top: calc(100% + 12px);
+            bottom: auto;
+            width: 48px;
+            height: 48px;
+            opacity: 1;
+            pointer-events: auto;
+            z-index: 2;
+          }
+          /* Centered pair, 12px apart, below the pill. */
+          #btn-remix {
+            right: auto;
+            left: 50%;
+            transform: translateX(calc(-100% - 6px));
+            transform-origin: center;
+          }
+          #btn-queue {
+            left: 50%;
+            transform: translateX(6px);
+            transform-origin: center;
+          }
+        }
       </style>
 
       <div id="playback-inner-wrapper" style="
