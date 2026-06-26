@@ -13,42 +13,40 @@ export const TOTAL_H      = SQUARE_H + GAP + CONTROLS_H; // 406px
 export const MITOSIS_DROP = 22;
 
 /**
- * Compute pixel positions for each slot given a layout mode.
+ * Compute pixel positions for each open slot given a layout mode string.
+ * Slots are laid out left→right as: remix, player, results, queue. Each is
+ * PLAYER_W wide with GAP between, and the whole group is centred. A panel's
+ * `*Left` is null when it isn't part of the mode.
  *
- * Modes:
- *   'player-only'          – player centred
- *   'player+queue'         – player left, queue right  (existing 2-col)
- *   'player+results'       – player left, results right
- *   'player+results+queue' – player left, results centre, queue right
+ * Examples: 'player-only', 'player+queue', 'player+remix',
+ *           'remix+player+queue', 'player+results+queue'.
  *
- * @param {'player-only'|'player+queue'|'player+results'|'player+results+queue'} mode
- * @returns {{ playerLeft: number, resultsLeft: number|null, queueLeft: number|null, targetTop: number }}
+ * @param {string} mode
+ * @returns {{ playerLeft: number, remixLeft: number|null, resultsLeft: number|null, queueLeft: number|null, targetTop: number }}
  */
 export function computeLayout(mode) {
     const targetTop = (window.innerHeight - TOTAL_H) / 2;
 
-    if (mode === 'player+queue') {
-        const combined = PLAYER_W + GAP + PLAYER_W;
-        const origin   = (window.innerWidth - combined) / 2;
-        return { playerLeft: origin, resultsLeft: null, queueLeft: origin + PLAYER_W + GAP, targetTop };
-    }
-    if (mode === 'player+results') {
-        const combined = PLAYER_W + GAP + PLAYER_W;
-        const origin   = (window.innerWidth - combined) / 2;
-        return { playerLeft: origin, resultsLeft: origin + PLAYER_W + GAP, queueLeft: null, targetTop };
-    }
-    if (mode === 'player+results+queue') {
-        const combined = 3 * PLAYER_W + 2 * GAP;
-        const origin   = (window.innerWidth - combined) / 2;
-        return {
-            playerLeft:  origin,
-            resultsLeft: origin + PLAYER_W + GAP,
-            queueLeft:   origin + 2 * (PLAYER_W + GAP),
-            targetTop
-        };
-    }
-    // player-only (default)
-    return { playerLeft: (window.innerWidth - PLAYER_W) / 2, resultsLeft: null, queueLeft: null, targetTop };
+    const cols = [];
+    if (mode.includes('remix'))   cols.push('remix');
+    cols.push('player');
+    if (mode.includes('results')) cols.push('results');
+    if (mode.includes('queue'))   cols.push('queue');
+
+    const combined = cols.length * PLAYER_W + (cols.length - 1) * GAP;
+    const origin   = (window.innerWidth - combined) / 2;
+    const leftOf   = name => {
+        const i = cols.indexOf(name);
+        return i < 0 ? null : origin + i * (PLAYER_W + GAP);
+    };
+
+    return {
+        playerLeft:  leftOf('player'),
+        remixLeft:   leftOf('remix'),
+        resultsLeft: leftOf('results'),
+        queueLeft:   leftOf('queue'),
+        targetTop,
+    };
 }
 
 const BUDDING_OVERLAP = 6;
@@ -300,12 +298,15 @@ export default class MitosisStateMachine {
       window.history.replaceState({ rolfsound: 'library' }, '', '/library');
     }
 
-    if (m.isQueueOpen) {
+    if (m.isQueueOpen || m.isRemixOpen) {
       AnimationEngine.clearScheduled(m, '_queueTimers');
       OverlayBackdropController.hide('player-panel');
       if (m.queueContainer?.parentNode) m.queueContainer.remove();
+      if (m.remixContainer?.parentNode) m.remixContainer.remove();
       m.queueContainer = null;
+      m.remixContainer = null;
       m.isQueueOpen    = false;
+      m.isRemixOpen    = false;
     }
 
     const container = m.playerContainer;

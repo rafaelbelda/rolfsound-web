@@ -22,8 +22,8 @@
   <script type="module" src="/static/js/components/queue-button/queue-button.js"></script>
   <script type="module" src="/static/js/components/volume-slider/volume-slider.js?v=player-knob-fix-20260501"></script>
   <script type="module" src="/static/js/components/device-toggle/device-toggle.js"></script>
-  <script type="module" src="/static/js/components/remix-button/remix-button.js"></script>
-  <script type="module" src="/static/js/components/remix-panel/remix-panel.js?v=player-knob-fix-20260501"></script>
+  <script type="module" src="/static/js/components/remix-button/remix-button.js?v=remix-rulers-20260625"></script>
+  <script type="module" src="/static/js/components/remix-panel/remix-panel.js?v=remix-rulers-20260625"></script>
   <script type="module" src="/static/js/components/track-row/track-row.js"></script>
   <script type="module" src="/static/js/components/search-results/search-results.js"></script>
   <script type="module" src="/static/js/features/player/PlaybackStateStore.js"></script>
@@ -58,9 +58,13 @@
     import ContextMenuController from '/static/js/features/search/ContextMenuController.js';
     import PlaylistController from '/static/js/features/library/PlaylistController.js';
     import UploadController from '/static/js/features/library/UploadController.js';
+    import { initWakeLock } from '/static/js/utils/wakeLock.js';
 
     const meuCursor = new Cursor();
     window.meuCursor = meuCursor;
+
+    // Keep the screen from auto-dimming/sleeping while the app is open.
+    initWakeLock();
 
     const island     = document.querySelector('rolfsound-island');
     const resultsEl  = document.querySelector('rolfsound-search-results');

@@ -29,7 +29,7 @@ DEFAULT_LIBRARY_LAYOUT = {
             "title": "Tracks",
             "size": "wide",
             "enabled": True,
-            "config": {"sort": "recent", "limit": 40},
+            "config": {"sort": "recent", "limit": 0},  # 0 = show all tracks
         },
         {
             "id": "artists-main",

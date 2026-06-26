@@ -1,4 +1,7 @@
 // static/js/components/remix-button/remix-button.js
+// Visual shell only — active state + open styling.
+// Click dispatches 'rolfsound-remix-click' (bubbles, composed) so PlayerShell
+// runs the side-panel animation it owns — the exact pattern the queue button uses.
 import RolfsoundControl           from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
 
@@ -8,8 +11,6 @@ class RolfsoundRemixButton extends RolfsoundControl {
   constructor() {
     super();
     this._active = false;
-    this._open = false;
-    this._onPanelState = (event) => this.setPanelOpen(Boolean(event.detail?.open));
   }
 
   render() {
@@ -22,17 +23,17 @@ class RolfsoundRemixButton extends RolfsoundControl {
       </button>
     `;
     this._btn = this.shadowRoot.querySelector('button');
-    this._btn.addEventListener('click', () => this._toggle());
+    this._btn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.dispatchEvent(new CustomEvent('rolfsound-remix-click', {
+        bubbles: true, composed: true
+      }));
+    });
     loadCss(CSS_URL).then(sheet => { this.shadowRoot.adoptedStyleSheets = [sheet]; });
   }
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener('rolfsound:remix-panel:state', this._onPanelState);
-  }
-
   subscribe() {
-    window.addEventListener('rolfsound:remix-panel:state', this._onPanelState);
     this.on('state.remix', s => {
       const pitch = Number(s?.pitch_semitones ?? 0);
       const tempo = Number(s?.tempo_ratio ?? 1);
@@ -44,47 +45,8 @@ class RolfsoundRemixButton extends RolfsoundControl {
     });
   }
 
-  _toggle() {
-    const rect = this._fullButtonRect();
-    window.dispatchEvent(new CustomEvent('rolfsound:remix-panel:toggle', {
-      detail: {
-        sourceRect: {
-          left: rect.left,
-          top: rect.top,
-          right: rect.right,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        },
-      },
-    }));
-  }
-
-  _fullButtonRect() {
-    // On touch the button sits below the pill (not docked off its side), so the
-    // popup should morph from its real on-screen position.
-    if (window.matchMedia?.('(hover: none)')?.matches) return this.getBoundingClientRect();
-
-    const shellRect = this.parentElement?.getBoundingClientRect?.();
-    if (shellRect?.width && shellRect?.height) {
-      const size = shellRect.height;
-      const gap = 4;
-      return {
-        left: shellRect.left - size - gap,
-        top: shellRect.top + shellRect.height / 2 - size / 2,
-        right: shellRect.left - gap,
-        bottom: shellRect.top + shellRect.height / 2 + size / 2,
-        width: size,
-        height: size,
-      };
-    }
-
-    return this.getBoundingClientRect();
-  }
-
-  setPanelOpen(open) {
-    if (open === this._open) return;
-    this._open = open;
+  // Called by PlayerShell to sync open/closed styling (mirrors queue button).
+  setRemixOpen(open) {
     this.classList.toggle('remix-open', open);
     this._btn?.setAttribute('aria-expanded', String(open));
   }

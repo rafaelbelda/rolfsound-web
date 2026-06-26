@@ -398,7 +398,7 @@ export default class PlayerShell {
 
             <!-- Seek bar — delegado ao Web Component -->
             <rolfsound-playback-timestamp style="position:absolute;bottom:8px;right:12px;z-index:3;"></rolfsound-playback-timestamp>
-            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;height:12px;z-index:4;"></rolfsound-seek-bar>
+            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;height:22px;z-index:4;"></rolfsound-seek-bar>
 
             <!-- Volume slider — delegado ao Web Component -->
           </div>
@@ -425,7 +425,6 @@ export default class PlayerShell {
           </div>
 
           <rolfsound-queue-button id="btn-queue"></rolfsound-queue-button>
-          <rolfsound-remix-panel id="remix-panel" style="bottom:0;right:calc(100% + 10px);--remix-panel-h:${TOTAL_H}px;"></rolfsound-remix-panel>
 
           <div id="queue-btn-hint" aria-hidden="true">
             <span class="queue-hint-line-v"></span>
@@ -670,17 +669,20 @@ export default class PlayerShell {
   attachControlListeners() {
     const m = this._m;
     m.playerContainer?.addEventListener('rolfsound-queue-click', (e) => this.handleQueueClick(e));
+    m.playerContainer?.addEventListener('rolfsound-remix-click', (e) => this.handleRemixClick(e));
 
     m._onOutsideClick = (e) => {
       if (!m.isMorphed) return;
       const inPlayer = m.playerContainer?.contains(e.target);
       const inQueue  = m.queueContainer?.contains(e.target);
+      const inRemix  = m.remixContainer?.contains(e.target);
       const inIsland = e.composedPath?.().some(el => el.tagName === 'ROLFSOUND-ISLAND');
-      if (inPlayer || inQueue || inIsland) return;
-      // On touch the queue is a popup floating over a backdrop — an outside tap
+      if (inPlayer || inQueue || inRemix || inIsland) return;
+      // On touch the panels are popups floating over a backdrop — an outside tap
       // (including the backdrop itself) should dismiss only the popup, not
       // collapse the whole player.
       if (isCoarsePointer() && m.isQueueOpen) { this.closeQueuePanel(); return; }
+      if (isCoarsePointer() && m.isRemixOpen) { this.closeRemixPanel(); return; }
       m._mitosis.unmorph({ reason: 'outside-click' });
     };
     document.addEventListener('mousedown', m._onOutsideClick);
@@ -690,15 +692,19 @@ export default class PlayerShell {
   // LAYOUT — multi-column slot system
   // ─────────────────────────────────────────────────────────────
 
-  /** Returns the current layout mode based on open panels. */
+  /**
+   * Returns the current layout mode based on open panels. Slots are laid out
+   * left→right as: remix, player, results, queue. Remix and queue are mutually
+   * exclusive (see openSidePanel), so they never both appear.
+   */
   _currentMode() {
     const m          = this._m;
-    const searchOpen = document.body.dataset.searchPanel === 'open';
-    const queueOpen  = m.isQueueOpen;
-    if (searchOpen && queueOpen) return 'player+results+queue';
-    if (searchOpen)              return 'player+results';
-    if (queueOpen)               return 'player+queue';
-    return 'player-only';
+    const parts      = [];
+    if (m.isRemixOpen)                              parts.push('remix');
+    parts.push('player');
+    if (document.body.dataset.searchPanel === 'open') parts.push('results');
+    if (m.isQueueOpen)                              parts.push('queue');
+    return parts.length === 1 ? 'player-only' : parts.join('+');
   }
 
   /**
@@ -714,111 +720,126 @@ export default class PlayerShell {
 
     if (!m.playerContainer) return;
 
-    const { playerLeft, queueLeft, resultsLeft, targetTop } = computeLayout(mode);
+    const { playerLeft, remixLeft, queueLeft, resultsLeft, targetTop } = computeLayout(mode);
 
-    // ── Animate player ──
-    const currentPlayerLeft = parseFloat(m.playerContainer.style.left);
-    if (!isNaN(currentPlayerLeft) && Math.abs(currentPlayerLeft - playerLeft) > 0.5) {
-      m._animator.play(m.playerContainer, [
-        { transform: 'none' },
-        { transform: `translateX(${playerLeft - currentPlayerLeft}px)` }
-      ], { duration, easing: ease });
+    // ── Slide an element from its current `left` to a target `left` ──
+    const slideTo = (el, targetLeft) => {
+      if (!el || targetLeft == null) return;
+      const currentLeft = parseFloat(el.style.left);
+      if (!isNaN(currentLeft) && Math.abs(currentLeft - targetLeft) > 0.5) {
+        m._animator.play(el, [
+          { transform: 'none' },
+          { transform: `translateX(${targetLeft - currentLeft}px)` }
+        ], { duration, easing: ease });
 
-      AnimationEngine.schedule(m, () => {
-        if (!m.playerContainer) return;
-        m._animator.releaseAll(m.playerContainer);
-        m.playerContainer.style.left      = `${playerLeft}px`;
-        m.playerContainer.style.transform = 'none';
-      }, duration + 80, '_queueTimers');
-    } else {
-      m.playerContainer.style.left = `${playerLeft}px`;
-    }
+        AnimationEngine.schedule(m, () => {
+          if (!el.parentNode) return;
+          m._animator.releaseAll(el);
+          el.style.left      = `${targetLeft}px`;
+          el.style.transform = 'none';
+        }, duration + 80, '_queueTimers');
+      } else {
+        el.style.left = `${targetLeft}px`;
+      }
+    };
+
+    slideTo(m.playerContainer, playerLeft);
 
     // ── Gate hover-catcher ──
     m.playerContainer.classList.toggle('search-open', mode.includes('results'));
 
-    // ── Animate queue panel if open ──
-    if (m.isQueueOpen && m.queueContainer && queueLeft != null) {
-      const currentQueueLeft = parseFloat(m.queueContainer.style.left);
-      if (!isNaN(currentQueueLeft) && Math.abs(currentQueueLeft - queueLeft) > 0.5) {
-        m._animator.play(m.queueContainer, [
-          { transform: 'none' },
-          { transform: `translateX(${queueLeft - currentQueueLeft}px)` }
-        ], { duration, easing: ease });
-
-        AnimationEngine.schedule(m, () => {
-          if (!m.queueContainer) return;
-          m._animator.releaseAll(m.queueContainer);
-          m.queueContainer.style.left      = `${queueLeft}px`;
-          m.queueContainer.style.transform = 'none';
-        }, duration + 80, '_queueTimers');
-      }
-    }
+    // ── Animate side panels if open ──
+    if (m.isRemixOpen) slideTo(m.remixContainer, remixLeft);
+    if (m.isQueueOpen) slideTo(m.queueContainer, queueLeft);
 
     // ── Notify results panel of its new slot ──
     window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
-      detail: { mode, playerLeft, resultsLeft, queueLeft, targetTop }
+      detail: { mode, playerLeft, remixLeft, resultsLeft, queueLeft, targetTop }
     }));
   }
 
   // ─────────────────────────────────────────────────────────────
-  // QUEUE PANEL
+  // SIDE PANELS — remix (left) & queue (right) share one mechanism
   // ─────────────────────────────────────────────────────────────
 
-  handleQueueClick(event) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    const m = this._m;
-    if (m.isQueueOpen) this.closeQueuePanel();
-    else this.openQueuePanel();
+  /** Per-side configuration; `side` is the slide direction (-1 left, +1 right). */
+  _panelCfg(key) {
+    return key === 'remix'
+      ? { key: 'remix', side: -1, openKey: 'isRemixOpen', containerKey: 'remixContainer',
+          containerId: 'remix-panel-container', btnId: '#btn-remix', hintId: '#remix-btn-hint',
+          setOpen: 'setRemixOpen', rectSide: 'remix', leftKey: 'remixLeft',
+          openEvent: 'rolfsound-remix-open', closeEvent: 'rolfsound-remix-close' }
+      : { key: 'queue', side: 1, openKey: 'isQueueOpen', containerKey: 'queueContainer',
+          containerId: 'queue-panel-container', btnId: '#btn-queue', hintId: '#queue-btn-hint',
+          setOpen: 'setQueueOpen', rectSide: 'queue', leftKey: 'queueLeft',
+          openEvent: 'rolfsound-queue-open', closeEvent: 'rolfsound-queue-close' };
   }
 
-  openQueuePanel() {
-    const m = this._m;
-    if (m.isQueueOpen || !m.playerContainer) return;
-    m.isQueueOpen = true;
+  handleQueueClick(event) { event?.preventDefault(); event?.stopPropagation(); this.toggleSidePanel('queue'); }
+  handleRemixClick(event) { event?.preventDefault(); event?.stopPropagation(); this.toggleSidePanel('remix'); }
+
+  openQueuePanel()  { this.openSidePanel('queue'); }
+  closeQueuePanel() { this.closeSidePanel('queue'); }
+  openRemixPanel()  { this.openSidePanel('remix'); }
+  closeRemixPanel() { this.closeSidePanel('remix'); }
+
+  toggleSidePanel(key) {
+    if (this._m[this._panelCfg(key).openKey]) this.closeSidePanel(key);
+    else this.openSidePanel(key);
+  }
+
+  openSidePanel(key) {
+    const m   = this._m;
+    const cfg = this._panelCfg(key);
+    if (m[cfg.openKey] || !m.playerContainer) return;
+
+    // Remix and queue are mutually exclusive — collapse the other first so the
+    // player only ever shares the stage with a single side panel.
+    const otherKey = key === 'remix' ? 'queue' : 'remix';
+    if (m[this._panelCfg(otherKey).openKey]) this.closeSidePanel(otherKey, { immediate: true });
+
+    m[cfg.openKey] = true;
     AnimationEngine.clearScheduled(m, '_queueTimers');
 
-    const btnEl = m.playerContainer.querySelector('#btn-queue');
-    if (!btnEl) { m.isQueueOpen = false; return; }
+    const btnEl = m.playerContainer.querySelector(cfg.btnId);
+    if (!btnEl) { m[cfg.openKey] = false; return; }
 
-    if (m.queueContainer?.parentNode) {
-      m._animator.releaseAll(m.queueContainer);
-      m.queueContainer.remove();
+    if (m[cfg.containerKey]?.parentNode) {
+      m._animator.releaseAll(m[cfg.containerKey]);
+      m[cfg.containerKey].remove();
     }
 
     const coarse     = isCoarsePointer();
-    const btnRect    = (coarse ? null : this._sideButtonRect('queue')) || btnEl.getBoundingClientRect();
+    const btnRect    = (coarse ? null : this._sideButtonRect(cfg.rectSide)) || btnEl.getBoundingClientRect();
     const playerRect = m.playerContainer.getBoundingClientRect();
 
-    btnEl.setQueueOpen?.(true);
-    const hint = m.playerContainer.querySelector('#queue-btn-hint');
+    btnEl[cfg.setOpen]?.(true);
+    const hint = m.playerContainer.querySelector(cfg.hintId);
     if (hint) hint.style.opacity = '0';
 
-    // Use mode-aware layout so 3-col works when search is also open
-    const mode             = this._currentMode(); // 'player+queue' or 'player+results+queue'
+    const mode             = this._currentMode();
     const slots            = computeLayout(mode);
     const targetPlayerLeft = slots.playerLeft;
-    // On touch there is no room for a side slot — center the queue as a popup
+    // On touch there is no room for a side slot — center the panel as a popup
     // over the player and dim the rest with a tap-to-close backdrop.
     const targetTop        = coarse ? Math.max(8, slots.targetTop) : slots.targetTop;
-    const targetQueueLeft  = coarse
+    const targetPanelLeft  = coarse
       ? Math.max(8, (window.innerWidth - PLAYER_W) / 2)
-      : slots.queueLeft;
+      : slots[cfg.leftKey];
 
     if (coarse) {
       OverlayBackdropController.show('player-panel', {
         zIndex: 1000,
         interactive: true,
-        onBackdropClick: () => this.closeQueuePanel(),
+        onBackdropClick: () => this.closeSidePanel(key),
       });
     }
 
     const panel = document.createElement('div');
-    panel.id = 'queue-panel-container';
+    panel.id = cfg.containerId;
     panel.style.cssText = `
       position: fixed;
-      left: ${targetQueueLeft}px;
+      left: ${targetPanelLeft}px;
       top: ${targetTop}px;
       width: ${PLAYER_W}px;
       height: ${TOTAL_H}px;
@@ -834,9 +855,9 @@ export default class PlayerShell {
       will-change: transform;
     `;
     document.body.appendChild(panel);
-    m.queueContainer = panel;
+    m[cfg.containerKey] = panel;
 
-    const panelCenterX = targetQueueLeft + PLAYER_W / 2;
+    const panelCenterX = targetPanelLeft + PLAYER_W / 2;
     const panelCenterY = targetTop       + TOTAL_H  / 2;
     const btnCenterX   = btnRect.left + btnRect.width  / 2;
     const btnCenterY   = btnRect.top  + btnRect.height / 2;
@@ -850,8 +871,8 @@ export default class PlayerShell {
       { transform: 'none' }
     ], { duration: 520, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
 
-    // On touch the player stays centered (queue floats over it as a popup);
-    // on desktop it slides left to make room for the side-by-side queue slot.
+    // On touch the player stays centered (panel floats over it as a popup);
+    // on desktop it slides to make room for the side-by-side slot.
     if (!coarse) {
       const currentPlayerLeft = playerRect.left;
       m.playerContainer.style.transition = 'none';
@@ -864,14 +885,13 @@ export default class PlayerShell {
       ], { duration: 480, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
     }
 
-    // If search results panel needs to shift (3-col), notify via layout-applied
-    const { resultsLeft } = computeLayout(mode);
     window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
-      detail: { mode, playerLeft: targetPlayerLeft, resultsLeft, queueLeft: targetQueueLeft, targetTop }
+      detail: { mode, playerLeft: targetPlayerLeft, remixLeft: slots.remixLeft,
+                resultsLeft: slots.resultsLeft, queueLeft: slots.queueLeft, targetTop }
     }));
 
     AnimationEngine.schedule(m, () => {
-      if (!panel.parentNode || panel !== m.queueContainer) return;
+      if (!panel.parentNode || panel !== m[cfg.containerKey]) return;
 
       if (!coarse) {
         m._animator.releaseAll(m.playerContainer);
@@ -882,26 +902,42 @@ export default class PlayerShell {
       m._animator.releaseAll(panel);
       panel.style.willChange    = '';
       panel.style.pointerEvents = 'auto';
-      panel.style.overflowY     = 'auto';
-      panel.innerHTML = this.buildQueueHTML();
-
-      const closeBtn = panel.querySelector('#btn-queue-close');
-      if (closeBtn) closeBtn.addEventListener('click', () => this.closeQueuePanel());
-
-      const list = panel.querySelector('#queue-items-list');
-      if (list) {
-        list.addEventListener('click', (e) => {
-          const row = e.target.closest('.q-item');
-          if (!row) return;
-          const idx = parseInt(row.dataset.idx, 10);
-          if (!isNaN(idx)) this.playQueueItem(idx);
-        });
-      }
-
-      this._loadRecentHistory().then(() => this.renderQueuePanel());
+      this._mountPanelContent(key, panel);
     }, 560, '_queueTimers');
 
-    window.dispatchEvent(new CustomEvent('rolfsound-queue-open', { bubbles: true }));
+    window.dispatchEvent(new CustomEvent(cfg.openEvent, { bubbles: true }));
+  }
+
+  /** Fill a freshly-settled panel with its content + listeners. */
+  _mountPanelContent(key, panel) {
+    if (key === 'remix') {
+      panel.style.overflow = 'hidden';
+      panel.innerHTML = '<rolfsound-remix-panel style="display:block;width:100%;height:100%;"></rolfsound-remix-panel>';
+      const el = panel.querySelector('rolfsound-remix-panel');
+      // The panel's own close button lives outside playerContainer, so catch its
+      // toggle here (it only shows while open → toggle === close).
+      el.addEventListener('rolfsound-remix-click', () => this.closeRemixPanel());
+      customElements.whenDefined('rolfsound-remix-panel').then(() => el?.activate?.());
+      return;
+    }
+
+    panel.style.overflowY = 'auto';
+    panel.innerHTML = this.buildQueueHTML();
+
+    const closeBtn = panel.querySelector('#btn-queue-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => this.closeQueuePanel());
+
+    const list = panel.querySelector('#queue-items-list');
+    if (list) {
+      list.addEventListener('click', (e) => {
+        const row = e.target.closest('.q-item');
+        if (!row) return;
+        const idx = parseInt(row.dataset.idx, 10);
+        if (!isNaN(idx)) this.playQueueItem(idx);
+      });
+    }
+
+    this._loadRecentHistory().then(() => this.renderQueuePanel());
   }
 
   _sideButtonRect(side) {
@@ -935,37 +971,53 @@ export default class PlayerShell {
     };
   }
 
-  closeQueuePanel() {
-    const m = this._m;
-    if (!m.isQueueOpen || !m.queueContainer) return;
-    m.isQueueOpen = false;
+  /**
+   * Collapse a side panel back toward its button.
+   * @param {{ immediate?: boolean }} opts - `immediate` tears down without
+   *   animating (used for mutual exclusivity and full-player teardown).
+   */
+  closeSidePanel(key, { immediate = false } = {}) {
+    const m   = this._m;
+    const cfg = this._panelCfg(key);
+    if (!m[cfg.openKey] || !m[cfg.containerKey]) return;
+    m[cfg.openKey] = false;
     AnimationEngine.clearScheduled(m, '_queueTimers');
 
     const coarse = isCoarsePointer();
-    const panel = m.queueContainer;
+    const panel  = m[cfg.containerKey];
 
-    const btnEl = m.playerContainer?.querySelector('#btn-queue');
-    btnEl?.setQueueOpen?.(false);
-    const hint = m.playerContainer?.querySelector('#queue-btn-hint');
+    const btnEl = m.playerContainer?.querySelector(cfg.btnId);
+    btnEl?.[cfg.setOpen]?.(false);
+    const hint = m.playerContainer?.querySelector(cfg.hintId);
     if (hint) hint.style.opacity = '';
 
     if (coarse) OverlayBackdropController.hide('player-panel');
 
-    // After queue closes, the remaining mode may still be player+results
-    const modeAfter        = this._currentMode(); // computed with isQueueOpen=false already
+    if (immediate) {
+      m._animator.releaseAll(panel);
+      if (panel.parentNode) panel.remove();
+      if (panel === m[cfg.containerKey]) m[cfg.containerKey] = null;
+      window.dispatchEvent(new CustomEvent(cfg.closeEvent, { bubbles: true }));
+      return;
+    }
+
+    // The remaining mode is computed with this panel's open flag already false.
+    const modeAfter        = this._currentMode();
     const slots            = computeLayout(modeAfter);
     const targetPlayerLeft = slots.playerLeft;
     const targetTop        = slots.targetTop;
-    const finalBtnLeft     = targetPlayerLeft + PLAYER_W + 4;
     const finalBtnTop      = targetTop + SQUARE_H + GAP;
+    const finalBtnLeft     = cfg.side > 0
+      ? targetPlayerLeft + PLAYER_W + 4
+      : targetPlayerLeft - 4 - CONTROLS_H;
 
-    // Notify results panel of potential slot change (2-col → still 2-col or 0-col)
     window.dispatchEvent(new CustomEvent('rolfsound-layout-applied', {
-      detail: { mode: modeAfter, playerLeft: targetPlayerLeft, resultsLeft: slots.resultsLeft, queueLeft: null, targetTop }
+      detail: { mode: modeAfter, playerLeft: targetPlayerLeft, remixLeft: slots.remixLeft,
+                resultsLeft: slots.resultsLeft, queueLeft: slots.queueLeft, targetTop }
     }));
 
     // On touch the player never moved, so leave it put and collapse the popup
-    // back toward the real (below-pill) queue button.
+    // back toward the real (below-pill) button.
     if (m.playerContainer && !coarse) {
       const currentLeft  = parseFloat(m.playerContainer.style.left) || targetPlayerLeft;
       m._animator.play(m.playerContainer, [
@@ -1002,10 +1054,10 @@ export default class PlayerShell {
         m.playerContainer.style.transform = 'none';
       }
       if (panel.parentNode) panel.remove();
-      if (panel === m.queueContainer) m.queueContainer = null;
+      if (panel === m[cfg.containerKey]) m[cfg.containerKey] = null;
     }, 480, '_queueTimers');
 
-    window.dispatchEvent(new CustomEvent('rolfsound-queue-close', { bubbles: true }));
+    window.dispatchEvent(new CustomEvent(cfg.closeEvent, { bubbles: true }));
   }
 
   renderQueuePanel() {

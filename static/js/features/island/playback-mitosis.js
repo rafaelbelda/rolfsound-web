@@ -17,6 +17,8 @@ class PlaybackMitosisManager {
     this._division       = null;
     this.isQueueOpen     = false;
     this.queueContainer  = null;
+    this.isRemixOpen     = false;
+    this.remixContainer  = null;
 
     // ─── Playback state (single source of truth) ───
     this.state = {
@@ -96,6 +98,8 @@ class PlaybackMitosisManager {
   openQueuePanel()       { this._shell.openQueuePanel(); }
   closeQueuePanel()      { this._shell.closeQueuePanel(); }
   renderQueuePanel()     { this._shell.renderQueuePanel(); }
+  openRemixPanel()       { this._shell.openRemixPanel(); }
+  closeRemixPanel()      { this._shell.closeRemixPanel(); }
 
   updateThumbnail()              { this._crossfader.update(); }
   resetThumbnail()               { this._crossfader.reset(); }
@@ -346,8 +350,11 @@ class PlaybackMitosisManager {
     AnimationEngine.clearScheduled(this, '_thumbCleanup');
     AnimationEngine.clearScheduled(this, '_queueTimers');
     if (this.queueContainer?.parentNode) this.queueContainer.remove();
+    if (this.remixContainer?.parentNode) this.remixContainer.remove();
     this.queueContainer = null;
+    this.remixContainer = null;
     this.isQueueOpen    = false;
+    this.isRemixOpen    = false;
   }
 }
 

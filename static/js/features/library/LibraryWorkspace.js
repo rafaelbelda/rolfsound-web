@@ -6,7 +6,7 @@ import LibraryStore from '/static/js/features/library/LibraryStore.js';
 
 const BLOCK_TYPES = {
   albums: { title: 'Albums', view: 'grid', size: 'wide', config: { sort: 'recent', limit: 12 } },
-  tracks: { title: 'Tracks', view: 'list', size: 'wide', config: { sort: 'recent', limit: 40 } },
+  tracks: { title: 'Tracks', view: 'list', size: 'wide', config: { sort: 'recent', limit: 0 } },
   artists: { title: 'Artists', view: 'circles', size: 'wide', config: { sort: 'name', limit: 18 } },
   playlists: { title: 'Playlists', view: 'grid', size: 'wide', config: { sort: 'recent', limit: 12 } },
 };

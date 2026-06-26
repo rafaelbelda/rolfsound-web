@@ -2,7 +2,7 @@
 import RolfsoundControl from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
 
-const CSS_URL = '/static/js/components/seek-bar/seek-bar.css?v=player-knob-fix-20260501';
+const CSS_URL = '/static/js/components/seek-bar/seek-bar.css?v=seek-wider-20260625';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 

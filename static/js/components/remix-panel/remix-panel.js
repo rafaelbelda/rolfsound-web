@@ -1,421 +1,446 @@
 // static/js/components/remix-panel/remix-panel.js
+// Remix controls — twin vertical gauges (BPM + Pitch) with live key/Camelot.
+//
+// This is panel *content* only: PlayerShell mounts it inside the body-appended
+// side-panel container and owns the open/close/morph animation (same machinery
+// as the queue). The component owns the gauges, the real-data wiring (channel
+// subscriptions + intents) and the green→accent→red limit tinting.
 import RolfsoundControl           from '../../core/RolfsoundControl.js';
 import { adoptStyles as loadCss } from '../../core/adoptStyles.js';
-import '../knob/knob.js?v=player-knob-fix-20260501';
+import { deriveBaseKey, shiftKey } from '../../utils/keyShift.js';
 
 const CSS_URL = '/static/js/components/remix-panel/remix-panel.css';
 
-const KNOBS = Object.freeze({
-  pitch: {
-    min: -12,
-    max: 12,
-    step: 0.5,
-    neutral: 0,
-    valueKey: '_pitch',
-  },
-  tempo: {
-    min: 0.5,
-    max: 2.0,
-    step: 0.01,
-    neutral: 1,
-    valueKey: '_tempo',
-  },
-});
+// Engine limits — pitch in semitones, tempo as a playback-rate ratio.
+const PITCH = Object.freeze({ min: -12, max: 12, step: 0.5, neutral: 0 });
+const TEMPO = Object.freeze({ min: 0.5, max: 2.0, neutral: 1 });
 
 const INPUT_COMMIT_DEBOUNCE_MS = 140;
 const GUARD_MS = 1600;
+const LIMIT_RGB = [255, 77, 79];   // colour values fade toward near min/max
+const WHITE_VAL = [244, 246, 244];
+const WHITE_PTR = [255, 255, 255];
+const ZONE = 8;                    // ticks from each edge where the red tint ramps in
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const mix   = (a, b, t) => a.map((x, k) => Math.round(x + (b[k] - x) * t));
+const rgb   = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+const rgba  = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const comma = (n, dp = 1) => n.toFixed(dp).replace('.', ',');
+
 const TEMPLATE = `
-  <aside class="panel" aria-hidden="true" aria-label="Remix controls">
-    <header class="meta-top">
-      <div class="meta-copy">
-        <span class="meta-label">Tempo</span>
-        <strong class="bpm-value">-- BPM</strong>
-      </div>
-      <button class="panel-close-btn" type="button" title="Close remix" aria-label="Close remix">
+  <div class="remix-root">
+    <header class="head">
+      <h1>Remix</h1>
+      <button class="close-btn" type="button" title="Close remix" aria-label="Close remix">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <path d="M18 6 6 18M6 6l12 12"/>
         </svg>
       </button>
     </header>
 
-    <section class="knob-stack">
-      <article class="knob-unit" data-kind="tempo">
-        <rolfsound-knob class="knob-control" min="0.5" max="2" step="0.01" value="1" neutral="1"
-          px-per-step="4" sweep="270" start="-135" data-cursor="range" aria-label="BPM"></rolfsound-knob>
-        <div class="knob-copy">
-          <span class="knob-label">BPM</span>
-          <strong class="tempo-value">1.00x</strong>
+    <div class="stage">
+      <div class="col" data-col="bpm">
+        <span class="name">BPM</span>
+        <div class="value"><span data-val>--</span><span class="unit">bpm</span></div>
+        <div class="delta" data-delta></div>
+        <div class="ruler-wrap">
+          <div class="center-line"></div>
+          <div class="ruler" data-ruler tabindex="0" role="slider" aria-label="Tempo in beats per minute"></div>
         </div>
-      </article>
+      </div>
 
-      <article class="knob-unit" data-kind="pitch">
-        <rolfsound-knob class="knob-control" min="-12" max="12" step="0.5" value="0" neutral="0"
-          px-per-step="7" sweep="270" start="-135" data-cursor="range" aria-label="Pitch"></rolfsound-knob>
-        <div class="knob-copy">
-          <span class="knob-label">Pitch</span>
-          <strong class="pitch-value">0.0 st</strong>
+      <div class="col" data-col="pitch">
+        <span class="name">Pitch</span>
+        <div class="value"><span data-val>0,0</span><span class="unit">st</span></div>
+        <div class="delta" data-delta></div>
+        <div class="ruler-wrap">
+          <div class="center-line"></div>
+          <div class="ruler" data-ruler tabindex="0" role="slider" aria-label="Pitch in semitones"></div>
         </div>
-      </article>
-    </section>
+      </div>
+    </div>
 
-    <footer class="meta-bottom">
-      <span class="key-value">--</span>
-      <span class="camelot-value">--</span>
-      <button class="reset-btn" type="button" title="Reset remix">Reset</button>
-    </footer>
-  </aside>
+    <div class="keys">
+      <div class="k"><span class="lab">Key</span><span class="val key-std">--</span></div>
+      <div class="k cam"><span class="lab">Camelot</span><span class="val key-cam">--</span></div>
+    </div>
+
+    <div class="foot"><button class="reset-btn" type="button">Reset</button></div>
+  </div>
 `;
+
+/* ───────────── one vertical ruler (min at top, max at bottom) ─────────────
+   index 0 = max value (top); scrolling down selects lower values. Built once
+   per config; rebuilt when the BPM span (base tempo) changes. onUser fires only
+   for user-driven scrolls so programmatic syncs never echo back to the engine. */
+function VRuler(root, cfg, hooks) {
+  const ruler   = root.querySelector('[data-ruler]');
+  const valEl   = root.querySelector('[data-val]');
+  const deltaEl = root.querySelector('[data-delta]');
+
+  const STEP_PX = 18;
+  const steps   = Math.max(1, Math.round((cfg.max - cfg.min) / cfg.step));
+  const valueOf = i => Math.round((cfg.max - i * cfg.step) * 1000) / 1000;
+  const indexOf = v => clamp(Math.round((cfg.max - v) / cfg.step), 0, steps);
+  const edgeT   = i => { const d = Math.min(i, steps - i); return d < ZONE ? (ZONE - d) / ZONE : 0; };
+
+  let index     = indexOf(cfg.start);
+  let lastIndex = -1;
+  let userActive = false;
+  let raf = null, idleTimer = null;
+
+  const track = document.createElement('div');
+  track.className = 'rl-track';
+  const pad = () => { const s = document.createElement('div'); s.className = 'rl-spacer'; return s; };
+  const lead = pad(), tail = pad();
+  track.appendChild(lead);
+
+  const ticks = [], bars = [], baseColors = [];
+  for (let i = 0; i <= steps; i++) {
+    const v = valueOf(i), isMajor = cfg.major(v), t = edgeT(i);
+    const a0   = isMajor ? 0.42 : 0.22;
+    const base = t > 0 ? rgba(mix(WHITE_PTR, LIMIT_RGB, t), Math.min(0.85, a0 + 0.45 * t)) : `rgba(255,255,255,${a0})`;
+    const tick = document.createElement('div');
+    tick.className = 'rl-tick' + (isMajor ? ' major' : '');
+    tick.style.height = STEP_PX + 'px';
+    const bar = document.createElement('span');
+    bar.className = 'rl-bar';
+    bar.style.background = base;
+    tick.appendChild(bar);
+    if (isMajor) {
+      const lab = document.createElement('span');
+      lab.className = 'rl-lab';
+      lab.textContent = cfg.label(v);
+      tick.appendChild(lab);
+    }
+    track.appendChild(tick);
+    ticks.push(tick); bars.push(bar); baseColors.push(base);
+  }
+  track.appendChild(tail);
+  ruler.appendChild(track);
+
+  function sizeSpacers() {
+    const half = Math.max(0, Math.round(ruler.clientHeight / 2 - STEP_PX / 2));
+    lead.style.height = half + 'px';
+    tail.style.height = (half + 2) + 'px';
+  }
+  function scrollToIndex(i, smooth) {
+    ruler.scrollTo({ top: i * STEP_PX, behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  function paint(i) {
+    const v = valueOf(i);
+    valEl.textContent   = cfg.fmt(v);
+    deltaEl.textContent = cfg.delta(v);
+    if (i === lastIndex) return;
+    if (bars[lastIndex]) { ticks[lastIndex].classList.remove('active'); bars[lastIndex].style.background = baseColors[lastIndex]; }
+    const t = edgeT(i), accent = hooks.accent();
+    if (bars[i]) { ticks[i].classList.add('active'); bars[i].style.background = rgb(mix(accent, LIMIT_RGB, t)); }
+    root.style.setProperty('--ptr', rgb(mix(accent, LIMIT_RGB, t)));
+    root.style.setProperty('--valcol', t > 0 ? rgb(mix(WHITE_VAL, LIMIT_RGB, t)) : 'var(--ink)');
+    ruler.setAttribute('aria-valuenow', v);
+    ruler.setAttribute('aria-valuetext', cfg.fmt(v) + ' ' + cfg.unit);
+    lastIndex = i;
+    hooks.haptic?.();
+  }
+
+  function onScroll() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      const i = clamp(Math.round(ruler.scrollTop / STEP_PX), 0, steps);
+      const changed = i !== index;
+      index = i;
+      paint(i);
+      if (userActive && changed) cfg.onUser(valueOf(i));
+    });
+  }
+  ruler.addEventListener('scroll', onScroll, { passive: true });
+
+  const markActive = () => {
+    userActive = true;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { userActive = false; }, 480);
+  };
+  ['pointerdown', 'wheel', 'touchstart', 'keydown'].forEach(ev =>
+    ruler.addEventListener(ev, markActive, { passive: true }));
+
+  // Pointer drag (touch + wheel are native for a vertical scroll container).
+  let dragging = false, startY = 0, startTop = 0;
+  ruler.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse') return;
+    dragging = true; startY = e.clientY; startTop = ruler.scrollTop;
+    ruler.setPointerCapture(e.pointerId);
+  });
+  ruler.addEventListener('pointermove', e => { if (dragging) ruler.scrollTop = startTop - (e.clientY - startY); });
+  const endDrag = () => { if (dragging) { dragging = false; scrollToIndex(index, true); } };
+  ruler.addEventListener('pointerup', endDrag);
+  ruler.addEventListener('pointercancel', endDrag);
+
+  ruler.addEventListener('keydown', e => {
+    let d = 0;
+    if (e.key === 'ArrowUp') d = -1;
+    if (e.key === 'ArrowDown') d = 1;
+    if (!d) return;
+    e.preventDefault();
+    index = clamp(index + d, 0, steps);
+    scrollToIndex(index, true);
+  });
+
+  const onResize = () => { sizeSpacers(); scrollToIndex(index, false); };
+  window.addEventListener('resize', onResize);
+
+  requestAnimationFrame(() => { sizeSpacers(); scrollToIndex(index, false); paint(index); });
+
+  return {
+    /** Move to a value without firing onUser (engine/track-driven sync). */
+    setValue(v) {
+      index = indexOf(v);
+      sizeSpacers();
+      scrollToIndex(index, false);
+      paint(index);
+    },
+    refresh() { sizeSpacers(); scrollToIndex(index, false); paint(index); },
+    get value() { return valueOf(index); },
+    destroy() {
+      if (raf) cancelAnimationFrame(raf);
+      if (idleTimer) clearTimeout(idleTimer);
+      window.removeEventListener('resize', onResize);
+      ruler.removeEventListener('scroll', onScroll);
+      ruler.replaceChildren();
+    },
+  };
+}
 
 class RolfsoundRemixPanel extends RolfsoundControl {
   constructor() {
     super();
-    this._open = false;
     this._pitch = 0;
     this._tempo = 1;
     this._baseBpm = null;
-    this._musicalKey = null;
-    this._camelotKey = null;
+    this._baseKey = null;
     this._currentTrackId = null;
 
-    this._raf = 0;
-    this._pending = null;
-    this._emitTimer = null;
+    this._bpmRuler = null;
+    this._pitchRuler = null;
+
+    this._pending = false;
     this._dirty = false;
+    this._emitTimer = null;
     this._guardUntilMs = 0;
-    this._activeKnob = null;
-    this._motion = null;
-    this._onWindowToggle = event => this._toggle(event?.detail?.sourceRect);
   }
 
   render() {
     this.shadowRoot.innerHTML = TEMPLATE;
-    this._cacheDom();
-    this._bindKnob('pitch');
-    this._bindKnob('tempo');
-    this._resetBtn.addEventListener('click', () => this._reset());
-    this._closeBtn.addEventListener('click', () => this._setOpen(false));
+    this._els = {
+      keyStd:  this.shadowRoot.querySelector('.key-std'),
+      keyCam:  this.shadowRoot.querySelector('.key-cam'),
+      bpmCol:  this.shadowRoot.querySelector('[data-col="bpm"]'),
+      pitchCol:this.shadowRoot.querySelector('[data-col="pitch"]'),
+    };
+    this.shadowRoot.querySelector('.reset-btn').addEventListener('click', () => this._reset());
+    this.shadowRoot.querySelector('.close-btn').addEventListener('click', () => {
+      // Same toggle path the button uses — PlayerShell owns the close animation.
+      this.dispatchEvent(new CustomEvent('rolfsound-remix-click', { bubbles: true, composed: true }));
+    });
     loadCss(CSS_URL).then(sheet => { this.shadowRoot.adoptedStyleSheets = [sheet]; });
-    this._schedulePaint();
+
+    this._buildPitchRuler();
+    this._buildBpmRuler();
+    this._paintKey();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener('rolfsound:remix-panel:toggle', this._onWindowToggle);
     if (this._emitTimer) clearTimeout(this._emitTimer);
-    if (this._raf) cancelAnimationFrame(this._raf);
-    if (this._motion) this._motion.cancel();
+    this._bpmRuler?.destroy();
+    this._pitchRuler?.destroy();
+    this._bpmRuler = this._pitchRuler = null;
   }
 
   subscribe() {
-    window.addEventListener('rolfsound:remix-panel:toggle', this._onWindowToggle);
     this.on('state.remix', s => {
-      if (this._activeKnob || Date.now() < this._guardUntilMs) return;
-      if (typeof s.pitch_semitones === 'number') this._pitch = this._clamp('pitch', s.pitch_semitones);
-      if (typeof s.tempo_ratio === 'number') this._tempo = this._clamp('tempo', s.tempo_ratio);
-      this._schedulePaint();
+      if (Date.now() < this._guardUntilMs) return;
+      if (typeof s.pitch_semitones === 'number') {
+        this._pitch = clamp(s.pitch_semitones, PITCH.min, PITCH.max);
+        this._pitchRuler?.setValue(this._pitch);
+        this._paintKey();
+      }
+      if (typeof s.tempo_ratio === 'number') {
+        this._tempo = clamp(s.tempo_ratio, TEMPO.min, TEMPO.max);
+        if (this._baseBpm) this._bpmRuler?.setValue(Math.round(this._baseBpm * this._tempo));
+      }
     });
 
     this.on('state.playback', s => {
-      const queueTracks = Array.isArray(s?.queue) ? s.queue : (s?.queue?.tracks || []);
+      const queueTracks  = Array.isArray(s?.queue) ? s.queue : (s?.queue?.tracks || []);
       const currentIndex = s?.queue_current_index ?? s?.queue?.current_index ?? -1;
       const track = queueTracks[currentIndex] || null;
       this._currentTrackId = s?.track_id || track?.track_id || track?.id || null;
       this._applyMetadata({
         ...(track || {}),
-        bpm: s?.bpm ?? track?.bpm,
+        bpm:         s?.bpm         ?? track?.bpm,
         musical_key: s?.musical_key ?? track?.musical_key,
         camelot_key: s?.camelot_key ?? track?.camelot_key,
       });
     });
 
     this.on('event.track_updated', frame => {
-      const track = frame?.payload ?? frame;
+      const track   = frame?.payload ?? frame;
       const trackId = track?.id || track?.track_id;
       if (this._currentTrackId && trackId && trackId !== this._currentTrackId) return;
       this._applyMetadata(track);
     });
   }
 
-  _cacheDom() {
-    this._panel    = this.shadowRoot.querySelector('.panel');
-    this._resetBtn = this.shadowRoot.querySelector('.reset-btn');
-    this._closeBtn = this.shadowRoot.querySelector('.panel-close-btn');
-    this._els = {
-      bpm: this.shadowRoot.querySelector('.bpm-value'),
-      key: this.shadowRoot.querySelector('.key-value'),
-      camelot: this.shadowRoot.querySelector('.camelot-value'),
-      pitchValue: this.shadowRoot.querySelector('.pitch-value'),
-      tempoValue: this.shadowRoot.querySelector('.tempo-value'),
-      pitchKnob: this.shadowRoot.querySelector('[data-kind="pitch"] rolfsound-knob'),
-      tempoKnob: this.shadowRoot.querySelector('[data-kind="tempo"] rolfsound-knob'),
-    };
-  }
-
-  _bindKnob(kind) {
-    const knob = this._els[`${kind}Knob`];
-    knob.addEventListener('rs-knob-input', e => this._onRemixInput(kind, e.detail.value));
-    knob.addEventListener('rs-knob-change', e => this._onRemixCommit(kind, e.detail.value));
-  }
-
-  _toggle(sourceRect = null) {
-    this._setOpen(!this._open, sourceRect);
-  }
-
-  _setOpen(open, sourceRect = null) {
-    if (open === this._open) return;
-    this._open = open;
-    this.classList.toggle('open', open);
-    this._playPanelMorph(open, sourceRect);
-    window.dispatchEvent(new CustomEvent('rolfsound:remix-panel:state', {
-      detail: { open },
-    }));
-  }
-
-  _playPanelMorph(open, sourceRect = null) {
-    const fromRect = sourceRect || this._buttonRect({ expanded: !open });
-    const targetRect = this.getBoundingClientRect();
-    const morph = this._morphTransform(fromRect, targetRect);
-
-    if (this._motion) {
-      this._motion.cancel();
-      this._motion = null;
-    }
-
-    this._panel.classList.add('morphing');
-    this._panel.style.pointerEvents = 'none';
-
-    if (open) {
-      this._panel.setAttribute('aria-hidden', 'false');
-    }
-
-    const frames = open
-      ? [
-          { opacity: '0.92', transform: morph, borderRadius: 'var(--radius-dynamic-island)' },
-          { opacity: '1', transform: 'none', borderRadius: 'var(--radius-dynamic-island-expanded)' },
-        ]
-      : [
-          { opacity: '1', transform: 'none', borderRadius: 'var(--radius-dynamic-island-expanded)' },
-          { opacity: '0', transform: morph, borderRadius: 'var(--radius-dynamic-island)' },
-        ];
-
-    const motion = this._panel.animate(frames, {
-      duration: open ? 520 : 420,
-      easing: open ? 'cubic-bezier(0.2, 0, 0, 1)' : 'cubic-bezier(0.3, 0, 1, 1)',
+  /** Called by PlayerShell once the container is sized & visible. */
+  activate() {
+    requestAnimationFrame(() => {
+      this._pitchRuler?.refresh();
+      this._bpmRuler?.refresh();
     });
-
-    this._motion = motion;
-    motion.onfinish = () => {
-      if (this._motion !== motion) return;
-      this._motion = null;
-      this._panel.classList.remove('morphing');
-      this._panel.style.pointerEvents = '';
-      this._panel.style.borderRadius = '';
-      if (!this._open) this._panel.setAttribute('aria-hidden', 'true');
-    };
-    motion.oncancel = () => {
-      if (this._motion === motion) this._motion = null;
-      this._panel.classList.remove('morphing');
-      this._panel.style.pointerEvents = '';
-      this._panel.style.borderRadius = '';
-    };
+    // The channel doesn't replay the last snapshot to new subscribers and this
+    // panel only mounts on open, so pull the current track + remix state once so
+    // the gauges open already showing real values (same source as the manager).
+    this._seedFromStatus();
   }
 
-  _buttonRect({ expanded = false } = {}) {
-    const btn = this.parentElement?.querySelector('#btn-remix');
+  async _seedFromStatus() {
+    try {
+      const r = await fetch('/api/status');
+      if (!r.ok) return;
+      const s = await r.json();
+      this._currentTrackId = s?.track_id || this._currentTrackId;
+      this._applyMetadata({ bpm: s?.bpm, musical_key: s?.musical_key, camelot_key: s?.camelot_key });
 
-    // On touch the button is below the pill — collapse toward its real position
-    // rather than the desktop side dock.
-    if (window.matchMedia?.('(hover: none)')?.matches) {
-      const r = btn?.getBoundingClientRect?.();
-      if (r?.width && r?.height) return this._plainRect(r);
+      const remix = s?.remix;
+      if (!remix || Date.now() < this._guardUntilMs) return;
+      if (typeof remix.pitch_semitones === 'number') {
+        this._pitch = clamp(remix.pitch_semitones, PITCH.min, PITCH.max);
+        this._pitchRuler?.setValue(this._pitch);
+        this._paintKey();
+      }
+      if (typeof remix.tempo_ratio === 'number') {
+        this._tempo = clamp(remix.tempo_ratio, TEMPO.min, TEMPO.max);
+        if (this._baseBpm) this._bpmRuler?.setValue(Math.round(this._baseBpm * this._tempo));
+      }
+    } catch {}
+  }
+
+  // ── ruler builders ──────────────────────────────────────────────
+
+  _accent() {
+    const raw = getComputedStyle(this).getPropertyValue('--rs-theme-accent-rgb').trim();
+    const m = raw.match(/\d+/g);
+    if (m && m.length >= 3) {
+      const c = [+m[0], +m[1], +m[2]];
+      if (c[0] + c[1] + c[2] > 90) return c;   // ignore the near-black neutral
     }
-
-    const shellRect = this.parentElement?.getBoundingClientRect?.();
-    if (expanded && shellRect?.width && shellRect?.height) {
-      const size = shellRect.height;
-      const gap = 4;
-      return {
-        left: shellRect.left - size - gap,
-        top: shellRect.top + shellRect.height / 2 - size / 2,
-        right: shellRect.left - gap,
-        bottom: shellRect.top + shellRect.height / 2 + size / 2,
-        width: size,
-        height: size,
-      };
-    }
-
-    const rect = btn?.getBoundingClientRect?.();
-    if (rect && rect.width && rect.height) return this._plainRect(rect);
-    const target = this.getBoundingClientRect();
-    return {
-      left: target.right - 56,
-      top: target.bottom - 56,
-      width: 56,
-      height: 56,
-      right: target.right,
-      bottom: target.bottom,
-    };
+    return [33, 211, 101];
   }
 
-  _plainRect(rect) {
-    return {
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-      width: rect.width,
-      height: rect.height,
-    };
+  _buildPitchRuler() {
+    this._pitchRuler?.destroy();
+    this._pitchRuler = VRuler(this._els.pitchCol, {
+      min: PITCH.min, max: PITCH.max, step: PITCH.step, start: this._pitch, unit: 'st',
+      major: v => Number.isInteger(v),
+      label: v => (v > 0 ? '+' : '') + v,
+      fmt:   v => (v > 0 ? '+' : '') + comma(v, 1),
+      delta: v => '(' + (v > 0 ? '+' : '') + comma((Math.pow(2, v / 12) - 1) * 100, 1) + '%)',
+      onUser: v => this._onPitch(v),
+    }, { accent: () => this._accent(), haptic: this._haptic });
   }
 
-  _morphTransform(sourceRect, targetRect) {
-    if (!sourceRect || !targetRect?.width || !targetRect?.height) {
-      return 'translateX(18px) scale(0.96)';
-    }
-
-    const sourceCenterX = sourceRect.left + sourceRect.width / 2;
-    const sourceCenterY = sourceRect.top + sourceRect.height / 2;
-    const targetCenterX = targetRect.left + targetRect.width / 2;
-    const targetCenterY = targetRect.top + targetRect.height / 2;
-    const dx = sourceCenterX - targetCenterX;
-    const dy = sourceCenterY - targetCenterY;
-    const scaleX = sourceRect.width / targetRect.width;
-    const scaleY = sourceRect.height / targetRect.height;
-
-    return `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`;
+  _buildBpmRuler() {
+    this._bpmRuler?.destroy();
+    const valEl = this._els.bpmCol.querySelector('[data-val]');
+    if (!this._baseBpm) { this._bpmRuler = null; if (valEl) valEl.textContent = '--'; return; }
+    const base  = this._baseBpm;
+    const min   = Math.round(base * TEMPO.min);
+    const max   = Math.round(base * TEMPO.max);
+    const start = clamp(Math.round(base * this._tempo), min, max);
+    this._bpmRuler = VRuler(this._els.bpmCol, {
+      min, max, step: 1, start, unit: 'bpm',
+      major: v => v % 5 === 0,
+      label: v => v,
+      fmt:   v => String(v),
+      delta: v => '(' + (v >= base ? '+' : '') + comma((v - base) / base * 100, 1) + '%)',
+      onUser: v => this._onBpm(v),
+    }, { accent: () => this._accent(), haptic: this._haptic });
   }
 
-  _onRemixInput(kind, value) {
-    this._activeKnob = kind;
-    if (this._applyKnobValue(kind, value)) this._scheduleIntent();
-  }
+  _haptic() { try { navigator.vibrate?.(8); } catch {} }
 
-  _onRemixCommit(kind, value) {
-    this._applyKnobValue(kind, value);
-    this._commit();
-    if (this._activeKnob === kind) this._activeKnob = null;
-  }
+  // ── user input ──────────────────────────────────────────────────
 
-  _applyKnobValue(kind, value) {
-    const cfg = KNOBS[kind];
-    const nextValue = this._clamp(kind, value);
-    if (this[cfg.valueKey] === nextValue) return false;
-    this[cfg.valueKey] = nextValue;
+  _onPitch(v) {
+    this._pitch = clamp(v, PITCH.min, PITCH.max);
+    this._paintKey();
     this._dirty = true;
-    this._schedulePaint();
-    return true;
+    this._scheduleIntent();
   }
 
-  _clamp(kind, value) {
-    const cfg = KNOBS[kind];
-    const number = Number(value);
-    const safe = Number.isFinite(number) ? number : cfg.neutral;
-    return Math.max(cfg.min, Math.min(cfg.max, safe));
+  _onBpm(v) {
+    if (!this._baseBpm) return;
+    this._tempo = clamp(v / this._baseBpm, TEMPO.min, TEMPO.max);
+    this._dirty = true;
+    this._scheduleIntent();
   }
 
-  _schedulePaint() {
-    if (this._raf) return;
-    this._raf = requestAnimationFrame(() => {
-      this._raf = 0;
-      this._paintKnobs();
-      this._paintMetadata();
-    });
-  }
+  // ── derived key / camelot ──────────────────────────────────────
 
-  _paintKnobs() {
-    const sign = this._pitch > 0 ? '+' : '';
-    this._els.pitchValue.textContent = `${sign}${this._pitch.toFixed(1)} st`;
-    this._els.pitchKnob.setValue(this._pitch);
-    this._els.pitchKnob.setAttribute('aria-valuetext', `${sign}${this._pitch.toFixed(1)} semitones`);
-
-    const tempoText = this._baseBpm
-      ? `${Math.round(this._baseBpm * this._tempo)} BPM`
-      : `${this._tempo.toFixed(2)}x`;
-    this._els.tempoValue.textContent = tempoText;
-    this._els.tempoKnob.setValue(this._tempo);
-    this._els.tempoKnob.setAttribute('aria-valuetext', tempoText);
-  }
-
-  _paintMetadata() {
-    this._els.bpm.textContent = this._baseBpm ? `${Math.round(this._baseBpm)} BPM` : '-- BPM';
-    this._els.key.textContent = this._formatMusicalKey(this._musicalKey);
-    this._els.camelot.textContent = this._camelotKey || '--';
-  }
-
-  _formatMusicalKey(value) {
-    const text = String(value || '').trim();
-    if (!text) return '--';
-
-    const normalized = text
-      .replace(/\s+/g, ' ')
-      .replace(/♯/g, '#')
-      .replace(/♭/g, 'b');
-
-    const match = normalized.match(/^([A-Ga-g])([#b]?)(?:\s+|-)?(major|minor|maj|min|m)?$/i);
-    if (!match) return normalized;
-
-    const note = `${match[1].toUpperCase()}${match[2] || ''}`;
-    const mode = String(match[3] || '').toLowerCase();
-    return mode === 'minor' || mode === 'min' || mode === 'm'
-      ? `${note}m`
-      : note;
+  _paintKey() {
+    const shifted = shiftKey(this._baseKey, this._pitch);
+    this._els.keyStd.textContent = shifted?.name    || '--';
+    this._els.keyCam.textContent = shifted?.camelot || '--';
   }
 
   _applyMetadata(data) {
     if (!data) return;
-    const bpm = data.bpm ?? data.metadata?.bpm ?? null;
+    const bpm        = data.bpm ?? data.metadata?.bpm ?? null;
     const musicalKey = data.musical_key ?? data.metadata?.musical_key ?? null;
     const camelotKey = data.camelot_key ?? data.metadata?.camelot_key ?? null;
-    const changed = (
-      this._baseBpm !== bpm ||
-      this._musicalKey !== musicalKey ||
-      this._camelotKey !== camelotKey
-    );
-    if (!changed) return;
-    this._baseBpm = bpm;
-    this._musicalKey = musicalKey;
-    this._camelotKey = camelotKey;
-    this._schedulePaint();
+    const nextBase   = (bpm != null && Number.isFinite(Number(bpm))) ? Number(bpm) : null;
+    const nextKey    = deriveBaseKey({ camelot_key: camelotKey, musical_key: musicalKey });
+
+    if (nextBase !== this._baseBpm) {
+      this._baseBpm = nextBase;
+      this._buildBpmRuler();   // span depends on base tempo
+    }
+    const keyChanged = JSON.stringify(nextKey) !== JSON.stringify(this._baseKey);
+    if (keyChanged) {
+      this._baseKey = nextKey;
+      this._paintKey();
+    }
   }
+
+  // ── engine intents (debounced, guarded against echo) ───────────
 
   _scheduleIntent() {
     this._pending = true;
     if (this._emitTimer) clearTimeout(this._emitTimer);
-    this._emitTimer = setTimeout(() => {
-      this._emitTimer = null;
-      this._commit();
-    }, INPUT_COMMIT_DEBOUNCE_MS);
+    this._emitTimer = setTimeout(() => { this._emitTimer = null; this._commit(); }, INPUT_COMMIT_DEBOUNCE_MS);
   }
 
   _commit() {
-    if (this._emitTimer) {
-      clearTimeout(this._emitTimer);
-      this._emitTimer = null;
-    }
+    if (this._emitTimer) { clearTimeout(this._emitTimer); this._emitTimer = null; }
     if (!this._pending && !this._dirty) return;
-    this._pending = null;
+    this._pending = false;
     this._dirty = false;
     this._guardUntilMs = Date.now() + GUARD_MS;
-    this.send('intent.remix.set', this._remixPayload());
-  }
-
-  _remixPayload() {
-    return {
-      pitch_semitones: this._pitch,
-      tempo_ratio: this._tempo,
-    };
+    this.send('intent.remix.set', { pitch_semitones: this._pitch, tempo_ratio: this._tempo });
   }
 
   _reset() {
-    this._pitch = KNOBS.pitch.neutral;
-    this._tempo = KNOBS.tempo.neutral;
-    this._pending = null;
+    this._pitch = PITCH.neutral;
+    this._tempo = TEMPO.neutral;
+    this._pending = false;
     this._dirty = false;
-    if (this._emitTimer) {
-      clearTimeout(this._emitTimer);
-      this._emitTimer = null;
-    }
-    this._schedulePaint();
+    if (this._emitTimer) { clearTimeout(this._emitTimer); this._emitTimer = null; }
+    this._pitchRuler?.setValue(this._pitch);
+    if (this._baseBpm) this._bpmRuler?.setValue(Math.round(this._baseBpm * this._tempo));
+    this._paintKey();
     this._guardUntilMs = Date.now() + GUARD_MS;
     this.send('intent.remix.reset', {});
   }

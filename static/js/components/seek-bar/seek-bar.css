@@ -1,6 +1,6 @@
 :host {
   display: block;
-  height: 12px;
+  height: 22px;
   position: relative;
   z-index: 10;
   background: transparent;
@@ -11,7 +11,9 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 12px;
+  /* Tall, transparent hit area for an easy grab (touch especially); the visible
+     hairline/fill stay anchored to the bottom edge. */
+  height: 100%;
   cursor: none;
   touch-action: none;
   outline: none;

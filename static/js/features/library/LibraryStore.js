@@ -4,7 +4,7 @@ const DEFAULT_LAYOUT = {
   version: 1,
   blocks: [
     { id: 'albums-main', type: 'albums', view: 'grid', title: 'Albums', size: 'wide', enabled: true, config: { sort: 'recent', limit: 12 } },
-    { id: 'tracks-main', type: 'tracks', view: 'list', title: 'Tracks', size: 'wide', enabled: true, config: { sort: 'recent', limit: 40 } },
+    { id: 'tracks-main', type: 'tracks', view: 'list', title: 'Tracks', size: 'wide', enabled: true, config: { sort: 'recent', limit: 0 } },
     { id: 'artists-main', type: 'artists', view: 'circles', title: 'Artists', size: 'wide', enabled: true, config: { sort: 'name', limit: 18 } },
     { id: 'playlists-main', type: 'playlists', view: 'grid', title: 'Playlists', size: 'wide', enabled: true, config: { sort: 'recent', limit: 12 } },
   ],

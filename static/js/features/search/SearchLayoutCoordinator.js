@@ -87,14 +87,11 @@ export default class SearchLayoutCoordinator {
             this._onModalKeydown = null;
         }
 
-        // Restore player to centered/original position
+        // Restore player to centered/original position. searchPanel is already
+        // 'closed' here, so the shell's mode reflects only remix/queue.
         if (this._isMorphed) {
             const shell = window.playbackMitosisManager?._shell;
-            if (shell) {
-                const mode = window.playbackMitosisManager.isQueueOpen
-                    ? 'player+queue' : 'player-only';
-                shell.applyLayout(mode);
-            }
+            if (shell) shell.applyLayout(shell._currentMode());
         }
     }
 
