@@ -69,6 +69,7 @@
   flex-direction: column;
   align-items: center;
   min-width: 0;
+  min-height: 0;
 }
 .col .name {
   font-size: 10px;
@@ -95,7 +96,9 @@
   min-height: 14px;
 }
 
-.ruler-wrap { position: relative; width: 100%; margin-top: 8px; flex: 1; min-height: 120px; }
+/* flex: 1 1 0 + min-height:0 lets the wrap shrink; the absolutely-positioned
+   .ruler below fills it without its tall tick track dictating the height. */
+.ruler-wrap { position: relative; width: 100%; margin-top: 8px; flex: 1 1 0; min-height: 96px; }
 .ruler-wrap::before,
 .ruler-wrap::after {
   content: "";
@@ -135,7 +138,8 @@
 .center-line::after  { right: -2px; border-right: 7px solid var(--ptr, var(--accent)); }
 
 .ruler {
-  height: 100%;
+  position: absolute;
+  inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scroll-snap-type: y mandatory;

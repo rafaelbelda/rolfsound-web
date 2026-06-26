@@ -22,6 +22,28 @@ const WHITE_VAL = [244, 246, 244];
 const WHITE_PTR = [255, 255, 255];
 const ZONE = 8;                    // ticks from each edge where the red tint ramps in
 
+// Haptics — Android (Vibration API) + iOS 17.4+ (hidden system-switch click).
+// The switch element is created lazily once and reused for every tick.
+const haptic = (() => {
+  let iosSwitch = null;
+  return () => {
+    try {
+      if (navigator.vibrate) { navigator.vibrate(10); return; }
+      if (!iosSwitch) {
+        const label = document.createElement('label');
+        iosSwitch = document.createElement('input');
+        iosSwitch.type = 'checkbox';
+        iosSwitch.setAttribute('switch', '');
+        label.style.cssText = 'position:fixed;top:-100px;left:-100px;opacity:0;pointer-events:none;';
+        label.appendChild(iosSwitch);
+        document.body.appendChild(label);
+      }
+      iosSwitch.parentElement.click();
+      iosSwitch.checked = false;
+    } catch {}
+  };
+})();
+
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const mix   = (a, b, t) => a.map((x, k) => Math.round(x + (b[k] - x) * t));
 const rgb   = c => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -296,10 +318,13 @@ class RolfsoundRemixPanel extends RolfsoundControl {
 
   /** Called by PlayerShell once the container is sized & visible. */
   activate() {
-    requestAnimationFrame(() => {
+    // Two nested RAFs: first lets the browser finish layout after the container
+    // becomes visible; second fires after the resulting geometry is painted so
+    // sizeSpacers() reads the actual clientHeight (not 0).
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       this._pitchRuler?.refresh();
       this._bpmRuler?.refresh();
-    });
+    }));
     // The channel doesn't replay the last snapshot to new subscribers and this
     // panel only mounts on open, so pull the current track + remix state once so
     // the gauges open already showing real values (same source as the manager).
@@ -349,7 +374,7 @@ class RolfsoundRemixPanel extends RolfsoundControl {
       fmt:   v => (v > 0 ? '+' : '') + comma(v, 1),
       delta: v => '(' + (v > 0 ? '+' : '') + comma((Math.pow(2, v / 12) - 1) * 100, 1) + '%)',
       onUser: v => this._onPitch(v),
-    }, { accent: () => this._accent(), haptic: this._haptic });
+    }, { accent: () => this._accent(), haptic });
   }
 
   _buildBpmRuler() {
@@ -367,10 +392,8 @@ class RolfsoundRemixPanel extends RolfsoundControl {
       fmt:   v => String(v),
       delta: v => '(' + (v >= base ? '+' : '') + comma((v - base) / base * 100, 1) + '%)',
       onUser: v => this._onBpm(v),
-    }, { accent: () => this._accent(), haptic: this._haptic });
+    }, { accent: () => this._accent(), haptic });
   }
-
-  _haptic() { try { navigator.vibrate?.(8); } catch {} }
 
   // ── user input ──────────────────────────────────────────────────
 

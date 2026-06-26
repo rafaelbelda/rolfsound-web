@@ -319,6 +319,19 @@ export default class PlayerShell {
             transform: translateX(6px);
             transform-origin: center;
           }
+          /* When a panel is open on mobile, hide that button in-place (no
+             transform change — avoids the desktop scale/translateY override
+             pulling the button to the wrong spot). */
+          #btn-remix.remix-open {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transform: translateX(calc(-100% - 6px)) !important;
+          }
+          #btn-queue.queue-open {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transform: translateX(6px) !important;
+          }
         }
       </style>
 
