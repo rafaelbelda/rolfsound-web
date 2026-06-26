@@ -398,7 +398,7 @@ export default class PlayerShell {
 
             <!-- Seek bar — delegado ao Web Component -->
             <rolfsound-playback-timestamp style="position:absolute;bottom:8px;right:12px;z-index:3;"></rolfsound-playback-timestamp>
-            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;height:22px;z-index:4;"></rolfsound-seek-bar>
+            <rolfsound-seek-bar style="position:absolute;bottom:0;left:0;right:0;height:32px;z-index:4;"></rolfsound-seek-bar>
 
             <!-- Volume slider — delegado ao Web Component -->
           </div>
@@ -900,6 +900,12 @@ export default class PlayerShell {
       }
 
       m._animator.releaseAll(panel);
+      // Force the settled box explicitly: if the morph was throttled or paused
+      // (mobile background/jank), commitStyles can leave a stale start transform,
+      // which would freeze the panel at button size. Pin it to its final rect.
+      panel.style.transform     = 'none';
+      panel.style.left          = `${targetPanelLeft}px`;
+      panel.style.top           = `${targetTop}px`;
       panel.style.willChange    = '';
       panel.style.pointerEvents = 'auto';
       this._mountPanelContent(key, panel);

@@ -324,6 +324,17 @@ def create_app() -> FastAPI:
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    # Force revalidation of front-end modules so a browser never serves a stale
+    # JS/CSS file from heuristic cache (which silently breaks ES-module chains —
+    # e.g. a freshly versioned component talking to a stale, cached PlayerShell).
+    # "no-cache" still allows 304s via the StaticFiles etag, so it stays cheap.
+    @app.middleware("http")
+    async def static_no_cache(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.websocket("/api/ws")
     async def websocket_route(ws: WebSocket):
         await ws_endpoint(ws)
