@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="static/css/prototype.css" />
   <link rel="stylesheet" href="static/css/seekbar.css" />
   <link rel="stylesheet" href="static/css/remixer-live.css" />
+  <link rel="stylesheet" href="static/css/dashboard-discovery.css" />
 </head>
 <body>
   <div class="appshell">
@@ -49,6 +50,11 @@
         <button class="isl-btn" data-nav="capturar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/></svg>
           <span>Capturar</span>
+        </button>
+        <!-- exclusivo admin — revelado por discovery.js quando account.admin -->
+        <button class="isl-btn is-hidden" data-nav="discovery">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M14.8 9.2 13 13l-3.8 1.8L11 11z"/></svg>
+          <span>Discovery</span>
         </button>
       </nav>
 
@@ -337,7 +343,7 @@
             <!-- query -->
             <div class="bsc-query">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-              <input data-bsc-input placeholder="Buscar por faixa, artista, coordenada…" />
+              <input data-bsc-input placeholder="Buscar por faixa, artista, álbum…" />
               <span class="kbd">⌘K</span>
             </div>
 
@@ -520,13 +526,53 @@
               <div class="cap-det-foot">
                 <div class="cap-target">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="2.2"/></svg>
-                  <div class="info"><span class="t">Destino no cofre</span><span class="s">Próxima coordenada livre</span></div>
-                  <span class="coord">C09·R01</span>
+                  <div class="info"><span class="t">Destino no cofre</span><span class="s">Adicionadas ao Acervo</span></div>
                 </div>
                 <div class="cap-det-foot-spacer"></div>
                 <button class="cap-save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>Salvar 3 faixas no cofre</button>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----- DISCOVERY (exclusivo admin — gate real é 403 no servidor) ----- -->
+      <section class="screen main dsc" data-screen="discovery" data-screen-label="Discovery">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Estúdio <span class="c-dot"></span> Discovery <span class="c-dot"></span> Admin · uso interno</div>
+            <div class="top-title">Discovery</div>
+          </div>
+          <div class="top-spacer"></div>
+          <span class="dsc-admin-badge">yt-dlp · não comercializável</span>
+        </header>
+
+        <div class="bsc-body">
+          <div class="bsc-inner">
+
+            <div class="bsc-query">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <input data-dsc-input placeholder="Buscar no YouTube…" />
+              <span class="kbd">⏎</span>
+            </div>
+
+            <div class="bsc-results">
+              <div class="bsc-results-head">
+                <div class="sec-label">Resultados</div>
+                <span class="bsc-count" data-dsc-state>Digite para buscar</span>
+                <div class="top-spacer"></div>
+              </div>
+              <div class="bsc-list scroll" data-dsc-results></div>
+            </div>
+
+            <div class="dsc-downloads" data-dsc-dlwrap hidden>
+              <div class="dsc-dl-head">
+                <div class="sec-label">Downloads</div>
+                <span class="bsc-count" data-dsc-dlcount></span>
+              </div>
+              <div class="dsc-dl-list" data-dsc-downloads></div>
+            </div>
+
           </div>
         </div>
       </section>
@@ -635,10 +681,6 @@
                 <div class="cfg-row-text"><span class="cfg-row-label">Detecção de BPM e tom</span><span class="cfg-row-sub">Analisa ao importar para o cofre</span></div>
                 <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
               </div>
-              <div class="cfg-row">
-                <div class="cfg-row-text"><span class="cfg-row-label">Coordenada automática</span><span class="cfg-row-sub">Atribui C·R à próxima posição livre</span></div>
-                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
-              </div>
             </div>
 
             <!-- Aparência -->
@@ -680,7 +722,7 @@
                 <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
               </div>
               <div class="cfg-row">
-                <div class="cfg-row-text"><span class="cfg-row-label">Exportar biblioteca</span><span class="cfg-row-sub">Metadados + coordenadas (.json)</span></div>
+                <div class="cfg-row-text"><span class="cfg-row-label">Exportar biblioteca</span><span class="cfg-row-sub">Metadados (.json)</span></div>
                 <div class="cfg-row-ctrl"><button class="cfg-link">Exportar</button></div>
               </div>
               <div class="cfg-row">
@@ -793,6 +835,7 @@
   </div>
 
   <script src="static/js/data.js"></script>
+  <script src="api/bootstrap.js"></script>
   <script src="static/js/render.js"></script>
   <script src="static/js/ui-scale.js"></script>
   <script src="static/js/dash.js"></script>
@@ -806,5 +849,6 @@
   <script src="static/js/tp-scrub-line.js"></script>
   <script src="static/js/remixer-engine.js"></script>
   <script src="static/js/search-engine.js"></script>
+  <script src="static/js/discovery.js"></script>
 </body>
 </html>

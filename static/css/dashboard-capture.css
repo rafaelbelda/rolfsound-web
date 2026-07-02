@@ -233,7 +233,6 @@
 .cap-target .info { display: flex; flex-direction: column; gap: 3px; }
 .cap-target .t { font-size: 13px; font-weight: 500; color: var(--ink); }
 .cap-target .s { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
-.cap-target .coord { font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; margin-left: 4px; }
 .cap-det-foot-spacer { flex: 1; }
 .cap-save {
   display: flex; align-items: center; justify-content: center; gap: 9px;

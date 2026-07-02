@@ -50,8 +50,8 @@
   function buildDataset() {
     DATA = $$('.screen[data-screen="acervo"] .row').map((row) => ({
       title:  row.dataset.title || row.querySelector('.row-title')?.textContent || 'Faixa',
-      artist: row.querySelector('.row-artist')?.textContent || 'Rolf',
-      coord:  row.dataset.coord || '',
+      artist: row.querySelector('.row-artist')?.textContent || '',
+      id:     row.dataset.id || '',
       bg:     row.querySelector('.row-cover')?.style.background || '',
       added:  parseInt(row.dataset.added, 10) || 0,
       bpm:    parseInt(row.dataset.bpm, 10) || 0,
@@ -75,10 +75,10 @@
     tags: new Set(),
     key: null,                 // single key, harmonic match
     states: new Set(),         // master/edit/rip/fav
-    sort: 'recent',            // recent | coord | bpm | key
+    sort: 'recent',            // recent | title | bpm | key
   };
-  const SORTS = ['recent', 'coord', 'bpm', 'key'];
-  const SORT_LABEL = { recent: 'Recente', coord: 'Coordenada', bpm: 'BPM', key: 'Tom' };
+  const SORTS = ['recent', 'title', 'bpm', 'key'];
+  const SORT_LABEL = { recent: 'Recente', title: 'Título', bpm: 'BPM', key: 'Tom' };
 
   let NOW = Date.now();        // anchored to newest track on init
   const DAY = 86400000;
@@ -88,7 +88,7 @@
      ============================================================ */
   function passes(t) {
     if (F.q) {
-      const hay = (t.title + ' ' + t.artist + ' ' + t.coord + ' ' + t.key + ' ' + t.tags.join(' ')).toLowerCase();
+      const hay = (t.title + ' ' + t.artist + ' ' + t.key + ' ' + t.tags.join(' ')).toLowerCase();
       if (!hay.includes(F.q)) return false;
     }
     if (F.days !== Infinity && (NOW - t.added) > F.days * DAY) return false;
@@ -111,7 +111,7 @@
       if (by === 'recent') return b.added - a.added;
       if (by === 'bpm') return a.bpm - b.bpm;
       if (by === 'key') return (camelot(a.key) || 'zz').localeCompare(camelot(b.key) || 'zz', undefined, { numeric: true }) || a.title.localeCompare(b.title);
-      return a.coord.localeCompare(b.coord, undefined, { numeric: true }); // coord
+      return a.title.localeCompare(b.title); // title
     });
   }
 
@@ -150,7 +150,7 @@
   function rowEl(t) {
     const el = document.createElement('div');
     el.className = 'bsc-row';
-    el.dataset.coord = t.coord;
+    el.dataset.id = t.id;
     el.dataset.key = t.key; el.dataset.bpm = t.bpm; el.dataset.fmt = t.fmt;
     el.innerHTML =
       `<span class="row-cover cover" style="background:${t.bg}"></span>` +
@@ -168,7 +168,7 @@
     });
     el.addEventListener('dblclick', () => {
       if (window.RolfRemixer) {
-        window.RolfRemixer.load({ bg: t.bg, title: t.title, artist: t.artist, bpm: t.bpm, key: t.key, coord: t.coord });
+        window.RolfRemixer.load({ id: t.id, bg: t.bg, title: t.title, artist: t.artist, bpm: t.bpm, key: t.key });
         window.RolfRemixer.play();
         const btn = $('.island .isl-btn[data-nav="remixer"]'); if (btn) btn.click();
       }

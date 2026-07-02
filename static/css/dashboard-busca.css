@@ -52,17 +52,6 @@
 .facet-title { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-dim); }
 .facet-val { font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
 
-/* coordinate range */
-.coord-range { display: flex; align-items: center; gap: 10px; }
-.coord-chip {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
-  height: 38px; border: 1px solid var(--hair); border-radius: 10px;
-  font-family: var(--font-mono); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
-  background: rgba(255,255,255,0.012);
-}
-.coord-arrow { color: var(--ink-faint); flex: none; }
-.coord-arrow svg { width: 15px; height: 15px; display: block; }
-
 /* BPM dual range */
 .range { position: relative; height: 6px; border-radius: 4px; background: var(--hair); margin: 14px 6px 4px; }
 .range-sel { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 4px; left: 28%; right: 30%; }

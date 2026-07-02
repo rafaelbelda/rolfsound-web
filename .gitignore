@@ -1,12 +1,19 @@
 # Handoff bundles do Claude Design (26+ MB, fonte fica no claude.ai/design)
 *-handoff.zip
 
-# Python (backend Flask, quando restaurado do histórico)
+# Python (backend FastAPI)
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 .env
+
+# Runtime do backend (criados pelo app)
+control.log*
+db/*.db
+music/
+cache/
+config.json
 
 # Node (se entrar tooling de frontend no futuro)
 node_modules/

@@ -1,8 +1,8 @@
 /* ============================================================
    ROLFSOUND V2 — Track panels (editor / album / artist)
    Renders into the morphing dock drawer. Coordinates with the
-   queue so only one drawer is open at a time. Album/year are
-   derived per crate and become editable (stored on the row).
+   queue so only one drawer is open at a time. Album/year come
+   from the track data and become editable (stored on the row).
    ============================================================ */
 (function () {
   'use strict';
@@ -16,19 +16,17 @@
   if (!dock || !panel || !inner) return;
 
   function meta(row) {
-    const coord = row.dataset.coord || (row.querySelector('.row-coord')?.textContent || '').replace(/\s+/g, ' ').trim();
-    const crate = coord.split('·')[0];
     const def = { album: 'Sem álbum', year: '' };
     const tags = (row.dataset.tags || '').split(',').filter(Boolean);
     return {
+      id:     row.dataset.id || '',
       title:  row.dataset.title || row.querySelector('.row-title')?.textContent || 'Faixa',
-      artist: row.dataset.artist || row.querySelector('.row-artist')?.textContent || 'Rolf',
+      artist: row.dataset.artist || row.querySelector('.row-artist')?.textContent || '',
       album:  row.dataset.album || def.album,
       year:   row.dataset.year || def.year,
       genre:  row.dataset.genre || (tags[0] ? tags[0][0].toUpperCase() + tags[0].slice(1) : ''),
       bpm:    row.dataset.bpm || row.querySelector('.row-data')?.textContent || '',
       key:    row.dataset.key || row.querySelector('.row-key')?.textContent || '',
-      coord, crate,
       bg:     row.querySelector('.row-cover')?.style.background || '',
       dur:    row.querySelector('.row-dur')?.textContent || '',
     };
@@ -47,7 +45,7 @@
     acervoRows().forEach((r) => {
       const mm = meta(r);
       if (mm.artist !== artist) return;
-      if (!map.has(mm.album)) map.set(mm.album, { album: mm.album, year: mm.year, bg: mm.bg, count: 0, coord: mm.coord });
+      if (!map.has(mm.album)) map.set(mm.album, { album: mm.album, year: mm.year, bg: mm.bg, count: 0 });
       map.get(mm.album).count++;
     });
     return [...map.values()];
@@ -104,8 +102,8 @@
     const c = $('[data-panel-close]', inner);
     if (c) c.addEventListener('click', closeDrawer);
   }
-  function playByCoord(coord) {
-    const row = $(`.screen[data-screen="acervo"] .row[data-coord="${coord}"]`);
+  function playById(id) {
+    const row = $(`.screen[data-screen="acervo"] .row[data-id="${id}"]`);
     if (row) row.click();
   }
 
@@ -124,7 +122,6 @@
           <div class="tpp-edit-art" style="background:${m.bg}">
             <div class="repl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M5 19h14"/></svg>Trocar capa</div>
           </div>
-          <div class="tpp-edit-coord">${esc(m.coord)}</div>
         </div>
         <div class="tpp-fields">
           <div class="tpp-field col2"><span class="tpp-label">Título da faixa</span><input class="tpp-input" data-f="title" value="${esc(m.title)}"></div>
@@ -134,14 +131,13 @@
           <div class="tpp-field"><span class="tpp-label">Gênero</span><input class="tpp-input" data-f="genre" value="${esc(m.genre)}"></div>
           <div class="tpp-field"><span class="tpp-label">BPM</span><input class="tpp-input mono" data-f="bpm" value="${esc(m.bpm)}"></div>
           <div class="tpp-field"><span class="tpp-label">Tom</span><input class="tpp-input mono" data-f="key" value="${esc(m.key)}"></div>
-          <div class="tpp-field col2"><span class="tpp-label">Coordenada no cofre</span><input class="tpp-input mono" data-f="coord" value="${esc(m.coord)}"></div>
         </div>
       </div>`;
     wireClose();
     const save = $('[data-edit-save]', inner);
     if (save) save.addEventListener('click', () => {
       const get = (f) => $(`[data-f="${f}"]`, inner)?.value.trim() || '';
-      const v = { title: get('title'), artist: get('artist'), album: get('album'), year: get('year'), genre: get('genre'), bpm: get('bpm'), key: get('key'), coord: get('coord') };
+      const v = { title: get('title'), artist: get('artist'), album: get('album'), year: get('year'), genre: get('genre'), bpm: get('bpm'), key: get('key') };
       // write back to the row
       row.dataset.title = v.title; row.dataset.artist = v.artist;
       row.dataset.album = v.album; row.dataset.year = v.year; row.dataset.genre = v.genre;
@@ -160,8 +156,8 @@
   }
 
   /* ---------- album / artist track list ---------- */
-  function trackRow(m, i, playingCoord) {
-    return `<div class="tpp-trk${m.coord === playingCoord ? ' playing' : ''}" data-coord="${esc(m.coord)}">
+  function trackRow(m, i, playingId) {
+    return `<div class="tpp-trk${m.id === playingId ? ' playing' : ''}" data-id="${esc(m.id)}">
       <span class="tpp-trk-idx">${i + 1}</span>
       <span class="row-cover cover" style="background:${m.bg}"></span>
       <span class="tpp-trk-name">${esc(m.title)}</span>
@@ -173,7 +169,7 @@
 
   function openAlbum(row) {
     const m = meta(row);
-    const playingCoord = document.querySelector('.row.active')?.dataset.coord || '';
+    const playingId = document.querySelector('.row.active')?.dataset.id || '';
     const tracks = $$('.screen[data-screen="acervo"] .row')
       .filter((r) => effAlbum(r) === m.album)
       .map(meta);
@@ -187,16 +183,16 @@
         <span class="tpp-hero-art" style="background:${m.bg}"></span>
         <div class="tpp-hero-info">
           <div class="tpp-hero-name">${esc(m.album)}</div>
-          <div class="tpp-hero-meta"><span>${esc(m.artist)}</span><span class="d"></span><span>${yrs.join('–')}</span><span class="d"></span><span>${tracks.length} ${tracks.length === 1 ? 'faixa' : 'faixas'}</span><span class="d"></span><span>${esc(m.crate)}</span></div>
+          <div class="tpp-hero-meta"><span>${esc(m.artist)}</span><span class="d"></span><span>${yrs.join('–')}</span><span class="d"></span><span>${tracks.length} ${tracks.length === 1 ? 'faixa' : 'faixas'}</span></div>
         </div>
         <div class="tpp-spacer"></div>
         <button class="tpp-btn accent" data-play-first><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg>Tocar álbum</button>
       </div>
-      <div class="tpp-list">${tracks.map((t, i) => trackRow(t, i, playingCoord)).join('')}</div>`;
+      <div class="tpp-list">${tracks.map((t, i) => trackRow(t, i, playingId)).join('')}</div>`;
     wireClose();
     const pf = $('[data-play-first]', inner);
-    if (pf && tracks[0]) pf.addEventListener('click', () => playByCoord(tracks[0].coord));
-    $$('.tpp-trk', inner).forEach((t) => t.addEventListener('click', () => playByCoord(t.dataset.coord)));
+    if (pf && tracks[0]) pf.addEventListener('click', () => playById(tracks[0].id));
+    $$('.tpp-trk', inner).forEach((t) => t.addEventListener('click', () => playById(t.dataset.id)));
     openDrawer(true);
   }
 
@@ -207,7 +203,7 @@
 
   function openArtist(row) {
     const m = meta(row);
-    const playingCoord = document.querySelector('.row.active')?.dataset.coord || '';
+    const playingId = document.querySelector('.row.active')?.dataset.id || '';
     const tracks = acervoRows().filter((r) => effArtist(r) === m.artist).map(meta);
     const albums = albumsByArtist(m.artist);
     const albumCards = albums.map((a) =>
@@ -234,12 +230,12 @@
         <div class="tpp-section">Álbuns</div>
         <div class="tpp-albums">${albumCards}</div>
         <div class="tpp-section">Faixas</div>
-        <div class="tpp-tracks">${tracks.map((t, i) => trackRow(t, i, playingCoord)).join('')}</div>
+        <div class="tpp-tracks">${tracks.map((t, i) => trackRow(t, i, playingId)).join('')}</div>
       </div>`;
     wireClose();
     const pf = $('[data-play-first]', inner);
-    if (pf && tracks[0]) pf.addEventListener('click', () => playByCoord(tracks[0].coord));
-    $$('.tpp-trk', inner).forEach((t) => t.addEventListener('click', () => playByCoord(t.dataset.coord)));
+    if (pf && tracks[0]) pf.addEventListener('click', () => playById(tracks[0].id));
+    $$('.tpp-trk', inner).forEach((t) => t.addEventListener('click', () => playById(t.dataset.id)));
     $$('.tpp-alb', inner).forEach((a) => a.addEventListener('click', () => openAlbumByName(a.dataset.album)));
     openDrawer(true);
   }

@@ -9,11 +9,11 @@
 
    Formato de faixa:
    {
+     id:     'a1b2c3',             // id único (ex.: id do banco)
      title:  'Coordinate Drift',
      artist: 'Rolf',
      album:  'Lattice',            // opcional
      year:   '2023',               // opcional
-     coord:  'C04·R08',            // coordenada no cofre (id único)
      added:  1750593600000,        // epoch ms
      bpm:    118,
      key:    'A min',
@@ -27,6 +27,9 @@
    ============================================================ */
 window.RolfsoundData = {
   tracks: [],     // faixas do cofre
-  queue: [],      // coords das faixas na fila "A seguir", em ordem
-  playlists: [],  // { id: 'p1', name: 'Nome', coords: ['C04·R08', …] }
+  queue: [],      // ids das faixas na fila "A seguir", em ordem
+  playlists: [],  // { id: 'p1', name: 'Nome', tracks: ['id-da-faixa', …] }
+  // Conta: admin habilita a aba Discovery (YouTube via yt-dlp).
+  // A UI só ESCONDE o recurso — o bloqueio real é 403 no servidor.
+  account: { admin: false },
 };

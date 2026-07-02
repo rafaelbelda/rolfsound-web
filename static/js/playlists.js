@@ -1,6 +1,6 @@
 /* ============================================================
    ROLFSOUND V2 — Playlists (data-driven)
-   Real playlist system: collections hold ordered coordinates
+   Real playlist system: collections hold ordered track ids
    into the Acervo. Create, rename, reorder (drag), remove,
    play/shuffle, and add tracks from the context menu. Persists
    to localStorage so the library survives reloads.
@@ -17,14 +17,14 @@
   if (!rail || !detail) return;
 
   /* ---------- track pool from the Acervo ---------- */
-  function row(coord) { return $(`.screen[data-screen="acervo"] .row[data-coord="${coord}"]`); }
-  function meta(coord) {
-    const r = row(coord);
+  function row(id) { return $(`.screen[data-screen="acervo"] .row[data-id="${id}"]`); }
+  function meta(id) {
+    const r = row(id);
     if (!r) return null;
     return {
-      coord,
+      id,
       title:  r.dataset.title || r.querySelector('.row-title')?.textContent || 'Faixa',
-      artist: r.dataset.artist || r.querySelector('.row-artist')?.textContent || 'Rolf',
+      artist: r.dataset.artist || r.querySelector('.row-artist')?.textContent || '',
       bpm:    +(r.dataset.bpm || r.querySelector('.row-data')?.textContent || 0),
       key:    r.dataset.key || r.querySelector('.row-key')?.textContent || '',
       bg:     r.querySelector('.row-cover')?.style.background || '',
@@ -32,23 +32,23 @@
       dur:    r.querySelector('.row-dur')?.textContent || '',
     };
   }
-  function allCoords() { return $$('.screen[data-screen="acervo"] .row').map((r) => r.dataset.coord); }
 
   /* ---------- model (seeded from RolfsoundData, persisted em localStorage) ---------- */
   const DEFAULTS = (window.RolfsoundData && Array.isArray(window.RolfsoundData.playlists))
     ? window.RolfsoundData.playlists
     : [];
+  const norm = (p) => ({ ...p, tracks: [...(p.tracks || [])] });
   let playlists, selectedId, seq = 100;
   try {
-    const saved = JSON.parse(localStorage.getItem('rolf_playlists') || 'null');
-    playlists = (saved && Array.isArray(saved.lists)) ? saved.lists : DEFAULTS.map((p) => ({ ...p, coords: [...p.coords] }));
+    const saved = JSON.parse(localStorage.getItem('rolf_playlists_v2') || 'null');
+    playlists = (saved && Array.isArray(saved.lists)) ? saved.lists.map(norm) : DEFAULTS.map(norm);
     seq = saved && saved.seq ? saved.seq : 100;
-  } catch (_) { playlists = DEFAULTS.map((p) => ({ ...p, coords: [...p.coords] })); }
+  } catch (_) { playlists = DEFAULTS.map(norm); }
   selectedId = playlists[0] && playlists[0].id;
 
-  function save() { try { localStorage.setItem('rolf_playlists', JSON.stringify({ lists: playlists, seq })); } catch (_) {} }
+  function save() { try { localStorage.setItem('rolf_playlists_v2', JSON.stringify({ lists: playlists, seq })); } catch (_) {} }
   function byId(id) { return playlists.find((p) => p.id === id); }
-  function tracksOf(p) { return p.coords.map(meta).filter(Boolean); }
+  function tracksOf(p) { return p.tracks.map(meta).filter(Boolean); }
 
   function fmtTotal(sec) {
     const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
@@ -86,7 +86,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         <span>Nova playlist</span>
       </button>`;
-    const totalTracks = playlists.reduce((a, p) => a + p.coords.length, 0);
+    const totalTracks = playlists.reduce((a, p) => a + p.tracks.length, 0);
     if (summary) summary.textContent = `${playlists.length} ${playlists.length === 1 ? 'coleção' : 'coleções'} · ${totalTracks} faixas`;
     const crumb = $('.screen[data-screen="playlists"] .top-crumb');
     if (crumb) crumb.innerHTML = `Biblioteca <span class="c-dot"></span> Playlists <span class="c-dot"></span> ${playlists.length} ${playlists.length === 1 ? 'coleção' : 'coleções'}`;
@@ -106,17 +106,16 @@
     const keys = ts.map((t) => t.key).filter(Boolean);
     const bpmRange = bpms.length ? (Math.min(...bpms) === Math.max(...bpms) ? Math.min(...bpms) : Math.min(...bpms) + '–' + Math.max(...bpms)) + ' BPM' : '—';
     const keyRange = keys.length ? (keys[0] + (keys.length > 1 ? ' → ' + keys[keys.length - 1] : '')) : '—';
-    const playingCoord = document.querySelector('.row.active')?.dataset.coord || '';
+    const playingId = document.querySelector('.row.active')?.dataset.id || '';
 
     const rows = ts.length ? ts.map((t, i) =>
-      `<div class="pl-row${t.coord === playingCoord ? ' playing' : ''}" data-coord="${esc(t.coord)}" draggable="true">
+      `<div class="pl-row${t.id === playingId ? ' playing' : ''}" data-id="${esc(t.id)}" draggable="true">
         <span class="pl-drag" aria-label="Arrastar"><i></i><i></i><i></i></span>
         <span class="pl-idx">${String(i + 1).padStart(2, '0')}</span>
         <span class="row-cover cover" style="background:${t.bg}"></span>
         <div class="pl-main"><div class="pl-title">${esc(t.title)}</div><div class="pl-artist">${esc(t.artist)}</div></div>
         <span class="pl-data">${t.bpm || ''}</span>
         <span class="pl-key">${esc(t.key)}</span>
-        <span class="pl-coord">${esc(t.coord)}</span>
         <span class="pl-dur">${esc(t.dur)}</span>
         <button class="pl-x" aria-label="Remover da playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>`).join('')
@@ -141,7 +140,7 @@
         </div>
       </div>
       <div class="pl-tracks-head">
-        <span></span><span>#</span><span></span><span>Faixa</span><span>BPM</span><span>Tom</span><span>Coord</span><span class="r">Dur</span><span></span>
+        <span></span><span>#</span><span></span><span>Faixa</span><span>BPM</span><span>Tom</span><span class="r">Dur</span><span></span>
       </div>
       <div class="pl-tracks scroll">${rows}</div>`;
 
@@ -151,7 +150,7 @@
   function renderAll() { renderRail(); renderDetail(); save(); }
 
   /* ---------- detail wiring ---------- */
-  function playByCoord(coord) { const r = row(coord); if (r) r.click(); }
+  function playById(id) { const r = row(id); if (r) r.click(); }
 
   function wireDetail(p) {
     // rename
@@ -159,12 +158,12 @@
     if (nameEl) nameEl.addEventListener('click', () => startRename(p, nameEl));
     // play / shuffle / delete
     const playBtn = $('[data-pl-play]', detail);
-    if (playBtn) playBtn.addEventListener('click', () => { const t = tracksOf(p)[0]; if (t) playByCoord(t.coord); });
+    if (playBtn) playBtn.addEventListener('click', () => { const t = tracksOf(p)[0]; if (t) playById(t.id); });
     const shBtn = $('[data-pl-shuffle]', detail);
     if (shBtn) shBtn.addEventListener('click', () => {
-      for (let i = p.coords.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p.coords[i], p.coords[j]] = [p.coords[j], p.coords[i]]; }
+      for (let i = p.tracks.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p.tracks[i], p.tracks[j]] = [p.tracks[j], p.tracks[i]]; }
       renderAll();
-      const t = tracksOf(p)[0]; if (t) playByCoord(t.coord);
+      const t = tracksOf(p)[0]; if (t) playById(t.id);
       raise(p.name, 'Embaralhada');
     });
     const delBtn = $('[data-pl-del]', detail);
@@ -174,15 +173,15 @@
     $$('.pl-row', detail).forEach((rowEl) => {
       rowEl.addEventListener('click', (e) => {
         if (e.target.closest('.pl-x') || e.target.closest('.pl-drag')) return;
-        playByCoord(rowEl.dataset.coord);
+        playById(rowEl.dataset.id);
         $$('.pl-row', detail).forEach((r) => r.classList.remove('playing'));
         rowEl.classList.add('playing');
       });
       const x = $('.pl-x', rowEl);
       if (x) x.addEventListener('click', (e) => {
         e.stopPropagation();
-        const idx = p.coords.indexOf(rowEl.dataset.coord);
-        if (idx > -1) p.coords.splice(idx, 1);
+        const idx = p.tracks.indexOf(rowEl.dataset.id);
+        if (idx > -1) p.tracks.splice(idx, 1);
         renderAll();
         raise('Faixa removida', p.name);
       });
@@ -199,7 +198,7 @@
         rowEl.classList.remove('dragging');
         $$('.pl-row.drag-over', detail).forEach((r) => r.classList.remove('drag-over'));
         // commit new order from DOM
-        p.coords = $$('.pl-row', detail).map((r) => r.dataset.coord);
+        p.tracks = $$('.pl-row', detail).map((r) => r.dataset.id);
         renderAll();
       });
       rowEl.addEventListener('dragover', (e) => {
@@ -233,7 +232,7 @@
   /* ---------- create / delete ---------- */
   function createPlaylist() {
     const id = 'p' + (++seq);
-    playlists.push({ id, name: 'Nova playlist', coords: [] });
+    playlists.push({ id, name: 'Nova playlist', tracks: [] });
     selectedId = id;
     renderAll();
     raise('Nova playlist', '+');
@@ -250,9 +249,9 @@
 
   /* ---------- "Adicionar à playlist" picker (from context menu) ---------- */
   let picker = null;
-  function openPicker(coord) {
+  function openPicker(trackId) {
     closePicker();
-    const t = meta(coord);
+    const t = meta(trackId);
     picker = document.createElement('div');
     picker.className = 'pl-picker-backdrop';
     picker.innerHTML =
@@ -264,7 +263,7 @@
         </div>
         <div class="pl-picker-list">
           ${playlists.map((p) => {
-            const has = p.coords.includes(coord);
+            const has = p.tracks.includes(trackId);
             return `<button class="pl-picker-item${has ? ' has' : ''}" data-id="${p.id}">
               ${collage(p)}
               <div class="pl-picker-info"><div class="pl-picker-n">${esc(p.name)}</div><div class="pl-picker-c">${statLine(p)}</div></div>
@@ -280,14 +279,14 @@
     $('.pl-picker-x', picker).addEventListener('click', closePicker);
     $$('.pl-picker-item', picker).forEach((it) => it.addEventListener('click', () => {
       const p = byId(it.dataset.id);
-      const idx = p.coords.indexOf(coord);
-      if (idx > -1) p.coords.splice(idx, 1); else p.coords.push(coord);
+      const idx = p.tracks.indexOf(trackId);
+      if (idx > -1) p.tracks.splice(idx, 1); else p.tracks.push(trackId);
       renderAll(); closePicker();
       raise(p.name, idx > -1 ? 'Removida' : 'Adicionada');
     }));
     $('.pl-picker-new', picker).addEventListener('click', () => {
       const id = 'p' + (++seq);
-      playlists.push({ id, name: (t ? t.title : 'Playlist'), coords: [coord] });
+      playlists.push({ id, name: (t ? t.title : 'Playlist'), tracks: [trackId] });
       selectedId = id; renderAll(); closePicker();
       raise('Nova playlist', '+');
     });
@@ -300,13 +299,13 @@
   const sortBtn = $('[data-pl-sort]');
   if (sortBtn) sortBtn.addEventListener('click', () => {
     const p = byId(selectedId); if (!p) return;
-    p.coords.sort((a, b) => a.localeCompare(b));
-    renderAll(); raise(p.name, 'Ordenada por coord');
+    p.tracks.sort((a, b) => (meta(a)?.title || '').localeCompare(meta(b)?.title || ''));
+    renderAll(); raise(p.name, 'Ordenada por título');
   });
 
   document.addEventListener('rolf:ctx', (e) => {
     const { action, row: r } = e.detail;
-    if (action === 'playlist' && r) openPicker(r.dataset.coord || (r.querySelector('.row-coord')?.textContent || '').replace(/\s+/g, ' ').trim());
+    if (action === 'playlist' && r && r.dataset.id) openPicker(r.dataset.id);
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
 

@@ -1,0 +1,105 @@
+/* ============================================================
+   ROLFSOUND V2 — Discovery (exclusivo admin)
+   Reusa o layout da Busca (.bsc-body/.bsc-query/.bsc-results);
+   aqui ficam só os estilos próprios da aba.
+   ============================================================ */
+
+/* botão da ilha escondido até discovery.js confirmar account.admin */
+.isl-btn.is-hidden { display: none !important; }
+
+.dsc-admin-badge {
+  font-family: var(--font-mono); font-size: 8.5px;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-soft); border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--accent-soft);
+}
+
+/* ---------- linha de resultado do YouTube ---------- */
+.dsc-row {
+  display: grid;
+  grid-template-columns: 68px 1fr 56px 120px;
+  align-items: center; gap: 14px; padding: 8px 20px;
+  border-bottom: 1px solid var(--hair-soft);
+  transition: background 0.14s;
+}
+.dsc-row:hover { background: rgba(255,255,255,0.025); }
+.dsc-thumb {
+  width: 68px; height: 40px; border-radius: 7px;
+  background: #141416 center/cover no-repeat;
+  border: 1px solid var(--hair-soft);
+}
+.dsc-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dsc-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 500; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dsc-channel {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dsc-dur { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); text-align: right; font-variant-numeric: tabular-nums; }
+
+.dsc-get {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 32px; border-radius: 9px; cursor: pointer;
+  border: 1px solid var(--hair); background: none;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-dim);
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.dsc-get svg { width: 13px; height: 13px; }
+.dsc-get:hover { color: var(--ink); border-color: var(--ink-faint); }
+.dsc-get.accent { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }
+.dsc-get:disabled { opacity: 0.55; cursor: default; }
+.dsc-get.done { color: var(--ink-faint); border-color: var(--hair-soft); background: none; }
+
+/* marca "já no cofre" */
+.dsc-row.in-vault .dsc-title::after {
+  content: 'no cofre';
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent); margin-left: 9px;
+}
+
+/* estado vazio / aviso dentro da lista */
+.dsc-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  padding: 48px 20px; text-align: center;
+}
+.dsc-empty svg { width: 26px; height: 26px; color: var(--ink-faint); }
+.dsc-empty .t { font-family: var(--font-display); font-size: 15px; color: var(--ink-dim); }
+.dsc-empty .s { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+
+/* ---------- painel de downloads ---------- */
+.dsc-downloads {
+  flex: none;
+  border: 1px solid var(--hair); border-radius: 16px;
+  background: rgba(12,12,15,0.4);
+  overflow: hidden;
+}
+.dsc-dl-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 20px; border-bottom: 1px solid var(--hair-soft);
+}
+.dsc-dl-list { max-height: 168px; overflow-y: auto; scrollbar-width: none; }
+.dsc-dl-list::-webkit-scrollbar { display: none; }
+.dsc-dl-row {
+  display: grid; grid-template-columns: 1fr 140px 84px;
+  align-items: center; gap: 14px; padding: 9px 20px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.dsc-dl-row:last-child { border-bottom: none; }
+.dsc-dl-title {
+  font-family: var(--font-display); font-size: 13px; color: var(--ink-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dsc-dl-bar { height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; }
+.dsc-dl-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.dsc-dl-status {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-faint); text-align: right;
+}
+.dsc-dl-row.complete .dsc-dl-status { color: var(--accent); }
+.dsc-dl-row.failed .dsc-dl-status { color: #c25a5a; }

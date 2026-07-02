@@ -26,8 +26,8 @@
 
   /* ---------------- screen navigation ---------------- */
   const STUB_COPY = {
-    playlists: ['Playlists', 'Montagem por coordenada · em breve'],
-    busca:     ['Busca avançada', 'Coordenada · BPM · tom · formato'],
+    playlists: ['Playlists', 'Coleções · em breve'],
+    busca:     ['Busca avançada', 'BPM · tom · formato'],
     capturar:  ['Capturar / Rip', 'Vinil · CD · linha · em breve'],
   };
 
@@ -76,7 +76,7 @@
       bg:     row.querySelector('.row-cover')?.style.background || '',
       title:  row.querySelector('.row-title')?.textContent || 'Faixa',
       artist: row.querySelector('.row-artist')?.textContent || '',
-      coord:  row.dataset.coord || '',
+      id:     row.dataset.id || '',
       bpm:    row.querySelector('.row-data')?.textContent || '',
       key:    row.querySelector('.row-key')?.textContent || '',
       dur:    +row.dataset.dur || 0,
@@ -185,7 +185,7 @@
     d = d || lastTrack || {
       bg: tp.cover ? tp.cover.style.background : '',
       title: tp.title ? tp.title.textContent : '',
-      artist: '', bpm: '', coord: '',
+      artist: '', bpm: '', id: '',
     };
     const cover = $('[data-viz-cover]'); if (cover && d.bg) cover.style.background = d.bg;
     const title = $('[data-viz-title]'); if (title) title.textContent = d.title;
@@ -275,7 +275,7 @@
       `${d.artist} <span style="width:3px;height:3px;border-radius:50%;background:var(--ink-faint)"></span> ${d.bpm} BPM <span class="tag" style="margin-left:2px">${d.key}</span>`;
     // sync the active marker with a matching acervo row if present
     $$('.row').forEach((r) => { r.classList.remove('active'); const eq = r.querySelector('.row-coord .eq'); if (eq) eq.remove(); });
-    const match = $$('.screen[data-screen="acervo"] .row').find((r) => r.dataset.coord === d.coord);
+    const match = $$('.screen[data-screen="acervo"] .row').find((r) => r.dataset.id === d.id);
     if (match) {
       match.classList.add('active');
       const ce = match.querySelector('.row-coord');
@@ -290,7 +290,7 @@
     const title = row.dataset.title;
     playData({
       bg: row.dataset.bg, title: row.dataset.title, artist: row.dataset.artist,
-      bpm: row.dataset.bpm, coord: row.dataset.coord, key: row.dataset.key,
+      bpm: row.dataset.bpm, id: row.dataset.id, key: row.dataset.key,
       dur: row.dataset.dur,
     });
     row.remove();
@@ -346,7 +346,7 @@
     const row = document.createElement('div');
     row.className = 'tpq-row';
     row.dataset.bg = d.bg; row.dataset.title = d.title; row.dataset.artist = d.artist;
-    row.dataset.bpm = d.bpm; row.dataset.coord = d.coord; row.dataset.key = d.key;
+    row.dataset.bpm = d.bpm; row.dataset.id = d.id; row.dataset.key = d.key;
     row.dataset.dur = d.dur || 0;
     row.innerHTML =
       '<span class="tpq-grip"><i></i><i></i><i></i></span>' +
@@ -578,7 +578,7 @@
   if (splitBtn) splitBtn.addEventListener('click', () => splitBtn.classList.toggle('on'));
   // save to vault
   const capSave = $('.cap-save');
-  if (capSave) capSave.addEventListener('click', () => toast('3 faixas salvas no cofre', 'C09·R01'));
+  if (capSave) capSave.addEventListener('click', () => toast('3 faixas salvas no cofre', 'Cofre'));
   // detected track selection
   $$('.cap-trk').forEach((t) => t.addEventListener('click', () => {
     $$('.cap-trk').forEach((x) => x.classList.remove('live')); t.classList.add('live');

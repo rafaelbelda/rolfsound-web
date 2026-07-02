@@ -38,13 +38,13 @@
     rip: '<span class="tag mut">Rip cru</span>',
   };
 
-  const byCoord = new Map(tracks.map((t) => [t.coord, t]));
+  const byId = new Map(tracks.map((t) => [t.id, t]));
 
   /* ---------- Acervo: rows do ledger ---------- */
   function rowHtml(t) {
     const tags = (t.tags || []).map((tg) => '<span class="tag mut">' + esc(cap(tg)) + '</span>').join('');
     return '<div class="row"' +
-      ' data-coord="' + esc(t.coord) + '"' +
+      ' data-id="' + esc(t.id) + '"' +
       ' data-added="' + (+t.added || 0) + '"' +
       ' data-bpm="' + (+t.bpm || 0) + '"' +
       ' data-key="' + esc(t.key) + '"' +
@@ -78,7 +78,7 @@
       ' data-title="' + esc(t.title) + '"' +
       ' data-artist="' + esc(t.artist) + '"' +
       ' data-bpm="' + (+t.bpm || 0) + '"' +
-      ' data-coord="' + esc(t.coord) + '"' +
+      ' data-id="' + esc(t.id) + '"' +
       ' data-key="' + esc(t.key) + '"' +
       ' data-dur="' + (+t.dur || 0) + '">' +
       '<span class="tpq-grip"><i></i><i></i><i></i></span>' +
@@ -92,7 +92,7 @@
   }
 
   const queueList = document.querySelector('[data-queue-list]');
-  const queueTracks = queue.map((c) => byCoord.get(c)).filter(Boolean);
+  const queueTracks = queue.map((id) => byId.get(id)).filter(Boolean);
   if (queueList) queueList.insertAdjacentHTML('beforeend', queueTracks.map(queueRowHtml).join(''));
   const queueCount = document.querySelector('[data-queue-count]');
   if (queueCount) queueCount.textContent = queueTracks.length;

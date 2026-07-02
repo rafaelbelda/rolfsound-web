@@ -102,7 +102,7 @@
 /* track list */
 .pl-tracks-head, .pl-row {
   display: grid;
-  grid-template-columns: 26px 40px 44px 1fr 70px 60px 104px 52px 30px;
+  grid-template-columns: 26px 40px 44px 1fr 70px 60px 52px 30px;
   align-items: center; gap: 14px; padding: 0 20px;
 }
 .pl-tracks-head {
@@ -141,7 +141,6 @@
 .pl-artist { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
 .pl-data { font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .pl-key { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-.pl-coord { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 0.04em; }
 .pl-dur { text-align: right; font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 
 /* remove-from-playlist button */

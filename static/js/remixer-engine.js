@@ -17,7 +17,8 @@
   const $  = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-  const AUDIO_URL = 'static/audio/reverie.mp3';
+  // audio real vem do backend; sem id (ou sem backend) o Remixer fica visual
+  const trackAudioUrl = (id) => (id ? 'api/library/' + encodeURIComponent(id) + '/download' : '');
 
   const Player = window.RolfPlayer = window.RolfPlayer || {};
   const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -140,9 +141,12 @@
     eqHi.connect(outGain); outGain.connect(analyser); analyser.connect(ctx.destination);
   }
 
-  async function decode() {
+  async function decode(url) {
+    if (!url) return;
     try {
-      const res = await fetch(encodeURI(AUDIO_URL));
+      ready = false;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
       const arr = await res.arrayBuffer();
       ensureCtx();
       buffer = await ctx.decodeAudioData(arr);
@@ -949,12 +953,12 @@
 
   function rowData(row) {
     return {
+      id: row.dataset.id || '',
       bg: row.querySelector('.row-cover')?.style.background || '',
       title: row.querySelector('.row-title')?.textContent || 'Faixa',
-      artist: row.querySelector('.row-artist')?.textContent || 'Rolf',
+      artist: row.querySelector('.row-artist')?.textContent || '',
       bpm: row.querySelector('.row-data')?.textContent || '118',
       key: row.querySelector('.row-key')?.textContent || 'A min',
-      coord: row.dataset.coord || '',
     };
   }
 
@@ -978,6 +982,8 @@
     renderCues();
     seek(0);
     layout();
+    // fetch + decode o áudio real da faixa (fire-and-forget; sem id fica visual)
+    decode(trackAudioUrl(d.id));
   }
 
   /* ============================================================
@@ -999,7 +1005,6 @@
      ============================================================ */
   function init() {
     ensureCtx();
-    decode();
     wireKnob('Pitch'); wireKnob('Tempo'); wireKnob('Filtro');
     wireToggles(); wireEQ(); wireLoop(); wireWave(); wireOutput();
     wireTools(); wireAB(); initCues();

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($cfg = Get-Content config.json -Raw; $cfg = $cfg.TrimStart\\([char]0xFEFF\\); [System.IO.File]::WriteAllText\\(\"c:\\\\Users\\\\lucbo\\\\Documents\\\\rolfsound-pack\\\\rolfsound-web\\\\config.json\", $cfg, \\(New-Object System.Text.UTF8Encoding\\($false\\)\\)\\); & .\\\\.venv\\\\Scripts\\\\python.exe -c \"import json; print\\(json.load\\(open\\('config.json'\\)\\)['account_type']\\)\")",
+      "PowerShell(\\(Get-Content youtube\\\\ytdlp.py -Raw\\) -split \"`n\" | Select-String -Pattern '\"yt-dlp\"' | ForEach-Object { $_.LineNumber.ToString\\(\\) + \": \" + $_.Line.Trim\\(\\) })",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false; \"old server stopped\" })",
+      "PowerShell(Start-Sleep -Seconds 8; $req = [System.Net.HttpWebRequest]::Create\\(\"http://localhost:8766/api/search?q=daft+punk+one+more+time\"\\); $req.Timeout = 40000; $req.ReadWriteTimeout = 40000; try { $resp = $req.GetResponse\\(\\); $sr = New-Object System.IO.StreamReader\\($resp.GetResponseStream\\(\\)\\); $lines = @\\(\\); $sw = [Diagnostics.Stopwatch]::StartNew\\(\\); while \\(-not $sr.EndOfStream -and $sw.Elapsed.TotalSeconds -lt 35 -and $lines.Count -lt 8\\) { $l = $sr.ReadLine\\(\\); if \\($l\\) { $lines += $l } }; $resp.Close\\(\\); $lines } catch { \"search FAIL: $\\($_.Exception.Message\\)\" })",
+      "PowerShell($edge = \"C:\\\\Program Files \\(x86\\)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\"; if \\(-not \\(Test-Path $edge\\)\\) { $edge = \"C:\\\\Program Files\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\" }; $shot = \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\3a2cef46-253e-485d-a0d9-ef360a8298e6\\\\scratchpad\\\\discovery-admin.png\"; & $edge --headless=new --disable-gpu --screenshot=\"$shot\" --window-size=1680,400 --virtual-time-budget=6000 --no-first-run \"http://localhost:8766/\" | Out-Null; Start-Sleep -Seconds 5; \\(Get-Item $shot\\).Length)",
+      "PowerShell($conn = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue; if \\($conn\\) { Stop-Process -Id $conn[0].OwningProcess -Force -Confirm:$false; \"server stopped\" })",
+      "PowerShell(git add -A)"
+    ]
+  }
+}
