@@ -1,0 +1,246 @@
+/* ============================================================
+   ROLFSOUND V2 — Capturar / Rip
+   Digitize a physical source (vinyl / CD / line). The hero is a
+   dot-matrix spectrogram; a right rail holds auto-split tracks,
+   detected metadata and the vault target.
+   ============================================================ */
+
+.cap { position: relative; }
+.cap-body {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: 8px 36px 116px;
+  overflow: hidden;
+}
+.cap-inner {
+  max-width: 1180px; width: 100%; margin: 0 auto;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+/* ---------- source bar ---------- */
+.cap-source {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--hair); border-radius: 16px;
+  background: rgba(12,12,15,0.5);
+}
+.src-seg { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--hair); border-radius: 12px; background: rgba(255,255,255,0.015); }
+.src-seg button {
+  display: flex; align-items: center; gap: 8px;
+  height: 38px; padding: 0 15px; border: none; border-radius: 9px; background: none;
+  color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-display); font-size: 13px; font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+}
+.src-seg button svg { width: 17px; height: 17px; }
+.src-seg button.active { color: var(--accent); background: var(--accent-soft); }
+.cap-source-spacer { flex: 1; }
+.src-chip {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 0 16px; border-left: 1px solid var(--hair-soft);
+}
+.src-chip:first-of-type { border-left: none; }
+.src-chip .k { font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); }
+.src-chip .v { font-family: var(--font-mono); font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.src-chip .v.live { color: #5aa55a; }
+.src-live-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px;
+  background: #5aa55a; box-shadow: 0 0 8px #5aa55a; vertical-align: middle;
+  animation: caplive 1.8s var(--ease) infinite;
+}
+@keyframes caplive { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .src-live-dot { animation: none; } }
+
+/* ---------- spectrogram stage ---------- */
+.cap-stage {
+  position: relative;
+  display: grid; grid-template-columns: 1fr 56px;
+  gap: 12px; align-items: stretch;
+  flex: 1; min-height: 180px;
+}
+.spectro-axis {
+  position: absolute; left: -42px; top: 0; bottom: 0; width: 34px;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.spectro-axis span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+
+.spectro {
+  position: relative;
+  border: 1px solid var(--hair); border-radius: 18px;
+  background:
+    radial-gradient(120% 120% at 100% 50%, var(--accent-soft), transparent 55%),
+    rgba(8,8,10,0.7);
+  overflow: hidden;
+  padding: 16px 0 0;
+  display: flex; flex-direction: column;
+}
+.spectro-top {
+  position: absolute; top: 12px; left: 16px; right: 16px; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between;
+  pointer-events: none;
+}
+.spectro-tag {
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.spectro-tag b { color: var(--accent); font-weight: 500; }
+.spectro-cv { display: block; width: 100%; flex: 1; min-height: 0; }
+/* capture head — the bright "now" edge at the right */
+.spectro-head {
+  position: absolute; top: 0; bottom: 0; right: 0; width: 2px;
+  background: var(--accent); box-shadow: 0 0 16px var(--accent); z-index: 2;
+}
+.spectro-head::before {
+  content: ""; position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent);
+}
+/* faint time ruler at the bottom */
+.spectro-ruler {
+  position: relative; z-index: 3; height: 22px; flex: none;
+  display: flex; align-items: center;
+  border-top: 1px solid var(--hair-soft);
+  padding: 0 14px; margin-top: 2px;
+}
+.spectro-ruler .t {
+  flex: 1; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.spectro-ruler .t:last-child { text-align: right; color: var(--accent); }
+
+/* L/R meters beside the spectrogram */
+.cap-meters { display: flex; gap: 8px; }
+.cap-meter { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.cap-meter-track {
+  position: relative; flex: 1; width: 100%; border-radius: 7px;
+  border: 1px solid var(--hair); overflow: hidden;
+  background: repeating-linear-gradient(180deg, transparent 0 6px, rgba(232,233,238,0.04) 6px 7px);
+}
+.cap-meter-fill {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(180deg, #d9a55a, var(--accent) 38%, color-mix(in oklab, var(--accent) 60%, #2a6f4a) 100%);
+}
+.cap-meter-peak { position: absolute; left: 0; right: 0; height: 2px; background: #d9a55a; }
+.cap-meter-label { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; color: var(--ink-dim); }
+
+/* ---------- capture controls ---------- */
+.cap-ctrl {
+  display: flex; align-items: center; gap: 18px;
+  padding: 16px 20px;
+  border: 1px solid var(--hair); border-radius: 16px;
+  background: rgba(12,12,15,0.5);
+}
+.rec-btn {
+  display: flex; align-items: center; gap: 11px;
+  height: 52px; padding: 0 22px 0 18px;
+  border-radius: 14px; border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  background: var(--accent-soft); color: var(--accent); cursor: pointer;
+  font-family: var(--font-display); font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+  transition: background 0.16s, border-color 0.16s, color 0.16s;
+}
+.rec-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.rec-btn.recording { background: var(--accent); color: #0b0b0d; border-color: var(--accent); }
+.rec-btn.recording .rec-dot { background: #0b0b0d; box-shadow: none; border-radius: 3px; animation: recblink 1.1s steps(1) infinite; }
+@keyframes recblink { 50% { opacity: 0.3; } }
+.cap-elapsed {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cap-elapsed .t { font-family: var(--font-mono); font-size: 24px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.cap-elapsed .k { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint); }
+.cap-ctrl-spacer { flex: 1; }
+.cap-toggle {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border: 1px solid var(--hair-soft); border-radius: 12px;
+  background: none; color: var(--ink-dim); cursor: pointer;
+}
+.cap-toggle .sw {
+  width: 34px; height: 19px; border-radius: 11px; background: var(--hair); position: relative; transition: background 0.16s;
+}
+.cap-toggle .sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--ink-dim); transition: transform 0.16s, background 0.16s;
+}
+.cap-toggle.on { color: var(--ink); }
+.cap-toggle.on .sw { background: var(--accent-soft); }
+.cap-toggle.on .sw::after { transform: translateX(15px); background: var(--accent); }
+.cap-toggle .lbl { font-size: 13px; font-weight: 500; }
+.cap-toggle .sub { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+
+.cap-gain { display: flex; align-items: center; gap: 11px; }
+.cap-gain svg { width: 17px; height: 17px; color: var(--ink-dim); }
+.cap-gain-bar { position: relative; width: 96px; height: 4px; border-radius: 3px; background: var(--hair); }
+.cap-gain-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 58%; background: var(--ink-dim); border-radius: 3px; }
+.cap-gain-fill::after { content: ""; position: absolute; right: -4px; top: 50%; transform: translateY(-50%); width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+
+/* ---------- detected tracks (horizontal, centered flow) ---------- */
+.cap-detected {
+  border: 1px solid var(--hair); border-radius: 18px;
+  background: rgba(12,12,15,0.5);
+  padding: 16px 18px 18px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.cap-det-head { display: flex; align-items: center; gap: 16px; }
+.cap-det-head .sec-label { flex: none; }
+.cap-det-meta {
+  display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; color: var(--ink-dim);
+}
+.cap-det-meta .d { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+.cap-det-meta b { color: var(--ink); font-weight: 500; }
+.cap-meta-fp {
+  display: inline-flex; align-items: center; gap: 7px; margin-left: auto; flex: none;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent); border-radius: 7px; padding: 5px 9px;
+}
+.cap-meta-fp svg { width: 13px; height: 13px; }
+
+.cap-det-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.cap-trk {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 14px; border-radius: 13px; cursor: pointer;
+  border: 1px solid var(--hair-soft); background: rgba(255,255,255,0.012);
+  transition: background 0.14s, border-color 0.14s;
+}
+.cap-trk:hover { background: rgba(255,255,255,0.03); border-color: var(--hair); }
+.cap-trk.live { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 30%, transparent); }
+.cap-trk-n {
+  width: 22px; flex: none; text-align: center;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+.cap-trk.live .cap-trk-n { color: var(--accent); }
+.cap-trk-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cap-trk-title {
+  font-size: 13.5px; font-weight: 500; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cap-trk-title.pending { color: var(--ink-dim); font-style: italic; }
+.cap-trk-sub { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.cap-trk-dur { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); flex: none; font-variant-numeric: tabular-nums; }
+.cap-trk-rec { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); flex: none; }
+
+/* destino + salvar footer row */
+.cap-det-foot {
+  display: flex; align-items: center; gap: 14px;
+  padding-top: 14px; border-top: 1px solid var(--hair-soft);
+}
+.cap-target {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 15px; border: 1px solid var(--hair); border-radius: 13px;
+  background: rgba(255,255,255,0.012);
+}
+.cap-target svg { width: 17px; height: 17px; color: var(--accent); flex: none; }
+.cap-target .info { display: flex; flex-direction: column; gap: 3px; }
+.cap-target .t { font-size: 13px; font-weight: 500; color: var(--ink); }
+.cap-target .s { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.cap-target .coord { font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.cap-det-foot-spacer { flex: 1; }
+.cap-save {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  height: 48px; padding: 0 22px; border-radius: 13px; border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  background: var(--accent-soft); color: var(--accent); cursor: pointer;
+  font-family: var(--font-display); font-size: 14px; font-weight: 600;
+  transition: background 0.16s;
+}
+.cap-save:hover { background: color-mix(in oklab, var(--accent) 26%, transparent); }
+.cap-save svg { width: 17px; height: 17px; }

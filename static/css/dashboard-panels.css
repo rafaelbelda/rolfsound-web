@@ -1,0 +1,146 @@
+/* ============================================================
+   ROLFSOUND V2 — Track panel content
+   Three modes rendered inside the morphing dock drawer:
+   · editor  — edit track metadata (title, album, artist, year…)
+   · album   — album header + its track list
+   · artist  — artist header + their catalogue
+   ============================================================ */
+
+.tp-panel-inner { height: 100%; display: flex; flex-direction: column; }
+
+/* shared header bar across modes */
+.tpp-head {
+  flex: none; display: flex; align-items: center; gap: 14px;
+  height: 58px; padding: 0 16px 0 22px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.tpp-kicker {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint);
+}
+.tpp-h-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.tpp-spacer { flex: 1; }
+.tpp-btn {
+  display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px;
+  border: 1px solid var(--hair); border-radius: 9px; background: none; color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tpp-btn svg { width: 13px; height: 13px; }
+.tpp-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
+.tpp-btn.accent { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 42%, transparent); background: var(--accent-soft); }
+.tpp-btn.accent:hover { background: color-mix(in oklab, var(--accent) 24%, transparent); }
+.tpp-close {
+  display: grid; place-items: center; width: 34px; height: 34px;
+  border: none; border-radius: 9px; background: none; color: var(--ink-dim); cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.tpp-close svg { width: 18px; height: 18px; }
+.tpp-close:hover { color: var(--ink); background: rgba(255,255,255,0.05); }
+
+/* ---------- editor ---------- */
+.tpp-editor { flex: 1; min-height: 0; display: flex; gap: 26px; padding: 22px; overflow-y: auto; scrollbar-width: none; }
+.tpp-editor::-webkit-scrollbar { display: none; }
+.tpp-edit-cover {
+  flex: none; width: 150px; display: flex; flex-direction: column; gap: 12px;
+}
+.tpp-edit-art {
+  width: 150px; height: 150px; border-radius: 16px;
+  border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--hair));
+  box-shadow: inset 0 0 40px rgba(0,0,0,0.4);
+  position: relative; overflow: hidden;
+}
+.tpp-edit-art .repl {
+  position: absolute; inset: auto 0 0 0; height: 36px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  background: rgba(0,0,0,0.5); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: var(--ink); cursor: pointer; opacity: 0; transition: opacity 0.16s;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.tpp-edit-art:hover .repl { opacity: 1; }
+.tpp-edit-art .repl svg { width: 13px; height: 13px; }
+.tpp-edit-coord {
+  text-align: center;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--accent);
+}
+
+.tpp-fields { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; align-content: start; }
+.tpp-field { display: flex; flex-direction: column; gap: 6px; }
+.tpp-field.col2 { grid-column: 1 / -1; }
+.tpp-label { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); }
+.tpp-input {
+  height: 40px; padding: 0 13px; border-radius: 10px;
+  border: 1px solid var(--hair); background: rgba(255,255,255,0.015);
+  color: var(--ink); font-family: var(--font-display); font-size: 14px; outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tpp-input::placeholder { color: var(--ink-faint); }
+.tpp-input:focus { border-color: color-mix(in oklab, var(--accent) 50%, transparent); background: var(--accent-soft); }
+.tpp-input.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- album / artist hero ---------- */
+.tpp-hero { flex: none; display: flex; align-items: center; gap: 20px; padding: 20px 22px; border-bottom: 1px solid var(--hair-soft); }
+.tpp-hero-art { width: 92px; height: 92px; border-radius: 16px; flex: none; border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--hair)); box-shadow: inset 0 0 36px rgba(0,0,0,0.4); }
+.tpp-hero-art.round { border-radius: 50%; }
+.tpp-hero-info { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.tpp-hero-name { font-family: var(--font-brand); font-weight: 600; font-size: 30px; letter-spacing: -0.01em; color: var(--ink); }
+.tpp-hero-meta { display: flex; align-items: center; gap: 9px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+.tpp-hero-meta .d { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
+
+/* track list shared by album/artist */
+.tpp-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 8px 12px 14px; }
+.tpp-list::-webkit-scrollbar { display: none; }
+.tpp-trk {
+  display: grid; grid-template-columns: 24px 38px 1fr 56px 60px 52px; align-items: center; gap: 14px;
+  height: 50px; padding: 0 12px; border-radius: 11px; cursor: pointer; transition: background 0.14s;
+}
+.tpp-trk:hover { background: rgba(255,255,255,0.03); }
+.tpp-trk.playing { background: var(--accent-soft); }
+.tpp-trk-idx { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.tpp-trk .row-cover { width: 34px; height: 34px; }
+.tpp-trk-name { font-size: 14px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpp-trk.playing .tpp-trk-name { color: var(--accent); }
+.tpp-trk-data { font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.tpp-trk-key { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+.tpp-trk-coord { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); }
+.tpp-trk-dur { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- autocomplete dropdown (artist / album fields) ---------- */
+.tpp-field.has-ac { position: relative; }
+.tpp-ac {
+  position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 5px;
+  padding: 5px; border: 1px solid var(--hair); border-radius: 11px;
+  background: rgba(18,18,21,0.96);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3); backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.6), 0 22px 50px -26px rgba(0,0,0,0.95);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.tpp-ac-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: 7px; background: none;
+  color: var(--ink-dim); cursor: pointer; text-align: left;
+  font-family: var(--font-display); font-size: 13px;
+  transition: color 0.12s, background 0.12s;
+}
+.tpp-ac-item svg { width: 13px; height: 13px; color: var(--ink-faint); flex: none; }
+.tpp-ac-item:hover { color: var(--ink); background: var(--accent-soft); }
+.tpp-ac-item:hover svg { color: var(--accent); }
+
+/* ---------- artist scroll: albums section + tracks section ---------- */
+.tpp-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 4px 12px 14px; }
+.tpp-scroll::-webkit-scrollbar { display: none; }
+.tpp-section {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 14px 10px 9px;
+}
+.tpp-albums { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 0 10px 6px; }
+.tpp-albums::-webkit-scrollbar { display: none; }
+.tpp-alb {
+  flex: none; width: 132px; display: flex; flex-direction: column; gap: 9px;
+  padding: 11px; border: 1px solid var(--hair-soft); border-radius: 14px;
+  background: rgba(255,255,255,0.012); cursor: pointer; text-align: left;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.tpp-alb:hover { border-color: var(--hair); background: rgba(255,255,255,0.03); transform: translateY(-2px); }
+.tpp-alb-art { width: 110px; height: 110px; border-radius: 10px; border: 1px solid var(--hair); box-shadow: inset 0 0 24px rgba(0,0,0,0.4); }
+.tpp-alb-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpp-alb-meta { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }

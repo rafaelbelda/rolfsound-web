@@ -1,0 +1,64 @@
+/* ============================================================
+   ROLFSOUND V2 — Remixer live additions
+   Track picker dropdown in the loaded-track strip.
+   ============================================================ */
+.rmx-track-meta { position: relative; }
+
+.rmx-loadbtn {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-left: 14px;
+  height: 34px; padding: 0 11px 0 12px;
+  border: 1px solid var(--hair); border-radius: 10px;
+  background: rgba(255,255,255,0.015); color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.rmx-loadbtn svg { width: 14px; height: 14px; }
+.rmx-loadbtn .cv { width: 13px; height: 13px; opacity: 0.7; transition: transform 0.18s; }
+.rmx-loadbtn:hover { color: var(--ink); border-color: var(--hair); }
+.rmx-loadbtn.open { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, transparent); background: var(--accent-soft); }
+.rmx-loadbtn.open .cv { transform: rotate(180deg); }
+
+.rmx-loadmenu {
+  position: absolute; z-index: 60; top: calc(100% + 8px); left: 0;
+  width: 340px; max-height: 360px; overflow-y: auto; scrollbar-width: thin;
+  padding: 6px; border: 1px solid var(--hair); border-radius: 14px;
+  background: rgba(18,18,22,0.97); backdrop-filter: blur(18px);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.55);
+}
+.rmx-loaditem {
+  display: grid; grid-template-columns: 34px 1fr auto auto; align-items: center; gap: 11px;
+  width: 100%; padding: 8px 10px; border: none; border-radius: 9px; background: none;
+  color: var(--ink); cursor: pointer; text-align: left; transition: background 0.12s;
+}
+.rmx-loaditem:hover { background: rgba(255,255,255,0.05); }
+.rmx-loaditem .row-cover { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--hair); }
+.rmx-loaditem .ri-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rmx-loaditem .ri-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rmx-loaditem .ri-sub { font-size: 11px; color: var(--ink-dim); }
+.rmx-loaditem .ri-bpm { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.rmx-loaditem .ri-key { font-family: var(--font-mono); font-size: 10px; color: var(--accent); min-width: 38px; text-align: right; }
+
+/* loop region hidden until a region exists (positioned by engine) */
+.wave-loop { display: none; }
+.wave-loop.rmx-loop-off { opacity: 0.4; filter: saturate(0.35); }
+
+/* interaction-mode cursors on the waveform */
+.wave-frame { cursor: pointer; touch-action: none; }
+.wave-frame[data-mode="loop"] { cursor: ew-resize; }
+.wave-frame[data-mode="cue"]  { cursor: cell; }
+.wave-frame[data-mode="zoom"] { cursor: zoom-in; }
+.wave-cue { cursor: pointer; }
+
+/* dynamic ruler: ticks are absolutely placed at bar boundaries */
+.rmx .wave-ruler { position: relative; display: block; }
+.rmx .wave-ruler .tick { position: absolute; top: 0; flex: none; transform: translateX(-1px); }
+
+/* zoom level badge + fit button live in the wave tools row */
+.rmx-zoom-badge {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 9px;
+  border-radius: 8px; background: var(--accent-soft);
+  color: var(--accent); font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.08em; font-variant-numeric: tabular-nums;
+}
+.rmx-fit { color: var(--ink-dim); }

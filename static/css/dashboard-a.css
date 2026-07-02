@@ -1,0 +1,340 @@
+/* ============================================================
+   ROLFSOUND V2 — Dashboard A "Island"
+   Direction A (Ledger) with the left rail removed and the nav
+   re-cast as a floating Dynamic Island at top-center — the same
+   command-island metaphor as the iPhone app, ported to desktop.
+   Reuses .ledger / .row / .tbl-head / .transport from
+   dashboard-variants.css and tokens from dashboard.css.
+   ============================================================ */
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(120% 80% at 70% -10%, rgba(255,255,255,0.018), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  font-family: var(--font-display);
+}
+
+.appshell {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.appshell > .mesh-bg {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.6;
+}
+
+/* ============================================================
+   TOP STRIP — brand · floating island · device status
+   ============================================================ */
+.topbar {
+  position: relative; z-index: 30; flex: none;
+  height: 86px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 30px;
+}
+.tb-brand {
+  display: flex; align-items: baseline; gap: 10px;
+}
+.tb-brand .word {
+  font-family: var(--font-brand);
+  font-size: 24px; font-weight: 700; color: var(--ink); letter-spacing: 0;
+}
+.tb-brand .word .ac { color: var(--accent); }
+.tb-brand .ver {
+  font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+}
+
+/* the Dynamic Island */
+.island {
+  position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+  z-index: 31;
+  display: flex; align-items: center; gap: 3px;
+  padding: 7px;
+  border-radius: 24px;
+  /* Apple-style liquid glass */
+  border: 1px solid rgba(255,255,255,0.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.02) 44%, rgba(255,255,255,0.05)),
+    rgba(30,30,34,0.42);
+  -webkit-backdrop-filter: blur(32px) saturate(1.9) brightness(1.18);
+  backdrop-filter: blur(32px) saturate(1.9) brightness(1.18);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.45),
+    0 18px 40px -24px rgba(0,0,0,0.85),
+    inset 0 1px 0.5px rgba(255,255,255,0.5),
+    inset 0 0 0 1px rgba(255,255,255,0.04),
+    inset 0 -10px 22px -16px rgba(255,255,255,0.12),
+    inset 0 -1px 1px rgba(0,0,0,0.3);
+}
+.isl-btn {
+  display: flex; align-items: center; gap: 9px;
+  height: 46px; padding: 0 14px;
+  border-radius: 17px;
+  background: none; border: none; color: var(--ink-dim); cursor: pointer;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease), padding 0.26s var(--ease);
+}
+.isl-btn svg { width: 20px; height: 20px; flex: none; }
+.isl-btn span {
+  font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
+  max-width: 0; overflow: hidden; white-space: nowrap;
+  opacity: 0; transition: max-width 0.28s var(--ease), opacity 0.2s var(--ease);
+}
+.isl-btn:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
+.isl-btn.active { color: var(--accent); background: var(--accent-soft); }
+.isl-btn.active span { max-width: 90px; opacity: 1; }
+.isl-sep { width: 1px; height: 22px; background: var(--hair); margin: 0 4px; flex: none; }
+
+/* device status capsule (subtle) */
+.tb-status {
+  display: flex; align-items: center; gap: 13px;
+  height: 44px; padding: 0 16px;
+  border: 1px solid var(--hair-soft); border-radius: 14px;
+  background: rgba(255,255,255,0.014);
+}
+.tb-status .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+}
+.tb-status .nm {
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-dim);
+}
+.tb-status .sep { width: 1px; height: 18px; background: var(--hair); }
+.tb-status .store { display: flex; flex-direction: column; gap: 5px; width: 92px; }
+.tb-status .bar { position: relative; height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; }
+.tb-status .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink-dim); border-radius: 2px; }
+.tb-status .meta {
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 7.5px;
+  letter-spacing: 0.08em; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   BODY — section header + ledger table (full-bleed)
+   ============================================================ */
+.appshell .main { position: relative; z-index: 1; flex: 1; min-height: 0; }
+.appshell .top { padding: 8px 36px 18px; }
+.appshell .top-title { font-size: 32px; }
+.appshell .ledger-scroll { padding-left: 36px; padding-right: 36px; }
+.appshell .tbl-head, .appshell .row {
+  grid-template-columns: 64px 52px 1fr 96px 70px 168px 132px 70px;
+}
+/* float the mini-player transport over the page */
+/* float the mini-player dock over the page; the glass surface
+   morphs upward when the queue opens */
+.appshell .ledger { position: relative; }
+.appshell .tp-dock {
+  position: absolute;
+  z-index: 40;
+  left: 32px; right: 32px; bottom: 22px;
+  display: flex; flex-direction: column;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 24px;
+  overflow: hidden;
+  /* Apple-style liquid glass: bright translucent material + specular edges */
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.13), rgba(255,255,255,0.02) 44%, rgba(255,255,255,0.05)),
+    rgba(30,30,34,0.40);
+  -webkit-backdrop-filter: blur(44px) saturate(2) brightness(1.2);
+  backdrop-filter: blur(44px) saturate(2) brightness(1.2);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.4),
+    0 30px 70px -30px rgba(0,0,0,0.92),
+    inset 0 1px 0.5px rgba(255,255,255,0.5),
+    inset 0 0 0 1px rgba(255,255,255,0.045),
+    inset 0 -12px 26px -18px rgba(255,255,255,0.12),
+    inset 0 -1px 1px rgba(0,0,0,0.28);
+  transition: box-shadow 0.4s var(--ease);
+}
+.appshell .tp-dock.queue-open {
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.4),
+    0 44px 96px -32px rgba(0,0,0,0.95),
+    inset 0 1px 0.5px rgba(255,255,255,0.52),
+    inset 0 0 0 1px rgba(255,255,255,0.05),
+    inset 0 -12px 26px -18px rgba(255,255,255,0.12),
+    inset 0 -1px 1px rgba(0,0,0,0.28);
+}
+.appshell .transport {
+  position: relative; z-index: 1;
+  flex: none; height: 92px;
+  background: none; border: none; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  border-radius: 0;
+}
+.appshell .tp-main { padding-left: 22px; padding-right: 22px; }
+
+/* ---------- queue panel: morphs up out of the bar ---------- */
+.appshell .tp-queue {
+  flex: none; overflow: hidden;
+  height: 0; opacity: 0;
+  transition: height 0.42s var(--ease), opacity 0.3s var(--ease);
+}
+.appshell .tp-dock.queue-open .tp-queue {
+  height: 340px; opacity: 1;
+}
+
+/* ---------- track panel: editor / album / artist (morphs up too) ---------- */
+.appshell .tp-panel {
+  flex: none; overflow: hidden;
+  height: 0; opacity: 0;
+  transition: height 0.42s var(--ease), opacity 0.3s var(--ease);
+}
+.appshell .tp-dock.panel-open .tp-panel {
+  height: 400px; opacity: 1;
+}
+.appshell .tp-dock.panel-open.panel-tall .tp-panel {
+  height: 540px;
+}
+.tp-queue-head {
+  display: flex; align-items: center; gap: 12px;
+  height: 56px; padding: 0 16px 0 22px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.tpq-title { font-size: 15px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 9px; }
+.tpq-count {
+  font-family: var(--font-mono); font-size: 10px; color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 32%, transparent); background: var(--accent-soft);
+  border-radius: 6px; padding: 2px 7px;
+}
+.tpq-from { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; }
+.tpq-from .d { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
+.tp-spacer { flex: 1; }
+.tpq-act {
+  display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px;
+  border: 1px solid var(--hair); border-radius: 9px; background: none; color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tpq-act svg { width: 13px; height: 13px; }
+.tpq-act:hover { color: var(--ink); border-color: var(--ink-faint); }
+.tpq-close {
+  display: grid; place-items: center; width: 34px; height: 34px;
+  border: none; border-radius: 9px; background: none; color: var(--ink-dim); cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.tpq-close svg { width: 18px; height: 18px; }
+.tpq-close:hover { color: var(--ink); background: rgba(255,255,255,0.05); }
+
+.tp-queue-list { height: 284px; overflow-y: auto; scrollbar-width: none; padding: 6px 12px 12px; }
+.tp-queue-list::-webkit-scrollbar { display: none; }
+.tpq-row {
+  display: grid;
+  grid-template-columns: 18px 22px 40px 1fr 56px 60px 52px 30px;
+  align-items: center; gap: 13px; padding: 0 10px;
+  height: 52px; border-radius: 11px; cursor: pointer;
+  transition: background 0.14s;
+}
+.tpq-row:hover { background: rgba(255,255,255,0.035); }
+.tpq-grip { display: flex; flex-direction: column; gap: 3px; cursor: grab; opacity: 0; transition: opacity 0.14s; }
+.tpq-row:hover .tpq-grip { opacity: 1; }
+.tpq-grip i { width: 12px; height: 1.6px; border-radius: 1px; background: var(--ink-faint); }
+.tpq-idx { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.tpq-row .row-cover { width: 36px; height: 36px; }
+.tpq-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tpq-name { font-size: 14px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpq-artist { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+.tpq-data { font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.tpq-key { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+.tpq-coord { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); }
+.tpq-dur { font-family: var(--font-mono); font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; text-align: right; }
+.tpq-x {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border: none; border-radius: 7px; background: none; color: var(--ink-faint); cursor: pointer;
+  opacity: 0; transition: opacity 0.14s, color 0.14s, background 0.14s;
+}
+.tpq-x svg { width: 14px; height: 14px; }
+.tpq-row:hover .tpq-x { opacity: 1; }
+.tpq-x:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
+
+/* queue button active state */
+.tp-fs.is-on { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 42%, transparent); background: var(--accent-soft); }
+/* keep the last rows clear of the floating bar */
+.appshell .ledger-scroll { padding-bottom: 118px; }
+
+/* keep the table from running edge-to-edge on ultra-wide */
+.appshell .ledger-scroll .tbl-head,
+.appshell .ledger-scroll .row { max-width: 1480px; margin-left: auto; margin-right: auto; }
+
+/* ============================================================
+   CUSTOM CONTEXT MENU — command sheet
+   ============================================================ */
+.ctx {
+  position: fixed; z-index: 200;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--hair);
+  border-radius: 16px;
+  background: rgba(16,16,19,0.86);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  backdrop-filter: blur(28px) saturate(1.3);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.6),
+    0 30px 70px -28px rgba(0,0,0,0.95),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  opacity: 0; transform: scale(0.96) translateY(-4px);
+  transform-origin: var(--ox, 0) var(--oy, 0);
+  transition: opacity 0.13s var(--ease), transform 0.13s var(--ease);
+  pointer-events: none;
+}
+.ctx.open { opacity: 1; transform: none; pointer-events: auto; }
+
+.ctx-head {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 10px 11px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.ctx-cover {
+  width: 34px; height: 34px; border-radius: 9px; flex: none;
+  border: 1px solid var(--hair); box-shadow: inset 0 0 18px rgba(0,0,0,0.45);
+}
+.ctx-meta { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ctx-title {
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 168px;
+}
+.ctx-sub {
+  font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim);
+}
+
+.ctx-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none; border-radius: 10px; background: none;
+  color: var(--ink-dim); cursor: pointer; text-align: left;
+  font-family: var(--font-display);
+  transition: color 0.12s var(--ease), background 0.12s var(--ease);
+}
+.ctx-item svg { width: 17px; height: 17px; flex: none; }
+.ctx-item .lbl { font-size: 13px; font-weight: 500; letter-spacing: 0.01em; }
+.ctx-item .kbd {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+.ctx-item .chev { margin-left: auto; color: var(--ink-faint); width: 14px; height: 14px; }
+.ctx-item:hover { color: var(--ink); background: rgba(255,255,255,0.05); }
+.ctx-item.accent { color: var(--accent); }
+.ctx-item.accent:hover { background: var(--accent-soft); }
+.ctx-item.danger { color: #d96a6a; }
+.ctx-item.danger:hover { background: rgba(217,106,106,0.12); }
+
+.ctx-sep { height: 1px; margin: 5px 8px; background: var(--hair-soft); }
+.ctx-label {
+  padding: 8px 10px 5px;
+  font-family: var(--font-mono); font-size: 7.5px;
+  letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);
+}
+/* row being targeted by the context menu */
+.appshell .row.ctx-target {
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--hair);
+}

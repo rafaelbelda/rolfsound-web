@@ -1,0 +1,173 @@
+/* ============================================================
+   ROLFSOUND V2 — Configurações / Conta
+   A centered settings console: account identity card + the
+   physical device panel, then grouped preference rows (Áudio,
+   Biblioteca, Aparência, Sobre). Reuses chips/seg/tokens.
+   ============================================================ */
+
+.cfg { position: relative; }
+.cfg-body {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: 8px 36px 116px;
+  overflow-y: auto; scrollbar-width: none;
+}
+.cfg-body::-webkit-scrollbar { display: none; }
+.cfg-inner {
+  max-width: 1080px; width: 100%; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* ---------- top row: identity + device ---------- */
+.cfg-top { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; }
+
+.cfg-card {
+  border: 1px solid var(--hair); border-radius: 18px;
+  background: rgba(12,12,15,0.5);
+  padding: 22px;
+}
+
+/* account identity */
+.cfg-id { display: flex; align-items: center; gap: 18px; }
+.cfg-avatar {
+  width: 72px; height: 72px; border-radius: 18px; flex: none;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--hair));
+  background: linear-gradient(150deg, var(--accent), color-mix(in oklab, var(--accent) 40%, #141416) 60%, #141416);
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.4);
+  display: grid; place-items: center;
+  font-family: var(--font-brand); font-weight: 700; font-size: 28px; color: #fff;
+}
+.cfg-id-meta { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cfg-id-name { font-size: 23px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.cfg-id-mail { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+.cfg-id-plan {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 3px;
+  padding: 4px 9px; border-radius: 7px;
+  border: 1px solid color-mix(in oklab, var(--accent) 32%, transparent); background: var(--accent-soft);
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+}
+.cfg-id-actions { display: flex; gap: 9px; margin-top: 20px; }
+
+/* device panel */
+.cfg-dev-head { display: flex; align-items: center; gap: 11px; margin-bottom: 16px; }
+.cfg-dev-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 70%, transparent);
+  animation: cfgPulse 1.9s ease-out infinite; flex: none;
+}
+@keyframes cfgPulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .cfg-dev-dot { animation: none; } }
+.cfg-dev-name { font-size: 15px; font-weight: 600; color: var(--ink); }
+.cfg-dev-conn {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+}
+.cfg-dev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px 18px; }
+.cfg-dev-cell { display: flex; flex-direction: column; gap: 5px; }
+.cfg-dev-k { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+.cfg-dev-v { font-family: var(--font-mono); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cfg-dev-v small { color: var(--ink-dim); font-size: 10px; }
+.cfg-dev-store { grid-column: 1 / -1; margin-top: 4px; }
+.cfg-dev-bar { position: relative; height: 5px; border-radius: 3px; background: var(--hair); overflow: hidden; }
+.cfg-dev-bar span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.cfg-dev-store .cfg-dev-meta {
+  display: flex; justify-content: space-between; margin-top: 7px;
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+
+/* ---------- preference groups ---------- */
+.cfg-group {
+  border: 1px solid var(--hair); border-radius: 18px;
+  background: rgba(12,12,15,0.4); overflow: hidden;
+}
+.cfg-group-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 15px 22px; border-bottom: 1px solid var(--hair-soft);
+}
+.cfg-group-head .sec-label { flex: none; }
+.cfg-group-note { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--ink-faint); letter-spacing: 0.04em; }
+
+.cfg-row {
+  display: flex; align-items: center; gap: 18px;
+  padding: 16px 22px; min-height: 34px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.cfg-row:last-child { border-bottom: none; }
+.cfg-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cfg-row-label { font-size: 14px; font-weight: 500; color: var(--ink); }
+.cfg-row-sub { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.04em; color: var(--ink-faint); }
+.cfg-row-ctrl { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.cfg-row-val { font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+/* iOS-style switch */
+.sw {
+  position: relative; width: 44px; height: 26px; border-radius: 14px; flex: none;
+  border: 1px solid var(--hair); background: rgba(255,255,255,0.04); cursor: pointer;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+.sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--ink-dim);
+  transition: transform 0.18s var(--ease), background 0.18s var(--ease);
+}
+.sw.on { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 42%, transparent); }
+.sw.on::after { transform: translateX(18px); background: var(--accent); }
+
+/* segmented (mono) reused for settings — small */
+.cfg-seg {
+  display: flex; gap: 2px; padding: 3px;
+  border: 1px solid var(--hair); border-radius: 10px; background: rgba(255,255,255,0.015);
+}
+.cfg-seg button {
+  height: 28px; padding: 0 12px; border: none; border-radius: 7px;
+  background: none; color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  transition: color 0.15s, background 0.15s;
+}
+.cfg-seg button:hover:not(.active) { color: var(--ink); }
+.cfg-seg button.active { color: var(--ink); background: rgba(255,255,255,0.07); }
+.cfg-seg button.accent.active { color: var(--accent); background: var(--accent-soft); }
+
+/* accent swatches */
+.cfg-swatches { display: flex; gap: 8px; }
+.cfg-swatch {
+  width: 26px; height: 26px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--hair-soft); position: relative;
+  transition: transform 0.14s var(--ease);
+}
+.cfg-swatch:hover { transform: translateY(-1px); }
+.cfg-swatch.on { border-color: var(--ink); }
+.cfg-swatch.on::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 7px; height: 7px;
+  border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+}
+.cfg-swatch.album {
+  display: grid; place-items: center;
+  background: repeating-conic-gradient(#c8693c 0deg 90deg, #3c9a8f 90deg 180deg, #6b6bd6 180deg 270deg, #c2557a 270deg 360deg);
+}
+
+/* danger row link */
+.cfg-link {
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-dim); transition: color 0.15s;
+}
+.cfg-link:hover { color: var(--ink); }
+.cfg-link.danger { color: color-mix(in oklab, #e0594e 80%, var(--ink)); }
+.cfg-link.danger:hover { color: #e0594e; }
+
+/* about footer */
+.cfg-about {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 4px 0;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+}
+.cfg-about .d { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-faint); }
+
+/* the device status chip in the topbar is now a button */
+.tb-status.is-btn { cursor: pointer; border-radius: 12px; transition: background 0.16s var(--ease); }
+.tb-status.is-btn:hover { background: rgba(255,255,255,0.04); }

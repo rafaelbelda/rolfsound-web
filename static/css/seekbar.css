@@ -1,0 +1,203 @@
+/* ============================================================
+   ROLFSOUND V2 — Waveform seek scrubber
+   Replaces the flat seek line in the mini-player + fullscreen
+   visualizer with a compact, interactive waveform: played bars
+   flood with the accent, the rest sit faint; a draggable playhead
+   with a knob; hover paints a "jump-to" preview region and floats
+   a timecode bubble. Same visual language as the Remixer wave.
+   ============================================================ */
+
+.seekbar {
+  position: relative;
+  flex: 1;
+  height: 30px;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.seekbar-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* playhead — thin accent line + knob, rides on top of the bars */
+.seekbar-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1.5px;
+  margin-left: -0.75px;
+  background: var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 1;
+}
+.seekbar-head::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 1.5px solid var(--accent);
+  transform: translate(-50%, -50%) scale(0.6);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  transition: transform 0.18s var(--ease);
+}
+.seekbar:hover .seekbar-head::after,
+.seekbar.is-scrubbing .seekbar-head::after { transform: translate(-50%, -50%) scale(1); }
+
+/* ghost line that tracks the cursor before you commit */
+.seekbar-ghost {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: color-mix(in oklab, var(--ink) 45%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s var(--ease);
+}
+.seekbar:hover .seekbar-ghost { opacity: 1; }
+.seekbar.is-scrubbing .seekbar-ghost { opacity: 0; }
+
+/* floating timecode bubble */
+.seekbar-bubble {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 0;
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--hair);
+  background: rgba(16, 16, 19, 0.94);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: bottom center;
+  transition: opacity 0.12s var(--ease);
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.9);
+  z-index: 5;
+}
+.seekbar-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(16, 16, 19, 0.94);
+}
+.seekbar:hover .seekbar-bubble,
+.seekbar.is-scrubbing .seekbar-bubble { opacity: 1; }
+
+/* ============================================================
+   MINI-PLAYER — minimal line scrub
+   Replaces the waveform with a hairline that's nearly invisible
+   at rest, flush to the dock's bottom vertex, edge-to-edge (no
+   side padding, no divider row). Reveals its fill, handle and
+   timecodes on hover/drag. The fullscreen visualizer keeps the
+   waveform below — untouched.
+   ============================================================ */
+.transport .tp-scrub {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 20px; padding: 0; margin: 0; gap: 0;
+  border-top: none; background: none;
+  cursor: pointer; touch-action: none;
+  -webkit-user-select: none; user-select: none;
+}
+.transport .tp-bar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px; border-radius: 0;
+  background: rgba(232, 233, 238, 0.09);
+}
+.transport .tp-scrub:hover .tp-bar,
+.transport .tp-scrub.is-drag .tp-bar {
+  background: var(--hair);
+}
+.transport .tp-fill {
+  height: 2px; border-radius: 0;
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+.transport .tp-scrub:hover .tp-fill,
+.transport .tp-scrub.is-drag .tp-fill {
+  background: var(--accent);
+}
+.transport .tp-fill::after {
+  width: 8px; height: 8px;
+  border: 1.5px solid var(--accent);
+  background: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  opacity: 0;
+  transform: translateY(-50%) scale(0.3);
+}
+.transport .tp-scrub:hover .tp-fill::after,
+.transport .tp-scrub.is-drag .tp-fill::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+.transport .tp-time {
+  position: absolute; bottom: 7px;
+  opacity: 0; pointer-events: none;
+}
+.transport .tp-time-l { left: 20px; }
+.transport .tp-time-r { right: 20px; }
+.transport .tp-scrub:hover .tp-time,
+.transport .tp-scrub.is-drag .tp-time { opacity: 1; }
+.transport .tp-bar-bubble {
+  position: absolute; bottom: 16px; left: 0;
+  transform: translateX(-50%);
+  padding: 3px 7px; border-radius: 7px;
+  border: 1px solid var(--hair);
+  background: rgba(16, 16, 19, 0.94);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.9);
+  z-index: 5;
+}
+.transport .tp-bar-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%; left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(16, 16, 19, 0.94);
+}
+.transport .tp-scrub:hover .tp-bar-bubble,
+.transport .tp-scrub.is-drag .tp-bar-bubble { opacity: 1; }
+
+/* ---- fullscreen visualizer: taller, more dramatic ---- */
+.viz-scrub .seekbar { height: 46px; }
+.viz-scrub .seekbar-head { width: 2px; margin-left: -1px; }
+.viz-scrub .seekbar-head::after { width: 12px; height: 12px; }
+.viz-scrub .seekbar-bubble { font-size: 11px; padding: 4px 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .seekbar-head, .seekbar-head::after, .seekbar-ghost, .seekbar-bubble { transition: none; }
+  .transport .tp-bar, .transport .tp-fill, .transport .tp-fill::after,
+  .transport .tp-time, .transport .tp-bar-bubble { transition: none; }
+}

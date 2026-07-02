@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rolfsound V2 — Protótipo</title>
+  <link rel="stylesheet" href="static/css/dashboard.css" />
+  <link rel="stylesheet" href="static/css/dashboard-variants.css" />
+  <link rel="stylesheet" href="static/css/dashboard-a.css" />
+  <link rel="stylesheet" href="static/css/dashboard-remixer.css" />
+  <link rel="stylesheet" href="static/css/dashboard-capture.css" />
+  <link rel="stylesheet" href="static/css/dashboard-playlists.css" />
+  <link rel="stylesheet" href="static/css/dashboard-busca.css" />
+  <link rel="stylesheet" href="static/css/dashboard-acervo.css" />
+  <link rel="stylesheet" href="static/css/dashboard-config.css" />
+  <link rel="stylesheet" href="static/css/dashboard-panels.css" />
+  <link rel="stylesheet" href="static/css/prototype.css" />
+  <link rel="stylesheet" href="static/css/seekbar.css" />
+  <link rel="stylesheet" href="static/css/remixer-live.css" />
+</head>
+<body>
+  <div class="appshell">
+    <canvas class="mesh-bg"></canvas>
+
+    <!-- ============ PERSISTENT TOP STRIP ============ -->
+    <div class="topbar">
+      <div class="tb-brand">
+        <span class="word">Rolf<span class="ac">sound.</span></span>
+      </div>
+
+      <nav class="island" aria-label="Navegação">
+        <button class="isl-btn active" data-nav="acervo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg>
+          <span>Acervo</span>
+        </button>
+        <button class="isl-btn" data-nav="playlists">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>
+          <span>Playlists</span>
+        </button>
+        <button class="isl-btn" data-nav="busca">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <span>Busca</span>
+        </button>
+        <span class="isl-sep"></span>
+        <button class="isl-btn" data-nav="remixer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3.2l9.6 10H20"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3.2l2.6-2.7"/><path d="M14.2 9.7 16.8 7"/><path d="M17 14l3 3-3 3"/></svg>
+          <span>Remixer</span>
+        </button>
+        <button class="isl-btn" data-nav="capturar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/></svg>
+          <span>Capturar</span>
+        </button>
+      </nav>
+
+      <div class="tb-status is-btn" data-nav="config" role="button" tabindex="0" aria-label="Conta e configurações">
+        <span class="dot"></span>
+        <span class="nm">Rolfsound · 01</span>
+        <span class="sep"></span>
+        <div class="store">
+          <div class="bar"><span class="fill" style="width:0%"></span></div>
+          <div class="meta"><span>0 faixas</span><span>— / —</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ SCREENS ============ -->
+    <div class="screens">
+
+      <!-- ----- ACERVO ----- -->
+      <section class="screen main acv active" data-screen="acervo" data-screen-label="Acervo" data-mode="tracks">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Biblioteca <span class="c-dot"></span> Faixas <span class="c-dot"></span> 0 no cofre</div>
+            <div class="top-title">Acervo</div>
+          </div>
+          <div class="acv-modeseg" data-acv-mode role="group" aria-label="Modo de exibição">
+            <button class="active" data-mode="tracks">Faixas</button>
+            <button data-mode="albums">Álbuns</button>
+            <button data-mode="artists">Artistas</button>
+          </div>
+          <div class="top-spacer"></div>
+          <div class="search-field">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+            <input data-acv-search placeholder="Buscar faixa, artista, álbum…" />
+            <span class="kbd">⌘K</span>
+          </div>
+          <div class="seg" data-acv-view>
+            <button class="active" data-view="list" aria-label="Lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+            <button data-view="grid" aria-label="Grade"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></button>
+          </div>
+        </header>
+
+        <div class="acv-bar">
+          <div class="acv-bar-inner">
+            <div class="acv-quick" data-acv-filters>
+              <span class="chip chip-all on" data-filter="all">Todas</span>
+              <span class="acv-sep"></span>
+              <span class="chip" data-filter="fmt" data-val="vinil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>Vinil</span>
+              <span class="chip" data-filter="fmt" data-val="cd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3a9 9 0 0 1 6.4 2.6"/></svg>CD</span>
+              <span class="chip" data-filter="fmt" data-val="digital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 16V8l5-2v8"/><circle cx="5" cy="16" r="2"/><path d="M14 14V6l5-2v8"/><circle cx="14" cy="14" r="2"/></svg>Digital</span>
+              <span class="acv-sep"></span>
+              <span class="chip" data-filter="state" data-val="master">Master</span>
+              <span class="chip" data-filter="state" data-val="edit">Edit</span>
+              <span class="chip" data-filter="state" data-val="rip">Rip cru</span>
+              <span class="acv-sep"></span>
+              <span class="chip chip-fav" data-filter="fav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l2.3 4.7 5.2.8-3.8 3.6.9 5.1L12 16.8 7.2 18.8l.9-5.1L4.3 9.5l5.2-.8z"/></svg>Favoritas</span>
+            </div>
+            <div class="top-spacer"></div>
+            <div class="acv-count"><b data-acv-count>0</b> de 0 faixas</div>
+            <div class="acv-divide"></div>
+            <div class="gseg" data-acv-group>
+              <button class="active" data-group="flat">Lista</button>
+              <button data-group="key">Tom</button>
+              <button data-group="fmt">Formato</button>
+            </div>
+            <button class="acv-sortbtn" data-acv-sortbtn>
+              <svg class="sort-dir" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 4L4 7M7 4l3 3"/></svg>
+              <span data-acv-sortlabel>Adicionada</span>
+              <svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="acv-menu" data-acv-sortmenu>
+              <button class="acv-menu-item active" data-sort="added">Adicionada</button>
+              <button class="acv-menu-item" data-sort="bpm">BPM</button>
+              <button class="acv-menu-item" data-sort="key">Tom</button>
+              <button class="acv-menu-item" data-sort="title">Título</button>
+              <button class="acv-menu-item" data-sort="dur">Duração</button>
+              <div class="acv-menu-sep"></div>
+              <button class="acv-menu-item" data-sort="dir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13M3 12h9M3 17h5M18 8v9M18 17l3-3M18 17l-3-3"/></svg>Inverter ordem</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="work ledger">
+          <div class="ledger-scroll scroll">
+            <div class="tbl-head">
+              <span>Adicionada</span><span></span><span>Faixa</span><span>BPM</span><span>Tom</span><span>Estado · Tags</span><span>Origem</span><span class="r">Dur</span>
+            </div>
+            <!-- rows renderizadas por render.js a partir de RolfsoundData.tracks -->
+          </div>
+        </div>
+
+        <div class="work acv-panel" data-acv-panel="albums">
+          <div class="acv-grid-scroll scroll" data-acv-albums-wrap>
+            <div class="acv-grid" data-acv-albums-grid></div>
+          </div>
+        </div>
+
+        <div class="work acv-panel" data-acv-panel="artists">
+          <div class="acv-grid-scroll scroll" data-acv-artists-wrap>
+            <div class="acv-grid" data-acv-artists-grid></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----- REMIXER ----- -->
+      <section class="screen main rmx" data-screen="remixer" data-screen-label="Remixer">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Estúdio <span class="c-dot"></span> Remixer <span class="c-dot"></span> Live edit</div>
+            <div class="top-title">Remixer</div>
+          </div>
+          <div class="top-spacer"></div>
+          <button class="btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4M20 19v-4h-4"/></svg>Reset</button>
+          <button class="btn-ghost btn-accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>Salvar versão</button>
+        </header>
+
+        <div class="rmx-body">
+          <div class="rmx-inner">
+            <div class="rmx-track">
+              <span class="rmx-track-cover"></span>
+              <div class="rmx-track-meta">
+                <div class="rmx-track-title">Nenhuma faixa</div>
+                <div class="rmx-track-sub">Selecione uma faixa no Acervo</div>
+              </div>
+              <div class="rmx-track-spacer"></div>
+              <div class="rmx-readouts">
+                <div class="rmx-read"><span class="k">Orig BPM</span><span class="v">—</span></div>
+                <div class="rmx-read"><span class="k">Atual</span><span class="v shift">—</span></div>
+                <div class="rmx-read"><span class="k">Orig Tom</span><span class="v">—</span></div>
+                <div class="rmx-read"><span class="k">Atual</span><span class="v shift">—</span></div>
+              </div>
+              <div class="rmx-ab" role="group" aria-label="Comparar versões">
+                <button class="active">A</button>
+                <button>B</button>
+              </div>
+            </div>
+
+            <div class="rmx-wave">
+              <div class="rmx-wave-top">
+                <div class="sec-label">Forma de onda <span style="color:var(--ink-faint)">· 16 compassos</span></div>
+                <div class="rmx-wave-tools">
+                  <button class="wave-tool on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 4v16M16 4v16"/></svg>Beatgrid</button>
+                  <button class="wave-tool on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 4l3 3-3 3"/><path d="M21 7H8a4 4 0 0 0-4 4v1"/><path d="M7 20l-3-3 3-3"/><path d="M3 17h13a4 4 0 0 0 4-4v-1"/></svg>Loop</button>
+                  <button class="wave-tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M11 4v14M6 9l5-5 5 5"/><circle cx="11" cy="20" r="1.4" fill="currentColor"/></svg>Cue</button>
+                  <button class="wave-tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M9 11h4M11 9v4"/></svg>Zoom</button>
+                </div>
+              </div>
+
+              <div class="wave-ruler">
+                <div class="tick"><span>1</span></div><div class="tick"><span>2</span></div>
+                <div class="tick"><span>3</span></div><div class="tick"><span>4</span></div>
+                <div class="tick"><span>5</span></div><div class="tick"><span>6</span></div>
+                <div class="tick"><span>7</span></div><div class="tick"><span>8</span></div>
+              </div>
+
+              <div class="wave-frame">
+                <canvas class="wave wave-canvas" data-played="0" data-seed="11" data-beats="16"></canvas>
+                <div class="wave-loop" style="display:none"></div>
+                <div class="wave-playhead" style="left:0%"></div>
+              </div>
+            </div>
+
+            <div class="rmx-deck">
+              <div class="mod primary">
+                <div class="mod-head"><span class="mod-title">Pitch</span><button class="mod-toggle on">Key lock</button></div>
+                <div class="mod-knobwrap">
+                  <div class="knob vfader" data-frac="0.5" style="--frac:0.5"><span class="vfader-fill"></span><span class="vfader-handle"></span></div>
+                  <div class="knob-val"><span class="acc">0</span><small>st</small></div>
+                </div>
+                <div class="mod-foot">
+                  <span class="mod-sub">Tom <b>—</b></span>
+                  <div class="stepper">
+                    <button class="step-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+                    <button class="step-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mod primary">
+                <div class="mod-head"><span class="mod-title">Tempo</span><button class="mod-toggle">Sync</button></div>
+                <div class="mod-knobwrap">
+                  <div class="knob vfader" data-frac="0.5" style="--frac:0.5"><span class="vfader-fill"></span><span class="vfader-handle"></span></div>
+                  <div class="knob-val">—<small>bpm</small></div>
+                </div>
+                <div class="mod-foot">
+                  <span class="mod-sub">—</span>
+                  <div class="stepper">
+                    <button class="step-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+                    <button class="step-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mod">
+                <div class="mod-head"><span class="mod-title">Filtro</span><button class="mod-toggle on">LP</button></div>
+                <div class="mod-knobwrap">
+                  <div class="knob vfader" data-frac="0.7" style="--frac:0.7"><span class="vfader-fill"></span><span class="vfader-handle"></span></div>
+                  <div class="knob-val">8.2<small>kHz</small></div>
+                </div>
+                <div class="mod-foot"><span class="mod-sub">Ress <b>0.4</b></span></div>
+              </div>
+
+              <div class="mod">
+                <div class="mod-head"><span class="mod-title">EQ</span><button class="mod-toggle">Flat</button></div>
+                <div class="eq-bank">
+                  <div class="eq-band">
+                    <div class="eq-slider"><span class="eq-knob" style="bottom:50%"></span></div>
+                    <span class="eq-label">Lo</span><span class="eq-db">0</span>
+                  </div>
+                  <div class="eq-band">
+                    <div class="eq-slider"><span class="eq-knob" style="bottom:50%"></span></div>
+                    <span class="eq-label">Mid</span><span class="eq-db">0</span>
+                  </div>
+                  <div class="eq-band">
+                    <div class="eq-slider"><span class="eq-knob" style="bottom:50%"></span></div>
+                    <span class="eq-label">Hi</span><span class="eq-db">0</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mod">
+                <div class="mod-head"><span class="mod-title">Loop</span><button class="mod-toggle">Ativo</button></div>
+                <div class="loop-grid">
+                  <button class="loop-cell">¼</button><button class="loop-cell">½</button><button class="loop-cell on">1</button>
+                  <button class="loop-cell">2</button><button class="loop-cell">4</button><button class="loop-cell">8</button>
+                </div>
+                <div class="loop-io">
+                  <button class="wave-tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 5v14M7 12h11M14 8l4 4-4 4"/></svg>In</button>
+                  <button class="wave-tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M17 5v14M17 12H6M10 8l-4 4 4 4"/></svg>Out</button>
+                </div>
+              </div>
+
+              <div class="mod">
+                <div class="mod-head"><span class="mod-title">Saída</span><button class="mod-toggle">Mute</button></div>
+                <div class="meter">
+                  <div class="meter-col"><i class="peak"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <div class="meter-col"><i class="peak"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                </div>
+                <div class="mod-foot"><span class="mod-sub">Gain</span><span class="knob-val" style="font-size:18px">0<small>dB</small></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----- PLAYLISTS ----- -->
+      <section class="screen main pl" data-screen="playlists" data-screen-label="Playlists">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Biblioteca <span class="c-dot"></span> Playlists <span class="c-dot"></span> 0 coleções</div>
+            <div class="top-title">Playlists</div>
+          </div>
+          <div class="top-spacer"></div>
+          <button class="btn-ghost" data-pl-sort><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Ordenar</button>
+          <button class="btn-ghost btn-accent" data-pl-new><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nova playlist</button>
+        </header>
+
+        <div class="pl-body">
+          <div class="pl-inner">
+            <div class="pl-collections">
+              <div class="pl-coll-head">
+                <div class="sec-label">Suas coleções</div>
+                <span class="n" data-pl-summary></span>
+              </div>
+              <div class="pl-coll-row" data-pl-rail></div>
+            </div>
+            <div class="pl-detail" data-pl-detail></div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ----- BUSCA AVANÇADA ----- -->
+      <section class="screen main bsc" data-screen="busca" data-screen-label="Busca">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Biblioteca <span class="c-dot"></span> Busca <span class="c-dot"></span> 0 faixas indexadas</div>
+            <div class="top-title">Busca avançada</div>
+          </div>
+          <div class="top-spacer"></div>
+          <button class="btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4M20 19v-4h-4"/></svg>Limpar filtros</button>
+        </header>
+
+        <div class="bsc-body">
+          <div class="bsc-inner">
+
+            <!-- query -->
+            <div class="bsc-query">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              <input data-bsc-input placeholder="Buscar por faixa, artista, coordenada…" />
+              <span class="kbd">⌘K</span>
+            </div>
+
+            <!-- filters -->
+            <div class="bsc-filters">
+              <div class="facet">
+                <div class="facet-head"><span class="facet-title">Adicionada</span><span class="facet-val">Todo o período</span></div>
+                <div class="chips" data-facet="key">
+                  <span class="chip">7 dias</span>
+                  <span class="chip">30 dias</span>
+                  <span class="chip">90 dias</span>
+                  <span class="chip on">Tudo</span>
+                </div>
+                <div class="facet-head"><span class="facet-title">Formato</span></div>
+                <div class="chips" data-facet="multi">
+                  <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>Vinil</span>
+                  <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3a9 9 0 0 1 6.4 2.6"/></svg>CD</span>
+                  <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 16V8l5-2v8"/><circle cx="5" cy="16" r="2"/><path d="M14 14V6l5-2v8"/><circle cx="14" cy="14" r="2"/></svg>Digital</span>
+                </div>
+              </div>
+
+              <div class="facet">
+                <div class="facet-head"><span class="facet-title">BPM</span><span class="facet-val">60 – 180</span></div>
+                <div class="range" data-range>
+                  <span class="range-sel"></span>
+                  <span class="range-h" style="left:0%"></span>
+                  <span class="range-h" style="left:100%"></span>
+                </div>
+                <div class="range-ticks"><span>60</span><span>90</span><span>120</span><span>150</span><span>180</span></div>
+                <div class="facet-head"><span class="facet-title">Tags</span></div>
+                <div class="chips" data-facet="multi">
+                  <span class="chip">Ambient</span>
+                  <span class="chip">Techno</span>
+                  <span class="chip">House</span>
+                  <span class="chip">Downtempo</span>
+                </div>
+              </div>
+
+              <div class="facet wide">
+                <div class="facet-head"><span class="facet-title">Tom · harmônico</span><span class="facet-val">Todos os tons</span></div>
+                <div class="chips" data-facet="key">
+                  <span class="chip">A min</span>
+                  <span class="chip">E min</span>
+                  <span class="chip">D min</span>
+                  <span class="chip">C maj</span>
+                  <span class="chip">G min</span>
+                  <span class="chip">B min</span>
+                  <span class="chip">F maj</span>
+                  <span class="chip">A maj</span>
+                </div>
+                <div class="facet-head"><span class="facet-title">Origem · estado</span></div>
+                <div class="chips" data-facet="multi">
+                  <span class="chip">Master</span>
+                  <span class="chip">Edit</span>
+                  <span class="chip">Rip cru</span>
+                  <span class="chip">Favoritas</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- results (renderizados por search-engine.js) -->
+            <div class="bsc-results">
+              <div class="bsc-results-head">
+                <div class="sec-label">Resultados</div>
+                <span class="bsc-count"><b>0</b> de 0 faixas</span>
+                <div class="top-spacer"></div>
+                <div class="bsc-sort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>Recente</div>
+              </div>
+              <div class="bsc-list scroll"></div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ----- CAPTURAR / RIP ----- -->
+      <section class="screen main cap" data-screen="capturar" data-screen-label="Capturar">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Estúdio <span class="c-dot"></span> Capturar <span class="c-dot"></span> Vinil · 24-bit</div>
+            <div class="top-title">Capturar</div>
+          </div>
+          <div class="top-spacer"></div>
+          <button class="btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 19h14"/></svg>Monitorar</button>
+        </header>
+
+        <div class="cap-body">
+          <div class="cap-inner">
+            <!-- source bar -->
+            <div class="cap-source">
+              <div class="src-seg" data-src>
+                <button class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>Vinil</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3a9 9 0 0 1 6.4 2.6"/></svg>CD</button>
+                <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h3l3-7 4 14 3-7h3"/></svg>Linha</button>
+              </div>
+              <div class="cap-source-spacer"></div>
+              <div class="src-chip"><span class="k">Entrada</span><span class="v">Pré-amp · Phono</span></div>
+              <div class="src-chip"><span class="k">Formato</span><span class="v">24-bit · 96kHz</span></div>
+              <div class="src-chip"><span class="k">Sinal</span><span class="v live"><span class="src-live-dot"></span>Detectado</span></div>
+            </div>
+
+            <!-- spectrogram stage -->
+            <div class="cap-stage">
+              <div class="spectro-axis" style="padding: 0px">
+                <span style="top:8%">20k</span>
+                <span style="top:30%">5k</span>
+                <span style="top:52%">1k</span>
+                <span style="top:74%">200</span>
+                <span style="top:94%">20 Hz</span>
+              </div>
+
+              <div class="spectro">
+                <div class="spectro-top">
+                  <div class="spectro-tag">Espectrograma <b>· ao vivo</b></div>
+                  <div class="spectro-tag">Lado A · faixa 3</div>
+                </div>
+                <canvas class="spectro-cv" data-gap="9" data-seed="4"></canvas>
+                <div class="spectro-head"></div>
+                <div class="spectro-ruler">
+                  <span class="t">−18s</span><span class="t">−12s</span><span class="t">−6s</span><span class="t">agora</span>
+                </div>
+              </div>
+
+              <div class="cap-meters">
+                <div class="cap-meter">
+                  <div class="cap-meter-track"><span class="cap-meter-peak" style="bottom:82%"></span><span class="cap-meter-fill" style="height:68%"></span></div>
+                  <span class="cap-meter-label">L</span>
+                </div>
+                <div class="cap-meter">
+                  <div class="cap-meter-track"><span class="cap-meter-peak" style="bottom:88%"></span><span class="cap-meter-fill" style="height:74%"></span></div>
+                  <span class="cap-meter-label">R</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- capture controls -->
+            <div class="cap-ctrl">
+              <button class="rec-btn recording" data-rec><span class="rec-dot"></span>Gravando</button>
+              <div class="cap-elapsed"><span class="t">04:38</span><span class="k">Decorrido · Lado A</span></div>
+              <div class="cap-ctrl-spacer"></div>
+              <div class="cap-gain">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h9M18 8h1M5 16h1M10 16h9"/><circle cx="16" cy="8" r="2.4"/><circle cx="8" cy="16" r="2.4"/></svg>
+                <div class="cap-gain-bar"><span class="cap-gain-fill"></span></div>
+              </div>
+              <button class="cap-toggle on" data-autosplit>
+                <span class="sw"></span>
+                <span style="display:flex;flex-direction:column;gap:2px"><span class="lbl">Auto-split</span><span class="sub">Detectar faixas</span></span>
+              </button>
+            </div>
+
+            <!-- detected tracks + metadata + destino/salvar -->
+            <div class="cap-detected">
+              <div class="cap-det-head">
+                <div class="sec-label">Faixas detectadas</div>
+                <div class="cap-det-meta">
+                  <b>Amber Sessions</b> <span class="d"></span> Rolf <span class="d"></span> 1998 <span class="d"></span> Mesh
+                  <span class="cap-meta-fp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 11v4M9 8a6 6 0 0 1 6 0M7 6a9 9 0 0 1 10 0M10 17a3 3 0 0 0 4 0"/></svg>Fingerprint</span>
+                </div>
+              </div>
+
+              <div class="cap-det-grid">
+                <div class="cap-trk">
+                  <span class="cap-trk-n">01</span>
+                  <div class="cap-trk-info"><div class="cap-trk-title">Drift in Amber</div><div class="cap-trk-sub">Lado A · 118 BPM</div></div>
+                  <span class="cap-trk-dur">3:48</span>
+                </div>
+                <div class="cap-trk">
+                  <span class="cap-trk-n">02</span>
+                  <div class="cap-trk-info"><div class="cap-trk-title">Lower Field</div><div class="cap-trk-sub">Lado A · 104 BPM</div></div>
+                  <span class="cap-trk-dur">4:11</span>
+                </div>
+                <div class="cap-trk live">
+                  <span class="cap-trk-n">03</span>
+                  <div class="cap-trk-info"><div class="cap-trk-title pending">Capturando…</div><div class="cap-trk-sub">Lado A · 96 BPM</div></div>
+                  <span class="cap-trk-rec"></span>
+                </div>
+              </div>
+
+              <div class="cap-det-foot">
+                <div class="cap-target">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="2.2"/></svg>
+                  <div class="info"><span class="t">Destino no cofre</span><span class="s">Próxima coordenada livre</span></div>
+                  <span class="coord">C09·R01</span>
+                </div>
+                <div class="cap-det-foot-spacer"></div>
+                <button class="cap-save"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>Salvar 3 faixas no cofre</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----- CONFIGURAÇÕES / CONTA ----- -->
+      <section class="screen main cfg" data-screen="config" data-screen-label="Configurações">
+        <header class="top">
+          <div class="top-head">
+            <div class="top-crumb">Conta <span class="c-dot"></span> Configurações <span class="c-dot"></span> Rolfsound · 01</div>
+            <div class="top-title">Conta</div>
+          </div>
+          <div class="top-spacer"></div>
+          <button class="btn-ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14-4M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14 4M20 19v-4h-4"/></svg>Sincronizar</button>
+        </header>
+
+        <div class="cfg-body scroll">
+          <div class="cfg-inner">
+
+            <!-- identity + device -->
+            <div class="cfg-top">
+              <div class="cfg-card cfg-id-card">
+                <div class="cfg-id">
+                  <div class="cfg-avatar">R</div>
+                  <div class="cfg-id-meta">
+                    <div class="cfg-id-name">Rolf Nivelle</div>
+                    <div class="cfg-id-mail">rolf@rolfsound.audio</div>
+                    <span class="cfg-id-plan"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 5 5.6.8-4 4 1 5.6L12 21l-5-2.6 1-5.6-4-4 5.6-.8z"/></svg>Studio · vitalício</span>
+                  </div>
+                </div>
+                <div class="cfg-id-actions">
+                  <button class="btn-ghost">Editar perfil</button>
+                  <button class="btn-ghost">Gerenciar plano</button>
+                </div>
+              </div>
+
+              <div class="cfg-card cfg-dev-card">
+                <div class="cfg-dev-head">
+                  <span class="cfg-dev-dot"></span>
+                  <span class="cfg-dev-name">Rolfsound · 01</span>
+                  <span class="cfg-dev-conn">USB-C · Conectado</span>
+                </div>
+                <div class="cfg-dev-grid">
+                  <div class="cfg-dev-cell"><span class="cfg-dev-k">Firmware</span><span class="cfg-dev-v">v2.4.1</span></div>
+                  <div class="cfg-dev-cell"><span class="cfg-dev-k">Sessão</span><span class="cfg-dev-v">4h 12m</span></div>
+                  <div class="cfg-dev-cell"><span class="cfg-dev-k">Faixas</span><span class="cfg-dev-v">312</span></div>
+                  <div class="cfg-dev-cell"><span class="cfg-dev-k">Temperatura</span><span class="cfg-dev-v">38<small>°C</small></span></div>
+                  <div class="cfg-dev-store">
+                    <div class="cfg-dev-bar"><span style="width:64%"></span></div>
+                    <div class="cfg-dev-meta"><span>1.28 TB usados</span><span>2 TB total</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Áudio -->
+            <div class="cfg-group">
+              <div class="cfg-group-head"><div class="sec-label">Áudio</div><span class="cfg-group-note">Saída e processamento</span></div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Saída de áudio</span><span class="cfg-row-sub">Destino do transporte</span></div>
+                <div class="cfg-row-ctrl">
+                  <div class="cfg-seg" data-cfg-seg>
+                    <button class="active">Alto-falantes</button>
+                    <button>Fones</button>
+                    <button>Linha</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Taxa de amostragem</span><span class="cfg-row-sub">Conversão de saída</span></div>
+                <div class="cfg-row-ctrl">
+                  <div class="cfg-seg" data-cfg-seg>
+                    <button>44.1<span style="text-transform:none"> kHz</span></button>
+                    <button class="active">48<span style="text-transform:none"> kHz</span></button>
+                    <button>96<span style="text-transform:none"> kHz</span></button>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Key lock</span><span class="cfg-row-sub">Preserva o tom ao mudar o tempo</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Normalização de volume</span><span class="cfg-row-sub">Nivela o ganho entre faixas</span></div>
+                <div class="cfg-row-ctrl"><span class="sw" data-sw></span></div>
+              </div>
+            </div>
+
+            <!-- Biblioteca -->
+            <div class="cfg-group">
+              <div class="cfg-group-head"><div class="sec-label">Biblioteca</div><span class="cfg-group-note">Catalogação e captura</span></div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Formato de rip padrão</span><span class="cfg-row-sub">Ao digitalizar vinil / CD</span></div>
+                <div class="cfg-row-ctrl">
+                  <div class="cfg-seg" data-cfg-seg>
+                    <button class="active">WAV</button>
+                    <button>FLAC</button>
+                    <button>AIFF</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Auto-split de faixas</span><span class="cfg-row-sub">Detecta silêncio entre músicas</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Detecção de BPM e tom</span><span class="cfg-row-sub">Analisa ao importar para o cofre</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Coordenada automática</span><span class="cfg-row-sub">Atribui C·R à próxima posição livre</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
+              </div>
+            </div>
+
+            <!-- Aparência -->
+            <div class="cfg-group">
+              <div class="cfg-group-head"><div class="sec-label">Aparência</div><span class="cfg-group-note">Caixa de luz reativa</span></div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Cor de acento</span><span class="cfg-row-sub">Reage à capa da faixa tocando, ou fixa</span></div>
+                <div class="cfg-row-ctrl">
+                  <div class="cfg-swatches" data-cfg-accent>
+                    <span class="cfg-swatch album on" data-accent="album" title="Capa do álbum"></span>
+                    <span class="cfg-swatch" data-accent="#c8693c" style="background:#c8693c" title="Ember"></span>
+                    <span class="cfg-swatch" data-accent="#3c9a8f" style="background:#3c9a8f" title="Teal"></span>
+                    <span class="cfg-swatch" data-accent="#6b6bd6" style="background:#6b6bd6" title="Indigo"></span>
+                    <span class="cfg-swatch" data-accent="#c2557a" style="background:#c2557a" title="Magenta"></span>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Densidade do visualizador</span><span class="cfg-row-sub">Espaçamento do campo de pontos</span></div>
+                <div class="cfg-row-ctrl">
+                  <div class="cfg-seg" data-cfg-seg>
+                    <button>Denso</button>
+                    <button class="active">Médio</button>
+                    <button>Amplo</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Movimento reduzido</span><span class="cfg-row-sub">Desativa pulsos e animações</span></div>
+                <div class="cfg-row-ctrl"><span class="sw" data-sw></span></div>
+              </div>
+            </div>
+
+            <!-- Conta / sessão -->
+            <div class="cfg-group">
+              <div class="cfg-group-head"><div class="sec-label">Conta</div></div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Backup na nuvem</span><span class="cfg-row-sub">Última sincronização há 12 min</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw></span></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Exportar biblioteca</span><span class="cfg-row-sub">Metadados + coordenadas (.json)</span></div>
+                <div class="cfg-row-ctrl"><button class="cfg-link">Exportar</button></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Sair da conta</span><span class="cfg-row-sub">Mantém o cofre no aparelho</span></div>
+                <div class="cfg-row-ctrl"><button class="cfg-link danger">Sair</button></div>
+              </div>
+            </div>
+
+            <div class="cfg-about">
+              <span>Rolfsound Console V2</span><span class="d"></span><span>Build 2.4.1</span><span class="d"></span><span>Termos</span><span class="d"></span><span>Privacidade</span>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+    </div>
+    <div class="tp-dock" data-dock>
+      <!-- QUEUE — morphs up out of the mini-player -->
+      <div class="tp-queue" data-queue aria-hidden="true">
+        <div class="tp-queue-head">
+          <div class="tpq-title">A seguir <span class="tpq-count" data-queue-count>0</span></div>
+          <div class="tpq-from">Da fila <span class="d"></span> Acervo</div>
+          <div class="tp-spacer"></div>
+          <button class="tpq-act" data-queue-shuffle><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3.2l9.6 10H20"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3.2l2.6-2.7"/><path d="M14.2 9.7 16.8 7"/><path d="M17 14l3 3-3 3"/></svg>Embaralhar</button>
+          <button class="tpq-act" data-queue-clear><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12"/></svg>Limpar</button>
+          <button class="tpq-close" data-queue-close aria-label="Fechar fila"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        </div>
+        <div class="tp-queue-list scroll" data-queue-list>
+          <!-- rows renderizadas por render.js a partir de RolfsoundData.queue -->
+        </div>
+      </div>
+
+      <!-- TRACK PANEL — editor / album / artist; morphs up like the queue -->
+      <div class="tp-panel" data-panel aria-hidden="true">
+        <div class="tp-panel-inner" data-panel-inner></div>
+      </div>
+
+    <div class="transport">
+      <div class="tp-main">
+        <div class="tp-now">
+          <span class="tp-cover cover"></span>
+          <div class="tp-info">
+            <div class="tp-title"><span class="tp-title-text">Nada tocando</span><span class="tp-artist"></span></div>
+          </div>
+        </div>
+        <div class="tp-center">
+          <div class="tp-ctrls">
+            <button class="tp-btn" aria-label="Shuffle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3.2l9.6 10H20"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3.2l2.6-2.7"/><path d="M14.2 9.7 16.8 7"/><path d="M17 14l3 3-3 3"/></svg></button>
+            <button class="tp-btn" aria-label="Anterior"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2.2v12H7zM18.5 6 9.5 12l9 6z"/></svg></button>
+            <button class="tp-btn tp-play" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></button>
+            <button class="tp-btn" aria-label="Próxima"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.8 6H17v12h-2.2zM5.5 6l9 6-9 6z"/></svg></button>
+            <button class="tp-btn" aria-label="Repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17 4l3 3-3 3"/><path d="M21 7H8a4 4 0 0 0-4 4v1"/><path d="M7 20l-3-3 3-3"/><path d="M3 17h13a4 4 0 0 0 4-4v-1"/></svg></button>
+          </div>
+        </div>
+        <div class="tp-right">
+          <button class="tp-fs" data-queue-open aria-label="Fila de reprodução">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M4 12h11M4 17h7"/><path d="M18 8v9M18 17l2.5-2.5M18 17l-2.5-2.5"/></svg>
+          </button>
+          <button class="tp-fs" data-viz-open aria-label="Tela cheia · Visualizer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          </button>
+          <canvas class="matrix tp-mini-vis" data-gap="7" data-r="1.1" data-seed="3"></canvas>
+          <div class="tp-vol">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h3l5 4V5L7 9z" fill="currentColor" stroke="none"/><path d="M16 9c1.2 1 1.2 5 0 6M18.5 7c2.4 2 2.4 8 0 10"/></svg>
+            <div class="tp-vol-bar"><span class="tp-vol-fill"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="tp-scrub" data-tp-scrub>
+        <div class="tp-bar"><span class="tp-fill" style="width:0%"></span></div>
+        <span class="tp-time tp-time-l">0:00</span>
+        <span class="tp-time tp-time-r">0:00</span>
+        <span class="tp-bar-bubble">0:00</span>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- ============ FULLSCREEN VISUALIZER ============ -->
+  <div class="viz" data-viz hidden>
+    <canvas class="viz-dots matrix" data-gap="24" data-r="2.6" data-seed="3"></canvas>
+    <button class="viz-exit" data-viz-close aria-label="Sair do visualizer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="viz-wordmark">Rolf<span class="ac">sound.</span></div>
+    <div class="viz-stage">
+      <div class="viz-cover cover" data-viz-cover></div>
+      <div class="viz-meta">
+        <div class="viz-coord" data-viz-coord></div>
+        <div class="viz-title" data-viz-title>Nada tocando</div>
+        <div class="viz-sub" data-viz-sub></div>
+      </div>
+      <div class="viz-transport">
+        <button class="tp-btn" aria-label="Anterior"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2.2v12H7zM18.5 6 9.5 12l9 6z"/></svg></button>
+        <button class="tp-btn tp-play viz-play" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></button>
+        <button class="tp-btn" aria-label="Próxima"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.8 6H17v12h-2.2zM5.5 6l9 6-9 6z"/></svg></button>
+      </div>
+      <div class="viz-scrub">
+        <span class="viz-time" data-viz-elapsed>0:00</span>
+        <div class="seekbar" data-seekbar>
+          <canvas class="seekbar-wave"></canvas>
+          <span class="seekbar-ghost"></span>
+          <span class="seekbar-head"></span>
+          <span class="seekbar-bubble">0:00</span>
+        </div>
+        <span class="viz-time" data-viz-total>0:00</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="static/js/data.js"></script>
+  <script src="static/js/render.js"></script>
+  <script src="static/js/ui-scale.js"></script>
+  <script src="static/js/dash.js"></script>
+  <script src="static/js/dash-contextmenu.js"></script>
+  <script src="static/js/prototype.js"></script>
+  <script src="static/js/acervo.js"></script>
+  <script src="static/js/playlists.js"></script>
+  <script src="static/js/track-panels.js"></script>
+  <script src="static/js/prototype-motion.js"></script>
+  <script src="static/js/seekbar.js"></script>
+  <script src="static/js/tp-scrub-line.js"></script>
+  <script src="static/js/remixer-engine.js"></script>
+  <script src="static/js/search-engine.js"></script>
+</body>
+</html>

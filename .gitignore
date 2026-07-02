@@ -1,65 +1,20 @@
-# Dependencies
-node_modules/
-package-lock.json
-yarn.lock
+# Handoff bundles do Claude Design (26+ MB, fonte fica no claude.ai/design)
+*-handoff.zip
 
-# Build outputs
-dist/
-build/
-*.bundle.js
-
-venv
-__pycache__
-
-# Environment variables
+# Python (backend Flask, quando restaurado do histórico)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
 .env
-.env.local
-.env.*.local
 
-# IDE
-.vscode/
-.idea/
-.claude/
-*.swp
-*.swo
-*.swn
-*.sublime-workspace
+# Node (se entrar tooling de frontend no futuro)
+node_modules/
 
-# OS
+# Claude Code — permissões locais da máquina
+.claude/settings.local.json
+
+# SO / editor
 .DS_Store
 Thumbs.db
-
-# Platform binaries — install locally per platform (see README)
-*.exe
-ffmpeg
-fpcalc
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-
-# Temporary files
-temp/
-tmp/
-*.tmp
-
-# Production
-.next/
-out/
-
-*.jpg
-*.mp3
-*.db
-*.ogg
-*.webm
-*.wav
-*.m4a
-library.*
-
-claude.md
-
-music/
-
-config.json
+desktop.ini
