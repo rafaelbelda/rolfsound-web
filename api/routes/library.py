@@ -20,6 +20,7 @@ class TrackMetadataUpdate(BaseModel):
     genre: str | None = None
     bpm: float | None = None
     key: str | None = None
+    version_label: str | None = None
 
 
 _reindex_state = {
@@ -215,6 +216,16 @@ async def delete_track(track_id: str):
         filepath = track.get("file_path")
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
+
+        # Delete stem sidecars ({id}.stem.{role}.ext) — a linha em track_stems
+        # cai junto com a faixa em database.delete_track.
+        for stem in database.get_stems(conn, track_id):
+            spath = stem.get("file_path")
+            if spath and os.path.exists(spath):
+                try:
+                    os.remove(spath)
+                except OSError:
+                    pass
 
         # Delete local thumbnail if it's a local path (not a URL).
         # "/thumbs/x.jpg" is the served alias for a sidecar in music_directory.

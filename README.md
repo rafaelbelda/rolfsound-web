@@ -58,7 +58,8 @@ SQLite (db/library.db)
 | `playlists.js` | playlists (persistem em `localStorage`, chave `rolf_playlists_v2`) |
 | `search-engine.js` | Busca avançada — client-side sobre o acervo (Camelot, BPM, tags) |
 | `track-panels.js` | gavetas de editor / álbum / artista no dock |
-| `remixer-engine.js` | áudio real (Web Audio, pitch/tempo independentes); decodifica de `/api/library/{id}/download` ao carregar faixa |
+| `remixer-live.js` | superfície de controle do core (pitch/tempo via `/api/remix`, seek na waveform, picker de faixa) |
+| `stems.js` | versão multipista: botão Stems no Remixer, lanes coloridas na waveform (vocals·drums·bass·other), gaveta de upload dos 4 slots (`/api/library/{id}/stems/*`). Mudo/solo/gain visuais — reprodução multipista aguarda o core |
 | `discovery.js` | aba Discovery (só ativa com `account.admin`) |
 | `seekbar.js`, `tp-scrub-line.js`, `prototype-motion.js`, `ui-scale.js` | seek do visualizer, scrub do transporte, animação, escala |
 
@@ -70,7 +71,12 @@ Telas Capturar e Config são mockups estáticos (hardware/conta) — ainda sem d
   playback, history, settings, downloads, monitor, recordings, discogs.
 - `api/routes/bootstrap.py` — monta o `RolfsoundData` do SQLite. Mapeamento do
   schema antigo: `source 'recording'`→vinil, `status 'identified'`→master;
-  **bpm/key/tags/fav/album ainda não existem no schema** (aparecem como "—").
+  **tags/fav ainda não existem no schema** (tags derivam de `genre`, fav é
+  sempre falso).
+- `api/routes/stems.py` — stems por faixa (4 papéis fixos): GET/POST/DELETE
+  `/api/library/{id}/stems[/{role}]`. Arquivos viram sidecars
+  `{id}.stem.{role}.ext` no diretório de música (ignorados pelo scan) e
+  registram em `track_stems`; o bootstrap devolve `stems: [roles]` por faixa.
 - `database.scan_and_reconcile` no startup importa arquivos soltos de `./music`.
 
 ## Discovery e o gate de admin
@@ -85,19 +91,10 @@ O produto **não pode ser comercializado com download do YouTube**. Por isso:
 - Binário do yt-dlp: resolvido em `youtube/ytdlp.py::YTDLP_BIN` (ao lado do
   Python do venv, senão PATH).
 
-## Próximos passos (em ordem de valor)
+## Próximos passos
 
-1. **Ações no backend** — tocar de verdade (`playback.py`/core), mutações da
-   fila e playlists persistidas no servidor (hoje playlists ficam só em
-   `localStorage`; o bootstrap já as lê do banco, falta escrever de volta).
-2. **Migração de schema** — `ALTER TABLE tracks` com bpm, key, tags, fav,
-   album; análise de BPM/tom ao importar (o Config já tem o toggle).
-3. **Acervo ao vivo** — inserir a row quando um download do Discovery completa
-   (hoje precisa recarregar a página).
-4. **Capturar/Config reais** — ligar em `monitor.py`/`recordings.py` e
-   `settings.py`.
-5. **Superfície mobile** — o handoff do design tem `Rolfsound iPhone.html`
-   (bundle: `Rolfsound V2-handoff.zip`, projeto claude.ai/design "Rolfsound V2").
+A lista viva do que falta fazer está em **[TO-DO-LIST.md](TO-DO-LIST.md)**,
+em ordem de valor.
 
 ## Referências
 

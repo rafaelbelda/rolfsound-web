@@ -13,7 +13,6 @@
     queue:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h11M4 12h11M4 17h7"/><path d="M17 14v6M14 17h6"/></svg>',
     playlist:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>',
     remix:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3.2l9.6 10H20"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3.2l2.6-2.7"/><path d="M14.2 9.7 16.8 7"/><path d="M17 14l3 3-3 3"/></svg>',
-    tune:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h9M18 8h1M5 16h1M10 16h9"/><circle cx="16" cy="8" r="2.4"/><circle cx="8" cy="16" r="2.4"/></svg>',
     rip:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/><path d="M12 4v3"/></svg>',
     info:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/></svg>',
     rename:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M14.5 5.5l4 4L9 19l-4 .9.9-4z"/></svg>',
@@ -26,6 +25,8 @@
     album:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.3"/></svg>',
     artist:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></svg>',
     edit:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M14.5 5.5l4 4L9 19l-4 .9.9-4z"/></svg>',
+    stems:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 9.5v5"/><path d="M9.5 5.5v13"/><path d="M14.5 8v8"/><path d="M19.5 11v2"/></svg>',
+    layers:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
   };
 
   // build one menu element, reused
@@ -78,10 +79,19 @@
     menu.appendChild(sep());
     menu.appendChild(label('Estúdio'));
     menu.appendChild(item({ icon: ICON.remix, label: 'Abrir no Remixer', kbd: 'R', action: 'remix' }));
-    menu.appendChild(item({ icon: ICON.tune, label: 'Ajustar BPM / Pitch', action: 'remix' }));
+    menu.appendChild(item({
+      icon: ICON.stems,
+      label: (row.dataset.stems || '').trim() ? 'Gerenciar stems' : 'Adicionar stems',
+      action: 'stems',
+    }));
     menu.appendChild(item({ icon: ICON.upload, label: 'Exportar faixa', action: 'export' }));
     menu.appendChild(sep());
     menu.appendChild(label('Navegar'));
+    menu.appendChild(item({
+      icon: ICON.layers,
+      label: (row.dataset.group ? 'Explorar versões' : 'Versões alternativas'),
+      action: 'versions',
+    }));
     menu.appendChild(item({ icon: ICON.album, label: 'Ver álbum', action: 'album' }));
     menu.appendChild(item({ icon: ICON.artist, label: 'Ver artista', action: 'artist' }));
     menu.appendChild(sep());

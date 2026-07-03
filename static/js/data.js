@@ -22,13 +22,18 @@
      fav:    false,
      tags:   ['ambient'],
      dur:    228,                  // segundos
-     cover:  'linear-gradient(150deg,#c8693c,#5a2f1a 56%,#141416)' // background CSS
+     cover:  'linear-gradient(150deg,#c8693c,#5a2f1a 56%,#141416)', // background CSS
+     group:  '',                   // id do grupo de versões ('' = solta)
+     vlabel: '',                   // rótulo da versão ('Instrumental', …)
+     primary: false               // é a versão que representa a "pasta" no Acervo
    }
    ============================================================ */
 window.RolfsoundData = {
   tracks: [],     // faixas do cofre
   queue: [],      // ids das faixas na fila "A seguir", em ordem
   playlists: [],  // { id: 'p1', name: 'Nome', tracks: ['id-da-faixa', …] }
+  // Grupos de versões: { 'vg_xxx': { primary: 'id', members: ['id', …] } }
+  groups: {},
   // Conta: admin habilita a aba Discovery (YouTube via yt-dlp).
   // A UI só ESCONDE o recurso — o bloqueio real é 403 no servidor.
   account: { admin: false },

@@ -25,7 +25,7 @@ from utils import core_client
 from utils.monitor_accumulator import get_accumulator
 
 from api.deps import require_admin
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload, stems, versions
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +328,8 @@ def create_app() -> FastAPI:
     app.include_router(scheduled_queues.router, prefix="/api")
     app.include_router(bootstrap.router,        prefix="/api")
     app.include_router(upload.router,           prefix="/api")
+    app.include_router(stems.router,            prefix="/api")
+    app.include_router(versions.router,         prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)

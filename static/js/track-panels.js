@@ -160,6 +160,8 @@
         const k = row.querySelector('.row-key'); if (k) k.textContent = v.key;
         closeDrawer();
         document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: v.title, kicker: 'Salvo' } }));
+        // versions.js escuta para sugerir agrupamento por título+artista iguais
+        document.dispatchEvent(new CustomEvent('rolf:track-saved', { detail: { id: m.id } }));
       } catch (e) {
         console.error('save track metadata failed:', e);
         document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Não foi possível salvar', kicker: 'Erro' } }));

@@ -26,7 +26,7 @@ from db import database
 router = APIRouter()
 
 
-def _cover(thumbnail: str | None) -> str:
+def cover_css(thumbnail: str | None) -> str:
     if not thumbnail:
         return ""
     t = thumbnail
@@ -40,8 +40,9 @@ def _cover(thumbnail: str | None) -> str:
     return f"url('{t}') center/cover no-repeat, #141416"
 
 
-def _track(r: dict) -> dict:
+def _track(r: dict, stems: list | None = None, primary: bool = False) -> dict:
     genre = r.get("genre") or ""
+    group = r.get("version_group_id") or ""
     return {
         "id":     r.get("id") or "",
         "title":  r.get("title") or "Faixa",
@@ -56,7 +57,15 @@ def _track(r: dict) -> dict:
         "fav":    False,
         "tags":   [genre.lower()] if genre else [],
         "dur":    r.get("duration") or 0,
-        "cover":  _cover(r.get("thumbnail")),
+        "cover":  cover_css(r.get("thumbnail")),
+        # papéis de stems presentes ('vocals'|'drums'|'bass'|'other') —
+        # badge no Acervo + modo Stems no Remixer
+        "stems":  stems or [],
+        # agrupamento de versões: group = id do grupo (ou ""), primary = é a
+        # versão que representa a "pasta" no Acervo, vlabel = rótulo da versão
+        "group":  group,
+        "vlabel": r.get("version_label") or "",
+        "primary": bool(primary),
     }
 
 
@@ -64,7 +73,14 @@ def _track(r: dict) -> dict:
 async def bootstrap_js():
     conn = database.get_connection()
     try:
-        tracks = [_track(r) for r in database.list_tracks(conn)]
+        smap = database.stems_map(conn)
+        gmap = database.groups_map(conn)
+        # {track_id: group_id} para os que são primary do seu grupo
+        primary_ids = {g["primary"] for g in gmap.values() if g.get("primary")}
+        tracks = [
+            _track(r, smap.get(r.get("id")), primary=(r.get("id") in primary_ids))
+            for r in database.list_tracks(conn)
+        ]
         known = {t["id"] for t in tracks}
 
         queue_state = database.load_queue_state(conn)
@@ -89,6 +105,7 @@ async def bootstrap_js():
         "tracks": tracks,
         "queue": queue,
         "playlists": playlists,
+        "groups": gmap,
         "account": {"admin": is_admin()},
     }
     body = "window.RolfsoundData = " + json.dumps(data, ensure_ascii=False) + ";\n"

@@ -11,6 +11,7 @@
   const D = window.RolfsoundData || {};
   const tracks = Array.isArray(D.tracks) ? D.tracks : [];
   const queue = Array.isArray(D.queue) ? D.queue : [];
+  const groups = (D.groups && typeof D.groups === 'object') ? D.groups : {};
 
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -40,9 +41,39 @@
 
   const byId = new Map(tracks.map((t) => [t.id, t]));
 
+  /* ---------- badge de stems (versão multipista) ----------
+     Quatro pontos fixos — vocals · drums · bass · other — acesos
+     conforme os slots preenchidos. stems.js atualiza após uploads. */
+  const STEM_ROLES = ['vocals', 'drums', 'bass', 'other'];
+  const STEM_LABEL = { vocals: 'Vocais', drums: 'Bateria', bass: 'Baixo', other: 'Outros' };
+  function stemsBadgeHtml(roles) {
+    if (!roles || !roles.length) return '';
+    const dots = STEM_ROLES.map((r) =>
+      '<i data-r="' + r + '"' + (roles.includes(r) ? ' class="on"' : '') + '></i>').join('');
+    const names = roles.map((r) => STEM_LABEL[r] || r).join(' · ');
+    return '<span class="tag stems" title="Stems · ' + esc(names) + '">' + dots + 'Stems</span>';
+  }
+  window.RolfStemsBadgeHtml = stemsBadgeHtml;
+
+  /* ---------- badge de versões (pasta de versões alternativas) ----------
+     Aceso na versão principal de um grupo com 2+ membros. O clique abre o
+     drawer "Explorar versões" (versions.js escuta .tag.versions). */
+  function versionsBadgeHtml(count) {
+    const n = +count || 0;
+    if (n < 2) return '';
+    return '<span class="tag versions" role="button" tabindex="0" ' +
+      'title="' + n + ' versões — explorar">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>' +
+      n + ' versões</span>';
+  }
+  window.RolfVersionsBadgeHtml = versionsBadgeHtml;
+  const groupCount = (t) => (t.group && groups[t.group] && groups[t.group].members)
+    ? groups[t.group].members.length : 0;
+
   /* ---------- Acervo: rows do ledger ---------- */
   function rowHtml(t) {
     const tags = (t.tags || []).map((tg) => '<span class="tag mut">' + esc(cap(tg)) + '</span>').join('');
+    const vcount = t.primary ? groupCount(t) : 0;
     return '<div class="row"' +
       ' data-id="' + esc(t.id) + '"' +
       ' data-added="' + (+t.added || 0) + '"' +
@@ -52,6 +83,10 @@
       ' data-state="' + esc(t.state) + '"' +
       ' data-fav="' + (t.fav ? 1 : 0) + '"' +
       ' data-tags="' + esc((t.tags || []).join(' ')) + '"' +
+      ' data-stems="' + esc((t.stems || []).join(' ')) + '"' +
+      (t.group ? ' data-group="' + esc(t.group) + '"' : '') +
+      (t.primary ? ' data-primary="1"' : '') +
+      (t.vlabel ? ' data-vlabel="' + esc(t.vlabel) + '"' : '') +
       ' data-title="' + esc(t.title) + '"' +
       ' data-artist="' + esc(t.artist) + '"' +
       (t.album ? ' data-album="' + esc(t.album) + '"' : '') +
@@ -62,14 +97,17 @@
       '<div class="row-main"><div class="row-title">' + esc(t.title) + '</div><div class="row-artist">' + esc(t.artist) + '</div></div>' +
       '<div class="row-data">' + (+t.bpm || '') + '</div>' +
       '<div class="row-key">' + esc(t.key) + '</div>' +
-      '<div class="row-tags">' + (STATE_TAG[t.state] || '') + tags + '</div>' +
+      '<div class="row-tags">' + (STATE_TAG[t.state] || '') + stemsBadgeHtml(t.stems) + versionsBadgeHtml(vcount) + tags + '</div>' +
       '<div class="fmt">' + (FMT_SVG[t.fmt] || '') + (FMT_LABEL[t.fmt] || '') + '</div>' +
       '<div class="row-dur">' + mmss(t.dur) + '</div>' +
       '</div>';
   }
 
+  // Colapso: no Acervo só entra a versão principal de cada grupo (a "pasta").
+  // As versões não-principais vivem no drawer "Explorar versões".
+  const ledgerTracks = tracks.filter((t) => !t.group || t.primary);
   const ledger = document.querySelector('.screen[data-screen="acervo"] .ledger-scroll');
-  if (ledger) ledger.insertAdjacentHTML('beforeend', tracks.map(rowHtml).join(''));
+  if (ledger) ledger.insertAdjacentHTML('beforeend', ledgerTracks.map(rowHtml).join(''));
 
   /* ---------- Fila "A seguir" ---------- */
   // absIdx = posição ABSOLUTA na fila do core (usada por /api/queue/remove
@@ -103,7 +141,7 @@
 
   /* ---------- Topbar: contagem do cofre ---------- */
   const storeCount = document.querySelector('.tb-status .store .meta span');
-  if (storeCount) storeCount.textContent = tracks.length + (tracks.length === 1 ? ' faixa' : ' faixas');
+  if (storeCount) storeCount.textContent = ledgerTracks.length + (ledgerTracks.length === 1 ? ' faixa' : ' faixas');
 
   // playback.js re-renderiza a fila com o mesmo markup ao sincronizar com o core
   window.RolfQueueRowHtml = queueRowHtml;

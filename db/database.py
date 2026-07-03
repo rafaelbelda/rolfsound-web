@@ -63,7 +63,15 @@ def _create_tables(conn):
             album           TEXT,
             genre           TEXT,
             bpm             REAL,
-            key             TEXT
+            key             TEXT,
+            version_group_id TEXT,
+            version_label    TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS version_groups (
+            id               TEXT PRIMARY KEY,
+            primary_track_id TEXT,
+            created_at       INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS history (
@@ -132,6 +140,17 @@ def _create_tables(conn):
             status       TEXT NOT NULL DEFAULT 'pending',
             created_at   INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS track_stems (
+            track_id  TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            role      TEXT NOT NULL CHECK (role IN ('vocals','drums','bass','other')),
+            file_path TEXT NOT NULL,
+            duration  INTEGER,
+            size      INTEGER,
+            codec     TEXT,
+            added_at  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (track_id, role)
+        );
     """)
 
 
@@ -194,7 +213,7 @@ def update_track_metadata(conn, track_id: str, data: dict) -> None:
     allowed = {
         "title", "artist", "duration", "thumbnail",
         "status", "mb_recording_id", "discogs_id", "label", "year", "fingerprint",
-        "album", "genre", "bpm", "key",
+        "album", "genre", "bpm", "key", "version_label",
     }
     updates = {k: v for k, v in data.items() if k in allowed and v is not None}
     if not updates:
@@ -213,6 +232,10 @@ def scan_and_reconcile(conn, music_dir):
     added = 0
     for f in music_path.iterdir():
         if f.suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        # sidecars de stems ({id}.stem.{role}.ext) pertencem à faixa master —
+        # não são faixas próprias e não entram no cofre
+        if ".stem." in f.name.lower():
             continue
         track_id = f.stem
         existing = conn.execute(
@@ -256,8 +279,158 @@ def increment_streams(conn, track_id):
 
 
 def delete_track(conn, track_id):
+    # Se a faixa pertence a um grupo de versões, sai dele primeiro (o helper
+    # reatribui o primary / dissolve o grupo conforme o caso).
+    remove_from_version_group(conn, track_id)
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
+    conn.execute("DELETE FROM track_stems WHERE track_id = ?", (track_id,))
+
+
+# ── Version groups (versões alternativas da mesma música) ─────────────────────
+
+def _members_of(conn, group_id) -> list[str]:
+    rows = conn.execute(
+        "SELECT id FROM tracks WHERE version_group_id = ? ORDER BY date_added ASC",
+        (group_id,)
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+def create_version_group(conn, primary_track_id: str) -> str:
+    import secrets, time
+    group_id = "vg_" + secrets.token_hex(6)
+    conn.execute(
+        "INSERT INTO version_groups (id, primary_track_id, created_at) VALUES (?, ?, ?)",
+        (group_id, primary_track_id, int(time.time()))
+    )
+    conn.execute(
+        "UPDATE tracks SET version_group_id = ? WHERE id = ?",
+        (group_id, primary_track_id)
+    )
+    return group_id
+
+
+def add_to_version_group(conn, group_id: str, track_id: str) -> None:
+    conn.execute(
+        "UPDATE tracks SET version_group_id = ? WHERE id = ?", (group_id, track_id)
+    )
+
+
+def set_version_primary(conn, group_id: str, track_id: str) -> None:
+    conn.execute(
+        "UPDATE version_groups SET primary_track_id = ? WHERE id = ?",
+        (track_id, group_id)
+    )
+
+
+def _dissolve_if_needed(conn, group_id: str) -> None:
+    """Grupo só faz sentido com 2+ membros. Com <2, dissolve e limpa o resto."""
+    members = _members_of(conn, group_id)
+    if len(members) < 2:
+        conn.execute(
+            "UPDATE tracks SET version_group_id = NULL, version_label = NULL "
+            "WHERE version_group_id = ?", (group_id,)
+        )
+        conn.execute("DELETE FROM version_groups WHERE id = ?", (group_id,))
+        return
+    # Garante um primary válido dentro do grupo.
+    row = conn.execute(
+        "SELECT primary_track_id FROM version_groups WHERE id = ?", (group_id,)
+    ).fetchone()
+    primary = row["primary_track_id"] if row else None
+    if primary not in members:
+        set_version_primary(conn, group_id, members[0])
+
+
+def remove_from_version_group(conn, track_id: str) -> None:
+    row = conn.execute(
+        "SELECT version_group_id FROM tracks WHERE id = ?", (track_id,)
+    ).fetchone()
+    group_id = row["version_group_id"] if row else None
+    if not group_id:
+        return
+    conn.execute(
+        "UPDATE tracks SET version_group_id = NULL, version_label = NULL WHERE id = ?",
+        (track_id,)
+    )
+    _dissolve_if_needed(conn, group_id)
+
+
+def get_version_group(conn, group_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM version_groups WHERE id = ?", (group_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_group_members(conn, group_id: str) -> list[dict]:
+    """Faixas completas do grupo — primary primeiro, depois por date_added."""
+    row = conn.execute(
+        "SELECT primary_track_id FROM version_groups WHERE id = ?", (group_id,)
+    ).fetchone()
+    primary = row["primary_track_id"] if row else None
+    rows = conn.execute(
+        "SELECT * FROM tracks WHERE version_group_id = ? ORDER BY date_added ASC",
+        (group_id,)
+    ).fetchall()
+    members = [dict(r) for r in rows]
+    members.sort(key=lambda t: (0 if t["id"] == primary else 1, t.get("date_added") or 0))
+    return members
+
+
+def groups_map(conn) -> dict:
+    """{group_id: {"primary": id, "members": [ids…]}} — usado pelo bootstrap."""
+    grows = conn.execute("SELECT id, primary_track_id FROM version_groups").fetchall()
+    out: dict = {}
+    for g in grows:
+        members = _members_of(conn, g["id"])
+        out[g["id"]] = {"primary": g["primary_track_id"], "members": members}
+    return out
+
+
+# ── Stems (versão multipista: vocals · drums · bass · other) ─────────────────
+
+def get_stems(conn, track_id) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM track_stems WHERE track_id = ? ORDER BY role", (track_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_stem(conn, track_id, role) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM track_stems WHERE track_id = ? AND role = ?", (track_id, role)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_stem(conn, track_id, role, file_path, duration, size, codec, added_at):
+    conn.execute("""
+        INSERT INTO track_stems (track_id, role, file_path, duration, size, codec, added_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(track_id, role) DO UPDATE SET
+            file_path = excluded.file_path,
+            duration  = excluded.duration,
+            size      = excluded.size,
+            codec     = excluded.codec,
+            added_at  = excluded.added_at
+    """, (track_id, role, file_path, duration, size, codec, added_at))
+
+
+def delete_stem(conn, track_id, role):
+    conn.execute(
+        "DELETE FROM track_stems WHERE track_id = ? AND role = ?", (track_id, role)
+    )
+
+
+def stems_map(conn) -> dict:
+    """{track_id: [roles…]} — usado pelo bootstrap para marcar as faixas."""
+    rows = conn.execute("SELECT track_id, role FROM track_stems ORDER BY role").fetchall()
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["track_id"], []).append(r["role"])
+    return out
 
 
 # ── History ───────────────────────────────────────────────────────────────────

@@ -125,6 +125,8 @@
     }
     syncViz(d);
     syncRemixer(d);
+    // módulos fora deste arquivo (ex.: stems.js) reagem à troca de faixa
+    document.dispatchEvent(new CustomEvent('rolf:track', { detail: d }));
   }
 
   // loadTransport: visuais otimistas + manda o core tocar a faixa.
@@ -450,6 +452,8 @@
       case 'edit': case 'album': case 'artist': break;  // handled by track-panels.js
       case 'import': case 'dossier': break;  // handled by importer.js
       case 'playlist': break;  // handled by playlists.js
+      case 'versions': break;  // handled by versions.js
+      case 'stems': break;  // handled by stems.js
       default:        toast(label || 'Ação', '·');
     }
   });

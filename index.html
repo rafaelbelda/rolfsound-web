@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="static/css/prototype.css" />
   <link rel="stylesheet" href="static/css/seekbar.css" />
   <link rel="stylesheet" href="static/css/remixer-live.css" />
+  <link rel="stylesheet" href="static/css/remixer-stems.css" />
+  <link rel="stylesheet" href="static/css/versions.css" />
   <link rel="stylesheet" href="static/css/dashboard-discovery.css" />
 </head>
 <body>
@@ -189,6 +191,13 @@
                 <div class="rmx-read"><span class="k">Orig Tom</span><span class="v">—</span></div>
                 <div class="rmx-read"><span class="k">Atual</span><span class="v shift">—</span></div>
               </div>
+              <button class="rmx-stems" data-stems-btn aria-pressed="false" title="Versão em stems — 4 camadas">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path class="b1" d="M4.5 9.5v5"/><path class="b2" d="M9.5 5.5v13"/><path class="b3" d="M14.5 8v8"/><path class="b4" d="M19.5 11v2"/>
+                </svg>
+                <span class="lbl">Stems</span>
+                <span class="ct" data-stems-count hidden></span>
+              </button>
               <div class="rmx-ab" role="group" aria-label="Comparar versões">
                 <button class="active">A</button>
                 <button>B</button>
@@ -853,6 +862,8 @@
   <script src="static/js/seekbar.js"></script>
   <script src="static/js/tp-scrub-line.js"></script>
   <script src="static/js/remixer-live.js"></script>
+  <script src="static/js/stems.js"></script>
+  <script src="static/js/versions.js"></script>
   <script src="static/js/search-engine.js"></script>
   <script src="static/js/discovery.js"></script>
   <!-- playback.js por último: liga os botões aos endpoints do core e
