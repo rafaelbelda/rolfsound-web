@@ -1,14 +1,11 @@
-INFO     | utils.config | Config loaded from D:\lb . d\rolfsound\rolfsound-web\config.json
+INFO     | utils.config | Config loaded from C:\Users\lucbo\Documents\rolfsound-pack\rolfsound-web\config.json
 INFO     | main | Starting rolfsound-control on port 8766
 DEBUG    | asyncio | Using proactor: IocpProactor
-INFO:     Started server process [51348]
+INFO:     Started server process [27840]
 INFO:     Waiting for application startup.
 INFO     | api.app | rolfsound-control starting up
-INFO     | utils.config | Config loaded from D:\lb . d\rolfsound\rolfsound-web\config.json
+INFO     | utils.config | Config loaded from C:\Users\lucbo\Documents\rolfsound-pack\rolfsound-web\config.json
 INFO     | db.database | Database initialized at ./db/library.db
-INFO     | db.database | Library scan: added 0oCnt13S-1g.webm
-INFO     | db.database | Library scan: added 5txfn1m2sbI.webm
-INFO     | api.app | Library scan: added 2 previously untracked files
 INFO     | downloads.manager | DownloadManager started
 INFO     | utils.event_poller | EventPoller started
 INFO     | library.cleanup | Cleanup scheduler started
@@ -17,15 +14,3 @@ INFO     | utils.monitor_accumulator | MonitorAccumulator started (poll=20ms)
 INFO     | library.scheduled_queue | Scheduled queue daemon started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8766 (Press CTRL+C to quit)
-DEBUG    | utils.core_client | Core 404: POST /play
-DEBUG    | utils.core_client | Core 404: POST /play
-DEBUG    | utils.core_client | Core 404: POST /play
-DEBUG    | youtube.search | YouTube API: 10 results for 'polyphia'
-INFO     | youtube.search | Search complete (using api): 10 results for 'polyphia'
-DEBUG    | youtube.search | YouTube API: 10 results for 'polyphia can yo'
-INFO     | youtube.search | Search complete (using api): 10 results for 'polyphia can yo'
-INFO     | downloads.manager | Queued download: QB15JltRf-M - Polyphia - CAN YOU FEEL IT
-INFO     | downloads.manager | Starting download: QB15JltRf-M
-INFO     | youtube.ytdlp | Downloading QB15JltRf-M (native webm)
-ERROR    | youtube.ytdlp | yt-dlp failed for QB15JltRf-M (exit 1)
-ERROR    | downloads.manager | Download failed: QB15JltRf-M

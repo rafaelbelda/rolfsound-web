@@ -19,6 +19,10 @@ class AddPlaylistTrackRequest(BaseModel):
     track_id: str
 
 
+class SetPlaylistTracksRequest(BaseModel):
+    track_ids: list[str]
+
+
 @router.get("/playlists")
 async def list_playlists():
     conn = database.get_connection()
@@ -119,6 +123,26 @@ async def add_track_to_playlist(playlist_id: int, req: AddPlaylistTrackRequest):
 
         database.add_track_to_playlist(conn, playlist_id, track_id)
         return {"ok": True, "duplicate": False}
+    finally:
+        conn.close()
+
+
+@router.put("/playlists/{playlist_id}/tracks")
+async def set_playlist_tracks(playlist_id: int, req: SetPlaylistTracksRequest):
+    """Substitui o conteúdo/ordem da playlist — usado por arrastar,
+    embaralhar e ordenar na UI. Ids desconhecidos são descartados."""
+    conn = database.get_connection()
+    try:
+        playlist = database.get_playlist(conn, playlist_id)
+        if not playlist:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+
+        known = [
+            tid for tid in req.track_ids
+            if tid and database.get_track(conn, tid)
+        ]
+        database.set_playlist_tracks(conn, playlist_id, known)
+        return {"ok": True, "track_count": len(known)}
     finally:
         conn.close()
 

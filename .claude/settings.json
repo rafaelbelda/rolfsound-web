@@ -42,7 +42,27 @@
       "Bash(echo \"track-panels OK\")",
       "Bash(node \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\20278958-a89b-4a2c-abe8-c17112639238\\\\scratchpad\\\\accent-test.js\")",
       "Bash(node --check \"c:/Users/lucbo/Documents/rolfsound-pack/rolfsound-web/static/js/prototype.js\")",
-      "Bash(node \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\20278958-a89b-4a2c-abe8-c17112639238\\\\scratchpad\\\\oklch-test.js\")"
+      "Bash(node \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\20278958-a89b-4a2c-abe8-c17112639238\\\\scratchpad\\\\oklch-test.js\")",
+      "Bash(node --check static/js/playlists.js)",
+      "Bash(node --check static/js/playback.js)",
+      "Bash(python -m py_compile db/database.py api/routes/playlists.py)",
+      "Bash(python \"C:/Users/lucbo/AppData/Local/Temp/claude/c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web/931eb83b-64f8-4b38-a83e-88e57b52c8b0/scratchpad/test_playlists_api.py\")",
+      "Bash(py -3.11 -c \"import fastapi; print\\('fastapi ok'\\)\")",
+      "Bash(py -0)",
+      "Bash(cd \"c:/Users/lucbo/Documents/rolfsound-pack\" && ls && ls rolfsound-web/.venv 2>/dev/null; ls .venv 2>/dev/null | head -3)",
+      "Bash(\"c:/Users/lucbo/Documents/rolfsound-pack/.venv/Scripts/python.exe\" \"C:/Users/lucbo/AppData/Local/Temp/claude/c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web/931eb83b-64f8-4b38-a83e-88e57b52c8b0/scratchpad/test_playlists_api.py\")",
+      "Bash(ls \"c:/Users/lucbo/Documents/rolfsound-pack/.venv/Scripts/\" | head; ls \"c:/Users/lucbo/Documents/rolfsound-pack/\" )",
+      "Read(//c/Users/lucbo/Documents/rolfsound-pack/.venv/**)",
+      "Bash(./.venv/Scripts/python.exe \"C:/Users/lucbo/AppData/Local/Temp/claude/c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web/931eb83b-64f8-4b38-a83e-88e57b52c8b0/scratchpad/test_playlists_api.py\")",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($c\\) { $p = Get-Process -Id $c.OwningProcess; \"$\\($p.Id\\) $\\($p.ProcessName\\) $\\($p.Path\\)\" } else { \"none\" })",
+      "PowerShell(Stop-Process -Id 52712 -Force -Confirm:$false)",
+      "PowerShell(\"stopped\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8766/api/queue/add -H 'Content-Type: application/json' -d '{\"track_id\":\"xTHd-CU4-Yw\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8766/api/queue/add -H 'Content-Type: application/json' -d '{\"track_id\":\"09 Nights\"}')",
+      "Bash(curl -s http://127.0.0.1:8766/api/queue)",
+      "Bash(curl -s http://127.0.0.1:8766/api/playlists/3/tracks)",
+      "Bash(python -c \"import sys;s=sys.stdin.read\\(\\);import json;d=json.loads\\(s.split\\('=',1\\)[1].rstrip\\(\\).rstrip\\(';'\\)\\);print\\('playlists no bootstrap:',d['playlists']\\)\")",
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($c\\) { $p = Get-Process -Id $c.OwningProcess; \"$\\($p.Id\\) $\\($p.Path\\)\" } else { \"none\" })"
     ]
   }
 }

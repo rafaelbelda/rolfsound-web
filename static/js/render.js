@@ -114,7 +114,7 @@
   // e /api/play {index}). playback.js reusa este markup ao re-renderizar
   // a fila a partir do /api/status.
   function queueRowHtml(t, i, absIdx) {
-    return '<div class="tpq-row"' +
+    return '<div class="tpq-row" draggable="true"' +
       ' data-bg="' + esc(t.cover || '') + '"' +
       ' data-title="' + esc(t.title) + '"' +
       ' data-artist="' + esc(t.artist) + '"' +

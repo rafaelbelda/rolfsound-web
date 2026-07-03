@@ -454,12 +454,79 @@
     toast(title, 'Tocando');
   });
 
+  // arrastar para reordenar → POST /api/queue/move (mutação otimista no
+  // DOM; o poll re-renderiza do estado verdadeiro do core)
+  if (queueList) {
+    let dragEl = null;
+    let dragFromAbs = -1;
+    queueList.addEventListener('dragstart', (e) => {
+      const row = e.target.closest('.tpq-row');
+      if (!row) return;
+      dragEl = row;
+      dragFromAbs = queueAbsIndex(row);
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    queueList.addEventListener('dragover', (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      const row = e.target.closest('.tpq-row');
+      if (!row || row === dragEl) return;
+      const r = row.getBoundingClientRect();
+      const after = (e.clientY - r.top) / r.height > 0.5;
+      queueList.insertBefore(dragEl, after ? row.nextSibling : row);
+    });
+    queueList.addEventListener('dragend', () => {
+      if (!dragEl) return;
+      const vis = $$('.tpq-row', queueList).indexOf(dragEl);
+      const cur = window.RolfPlayback ? window.RolfPlayback.state.currentQueueIdx : -1;
+      const toAbs = cur + 1 + Math.max(0, vis);
+      dragEl.classList.remove('dragging');
+      dragEl = null;
+      renumberQueue();
+      if (toAbs !== dragFromAbs && dragFromAbs >= 0 && window.RolfPlayback) {
+        window.RolfPlayback.queueMove(dragFromAbs, toAbs);
+        // qindex gravado ficou obsoleto até o próximo poll — o fallback
+        // visual de queueAbsIndex() dá a posição certa nesse intervalo
+        $$('.tpq-row', queueList).forEach((r) => { delete r.dataset.qindex; });
+      }
+      dragFromAbs = -1;
+    });
+  }
+
   const queueClear = $('[data-queue-clear]');
   if (queueClear) queueClear.addEventListener('click', () => {
     $$('.tpq-row', queueList).forEach((r, i) => { setTimeout(() => { r.style.opacity = '0'; setTimeout(() => r.remove(), 130); }, i * 30); });
     setTimeout(() => { renumberQueue(); toast('Fila esvaziada', 'Limpar'); }, 200);
     if (window.RolfPlayback) window.RolfPlayback.queueClear();
   });
+  // salvar a fila atual como playlist (persistida no banco pelo servidor);
+  // playlists.js escuta 'rolf:playlist-created' e insere no rail
+  const queueSave = $('[data-queue-save]');
+  if (queueSave) queueSave.addEventListener('click', async () => {
+    const rows = $$('.tpq-row', queueList);
+    if (!rows.length) { toast('Fila vazia', 'Salvar'); return; }
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const name = `Fila ${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    try {
+      const res = await fetch('/api/queue/save-as-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const p = await res.json();
+      document.dispatchEvent(new CustomEvent('rolf:playlist-created', {
+        detail: { id: 'p' + p.id, name: p.name },
+      }));
+      toast(p.name, 'Playlist salva');
+    } catch (err) {
+      console.error('save queue as playlist failed:', err);
+      toast('Servidor indisponível', 'Salvar');
+    }
+  });
+
   // shuffle é um MODO do core (não um embaralhamento local da lista)
   const queueShuffle = $('[data-queue-shuffle]');
   if (queueShuffle) queueShuffle.addEventListener('click', () => {
@@ -475,6 +542,7 @@
     const dur = d.dur > 0 ? mmss(d.dur) : '—';
     const row = document.createElement('div');
     row.className = 'tpq-row';
+    row.draggable = true;
     row.dataset.bg = d.bg; row.dataset.title = d.title; row.dataset.artist = d.artist;
     row.dataset.bpm = d.bpm; row.dataset.id = d.id; row.dataset.key = d.key;
     row.dataset.dur = d.dur || 0;

@@ -230,6 +230,8 @@
   function renderQueue() {
     const list = $('[data-queue-list]');
     if (!list || !window.RolfQueueRowHtml) return;
+    // não re-renderizar no meio de um arraste (mataria o drag em curso)
+    if (list.querySelector('.tpq-row.dragging')) return;
 
     const start = S.currentQueueIdx + 1;
     const upcoming = S.queue.slice(start);
@@ -452,6 +454,25 @@
       lastQueueSig = null;
       try { await api('/api/queue/clear'); schedulePoll(300); }
       catch (e) { console.error('queue clear failed:', e); }
+    },
+    async queueMove(fromAbs, toAbs) {
+      lastQueueSig = null;
+      try { await api('/api/queue/move', { from_pos: fromAbs, to_pos: toAbs }); schedulePoll(300); }
+      catch (e) { console.error('queue move failed:', e); }
+    },
+    // carrega uma lista inteira na fila do core e toca do início
+    // (Tocar/Embaralhar de uma playlist). adds sequenciais preservam a ordem.
+    async playList(ids) {
+      ids = (ids || []).filter(Boolean);
+      if (!ids.length) return;
+      S.guardUntilMs = Date.now() + 3000;
+      lastQueueSig = null;
+      try {
+        await api('/api/queue/clear');
+        for (const id of ids) await api('/api/queue/add', { track_id: id });
+        await api('/api/play', { index: 0 });
+        schedulePoll(300);
+      } catch (e) { console.error('play list failed:', e); schedulePoll(600); }
     },
     async toggleShuffle() {
       S.shuffle = !S.shuffle;

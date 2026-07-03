@@ -623,6 +623,32 @@ def rename_playlist(conn, playlist_id: int, name: str) -> bool:
     return cursor.rowcount > 0
 
 
+def set_playlist_tracks(conn, playlist_id: int, track_ids: list[str]) -> None:
+    """Substitui o conteúdo da playlist pela lista ordenada (reordenar /
+    embaralhar / ordenar na UI mandam a ordem completa). Preserva o
+    added_at de quem já estava."""
+    import time
+    rows = conn.execute(
+        "SELECT track_id, added_at FROM playlist_tracks WHERE playlist_id = ?",
+        (playlist_id,)
+    ).fetchall()
+    added = {r["track_id"]: r["added_at"] for r in rows}
+    now = int(time.time())
+    conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+    seen = set()
+    position = 0
+    for track_id in track_ids:
+        if not track_id or track_id in seen:
+            continue
+        seen.add(track_id)
+        conn.execute("""
+            INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at)
+            VALUES (?, ?, ?, ?)
+        """, (playlist_id, track_id, position, added.get(track_id, now)))
+        position += 1
+    conn.commit()
+
+
 def track_already_in_playlist(conn, playlist_id: int, track_id: str) -> bool:
     row = conn.execute(
         "SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",

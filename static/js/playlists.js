@@ -2,8 +2,13 @@
    ROLFSOUND V2 — Playlists (data-driven)
    Real playlist system: collections hold ordered track ids
    into the Acervo. Create, rename, reorder (drag), remove,
-   play/shuffle, and add tracks from the context menu. Persists
-   to localStorage so the library survives reloads.
+   play/shuffle, and add tracks from the context menu.
+
+   Persistência: o banco é a fonte de verdade. O bootstrap
+   (GET /api/bootstrap.js) semeia RolfsoundData.playlists com
+   id 'p{id-do-banco}'; cada mutação da UI é otimista no modelo
+   local e espelhada em /api/playlists/* (criar, renomear,
+   excluir, adicionar/remover faixa, reordenar via PUT …/tracks).
    ============================================================ */
 (function () {
   'use strict';
@@ -33,20 +38,51 @@
     };
   }
 
-  /* ---------- model (seeded from RolfsoundData, persisted em localStorage) ---------- */
+  /* ---------- model (semeado do banco via bootstrap; mutações via API) ---------- */
   const DEFAULTS = (window.RolfsoundData && Array.isArray(window.RolfsoundData.playlists))
     ? window.RolfsoundData.playlists
     : [];
   const norm = (p) => ({ ...p, tracks: [...(p.tracks || [])] });
-  let playlists, selectedId, seq = 100;
-  try {
-    const saved = JSON.parse(localStorage.getItem('rolf_playlists_v2') || 'null');
-    playlists = (saved && Array.isArray(saved.lists)) ? saved.lists.map(norm) : DEFAULTS.map(norm);
-    seq = saved && saved.seq ? saved.seq : 100;
-  } catch (_) { playlists = DEFAULTS.map(norm); }
-  selectedId = playlists[0] && playlists[0].id;
+  let playlists = DEFAULTS.map(norm);
+  let selectedId = playlists[0] && playlists[0].id;
+  // chave legada: as playlists agora vivem no banco (ler daqui ressuscitaria
+  // playlists excluídas no servidor)
+  try { localStorage.removeItem('rolf_playlists_v2'); } catch (_) {}
 
-  function save() { try { localStorage.setItem('rolf_playlists_v2', JSON.stringify({ lists: playlists, seq })); } catch (_) {} }
+  /* ---------- persistência no servidor ---------- */
+  // id da UI 'p42' -> id 42 do banco (null = playlist só local, ex.: criada
+  // com o servidor fora do ar — segue funcionando na sessão, sem persistir)
+  const dbid = (id) => {
+    const n = +String(id).replace(/^p/, '');
+    return Number.isFinite(n) ? n : null;
+  };
+  async function apiCall(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(method + ' ' + path + ' -> HTTP ' + res.status);
+    return res.json().catch(() => ({}));
+  }
+  // otimista: a UI já mudou; se o servidor falhar, avisa mas não desfaz
+  function persist(method, path, body) {
+    apiCall(method, path, body).catch((e) => {
+      console.error('playlist persist failed:', e);
+      raise('Servidor indisponível — mudança não salva', 'Playlists');
+    });
+  }
+  function persistOrder(p) {
+    const n = dbid(p.id);
+    if (n != null) persist('PUT', `/api/playlists/${n}/tracks`, { track_ids: p.tracks });
+  }
+  function persistTrackToggle(p, trackId, removed) {
+    const n = dbid(p.id);
+    if (n == null) return;
+    if (removed) persist('DELETE', `/api/playlists/${n}/tracks/${encodeURIComponent(trackId)}`);
+    else persist('POST', `/api/playlists/${n}/tracks`, { track_id: trackId });
+  }
+
   function byId(id) { return playlists.find((p) => p.id === id); }
   function tracksOf(p) { return p.tracks.map(meta).filter(Boolean); }
 
@@ -149,10 +185,23 @@
     wireDetail(p);
   }
 
-  function renderAll() { renderRail(); renderDetail(); save(); }
+  function renderAll() { renderRail(); renderDetail(); }
 
   /* ---------- detail wiring ---------- */
   function playById(id) { const r = row(id); if (r) r.click(); }
+
+  // Tocar playlist = carregar a fila do core com a lista inteira e tocar
+  // do início (a fila é persistida no servidor). Fallback: 1ª faixa.
+  function playPlaylist(p) {
+    const ids = tracksOf(p).map((t) => t.id);
+    if (!ids.length) return;
+    if (window.RolfPlayback && window.RolfPlayback.playList) {
+      window.RolfPlayback.playList(ids);
+      raise(p.name, 'Tocando');
+      return;
+    }
+    playById(ids[0]);
+  }
 
   function wireDetail(p) {
     // rename
@@ -160,12 +209,13 @@
     if (nameEl) nameEl.addEventListener('click', () => startRename(p, nameEl));
     // play / shuffle / delete
     const playBtn = $('[data-pl-play]', detail);
-    if (playBtn) playBtn.addEventListener('click', () => { const t = tracksOf(p)[0]; if (t) playById(t.id); });
+    if (playBtn) playBtn.addEventListener('click', () => playPlaylist(p));
     const shBtn = $('[data-pl-shuffle]', detail);
     if (shBtn) shBtn.addEventListener('click', () => {
       for (let i = p.tracks.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p.tracks[i], p.tracks[j]] = [p.tracks[j], p.tracks[i]]; }
+      persistOrder(p);
       renderAll();
-      const t = tracksOf(p)[0]; if (t) playById(t.id);
+      playPlaylist(p);
       raise(p.name, 'Embaralhada');
     });
     const delBtn = $('[data-pl-del]', detail);
@@ -183,7 +233,10 @@
       if (x) x.addEventListener('click', (e) => {
         e.stopPropagation();
         const idx = p.tracks.indexOf(rowEl.dataset.id);
-        if (idx > -1) p.tracks.splice(idx, 1);
+        if (idx > -1) {
+          p.tracks.splice(idx, 1);
+          persistTrackToggle(p, rowEl.dataset.id, true);
+        }
         renderAll();
         raise('Faixa removida', p.name);
       });
@@ -201,6 +254,7 @@
         $$('.pl-row.drag-over', detail).forEach((r) => r.classList.remove('drag-over'));
         // commit new order from DOM
         p.tracks = $$('.pl-row', detail).map((r) => r.dataset.id);
+        persistOrder(p);
         renderAll();
       });
       rowEl.addEventListener('dragover', (e) => {
@@ -223,6 +277,10 @@
     const finish = () => {
       el.removeAttribute('contenteditable'); el.classList.remove('editing');
       const name = el.textContent.trim() || 'Playlist';
+      if (name !== p.name) {
+        const n = dbid(p.id);
+        if (n != null) persist('PATCH', `/api/playlists/${n}`, { name });
+      }
       p.name = name; el.removeEventListener('blur', finish); el.removeEventListener('keydown', onKey);
       renderAll();
     };
@@ -232,18 +290,36 @@
   }
 
   /* ---------- create / delete ---------- */
-  function createPlaylist() {
-    const id = 'p' + (++seq);
-    playlists.push({ id, name: 'Nova playlist', tracks: [] });
-    selectedId = id;
+  // cria no servidor primeiro para nascer com o id do banco; se ele
+  // estiver fora do ar, cria só na sessão (id 'local-…', não persiste)
+  async function newPlaylist(name, tracks) {
+    let id;
+    try {
+      const created = await apiCall('POST', '/api/playlists', { name });
+      id = 'p' + created.id;
+    } catch (e) {
+      console.error('playlist create failed:', e);
+      id = 'local-' + Date.now();
+      raise('Servidor indisponível — playlist só nesta sessão', 'Playlists');
+    }
+    const p = { id, name, tracks: [...(tracks || [])] };
+    playlists.push(p);
+    if (p.tracks.length && dbid(id) != null) persistOrder(p);
+    return p;
+  }
+  async function createPlaylist() {
+    const p = await newPlaylist('Nova playlist', []);
+    selectedId = p.id;
     renderAll();
     raise('Nova playlist', '+');
     // jump into rename
-    requestAnimationFrame(() => { const el = $('[data-pl-name]', detail); if (el) startRename(byId(id), el); });
+    requestAnimationFrame(() => { const el = $('[data-pl-name]', detail); if (el) startRename(byId(p.id), el); });
   }
   function deletePlaylist(p) {
     const i = playlists.findIndex((x) => x.id === p.id);
     if (i > -1) playlists.splice(i, 1);
+    const n = dbid(p.id);
+    if (n != null) persist('DELETE', `/api/playlists/${n}`);
     selectedId = playlists.length ? playlists[Math.max(0, i - 1)].id : null;
     renderAll();
     raise(p.name, 'Excluída');
@@ -283,13 +359,14 @@
       const p = byId(it.dataset.id);
       const idx = p.tracks.indexOf(trackId);
       if (idx > -1) p.tracks.splice(idx, 1); else p.tracks.push(trackId);
+      persistTrackToggle(p, trackId, idx > -1);
       renderAll(); closePicker();
       raise(p.name, idx > -1 ? 'Removida' : 'Adicionada');
     }));
-    $('.pl-picker-new', picker).addEventListener('click', () => {
-      const id = 'p' + (++seq);
-      playlists.push({ id, name: (t ? t.title : 'Playlist'), tracks: [trackId] });
-      selectedId = id; renderAll(); closePicker();
+    $('.pl-picker-new', picker).addEventListener('click', async () => {
+      closePicker();
+      const p = await newPlaylist((t ? t.title : 'Playlist'), [trackId]);
+      selectedId = p.id; renderAll();
       raise('Nova playlist', '+');
     });
   }
@@ -302,7 +379,25 @@
   if (sortBtn) sortBtn.addEventListener('click', () => {
     const p = byId(selectedId); if (!p) return;
     p.tracks.sort((a, b) => (meta(a)?.title || '').localeCompare(meta(b)?.title || ''));
+    persistOrder(p);
     renderAll(); raise(p.name, 'Ordenada por título');
+  });
+
+  // fila salva como playlist (botão "Salvar" no dock, prototype.js):
+  // o servidor já criou — busca a lista de faixas dele e insere no rail
+  document.addEventListener('rolf:playlist-created', async (e) => {
+    const { id, name } = e.detail || {};
+    if (!id || byId(id)) return;
+    let tracks = [];
+    const n = dbid(id);
+    if (n != null) {
+      try {
+        const data = await apiCall('GET', `/api/playlists/${n}/tracks`);
+        tracks = (data.tracks || []).map((r) => r.id).filter(Boolean);
+      } catch (err) { console.error('fetch new playlist failed:', err); }
+    }
+    playlists.push({ id, name: name || 'Playlist', tracks });
+    renderAll();
   });
 
   document.addEventListener('rolf:ctx', (e) => {

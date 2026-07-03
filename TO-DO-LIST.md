@@ -5,11 +5,15 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
 
 ## 1. Ações no backend
 
-- [ ] Mutações da fila persistidas no servidor (hoje a fila vive no core e o
-      estado é salvo/restaurado, mas as ações da UI ainda são parciais).
-- [ ] Playlists escritas de volta no banco — hoje ficam só em `localStorage`
-      (chave `rolf_playlists_v2`); o bootstrap já as lê do banco, falta o
-      caminho de escrita (criar/renomear/adicionar/remover via API).
+- [x] Mutações da fila persistidas no servidor — todas as ações da UI agora
+      chegam ao core: arrastar para reordenar no dock (`/api/queue/move`),
+      botão "Salvar" (fila → playlist via `/api/queue/save-as-playlist`) e
+      Tocar/Embaralhar de playlist carrega a fila inteira
+      (`RolfPlayback.playList`).
+- [x] Playlists escritas de volta no banco — `playlists.js` abandonou o
+      `localStorage`; criar/renomear/excluir/adicionar/remover vão para
+      `/api/playlists/*` e reordenar/embaralhar/ordenar usam o novo
+      `PUT /api/playlists/{id}/tracks`.
 
 ## 2. Migração de schema
 
