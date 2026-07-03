@@ -119,7 +119,7 @@
       </div>
       <div class="tpp-editor">
         <div class="tpp-edit-cover">
-          <div class="tpp-edit-art" style="background:${m.bg}">
+          <div class="tpp-edit-art" style='background:${m.bg}'>
             <div class="repl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M5 19h14"/></svg>Trocar capa</div>
           </div>
         </div>
@@ -177,7 +177,7 @@
   function trackRow(m, i, playingId) {
     return `<div class="tpp-trk${m.id === playingId ? ' playing' : ''}" data-id="${esc(m.id)}">
       <span class="tpp-trk-idx">${i + 1}</span>
-      <span class="row-cover cover" style="background:${m.bg}"></span>
+      <span class="row-cover cover" style='background:${m.bg}'></span>
       <span class="tpp-trk-name">${esc(m.title)}</span>
       <span class="tpp-trk-data">${esc(m.bpm)}</span>
       <span class="tpp-trk-key">${esc(m.key)}</span>
@@ -198,7 +198,7 @@
         <button class="tpp-close" data-panel-close aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
       </div>
       <div class="tpp-hero">
-        <span class="tpp-hero-art" style="background:${m.bg}"></span>
+        <span class="tpp-hero-art" style='background:${m.bg}'></span>
         <div class="tpp-hero-info">
           <div class="tpp-hero-name">${esc(m.album)}</div>
           <div class="tpp-hero-meta"><span>${esc(m.artist)}</span><span class="d"></span><span>${yrs.join('–')}</span><span class="d"></span><span>${tracks.length} ${tracks.length === 1 ? 'faixa' : 'faixas'}</span></div>
@@ -226,7 +226,7 @@
     const albums = albumsByArtist(m.artist);
     const albumCards = albums.map((a) =>
       `<button class="tpp-alb" data-album="${esc(a.album)}">
-        <span class="tpp-alb-art" style="background:${a.bg}"></span>
+        <span class="tpp-alb-art" style='background:${a.bg}'></span>
         <span class="tpp-alb-name">${esc(a.album)}</span>
         <span class="tpp-alb-meta">${esc(a.year)} · ${a.count} ${a.count === 1 ? 'faixa' : 'faixas'}</span>
       </button>`).join('');
@@ -236,7 +236,7 @@
         <button class="tpp-close" data-panel-close aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
       </div>
       <div class="tpp-hero">
-        <span class="tpp-hero-art round" style="background:${m.bg}"></span>
+        <span class="tpp-hero-art round" style='background:${m.bg}'></span>
         <div class="tpp-hero-info">
           <div class="tpp-hero-name">${esc(m.artist)}</div>
           <div class="tpp-hero-meta"><span>${tracks.length} ${tracks.length === 1 ? 'faixa' : 'faixas'}</span><span class="d"></span><span>${albums.length} ${albums.length === 1 ? 'álbum' : 'álbuns'}</span><span class="d"></span><span>No cofre</span></div>

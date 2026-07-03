@@ -67,7 +67,9 @@
     const cells = [];
     for (let i = 0; i < 4; i++) {
       const bg = ts[i] ? ts[i].bg : 'linear-gradient(150deg,#1a1a1e,#0c0c0f)';
-      cells.push(`<span style="background:${bg}"></span>`);
+      // single-quoted: .style.background re-serializes url() with double
+      // quotes, which would otherwise close this attribute early.
+      cells.push(`<span style='background:${bg}'></span>`);
     }
     return `<div class="collage${cls ? ' ' + cls : ''}">${cells.join('')}</div>`;
   }
@@ -112,7 +114,7 @@
       `<div class="pl-row${t.id === playingId ? ' playing' : ''}" data-id="${esc(t.id)}" draggable="true">
         <span class="pl-drag" aria-label="Arrastar"><i></i><i></i><i></i></span>
         <span class="pl-idx">${String(i + 1).padStart(2, '0')}</span>
-        <span class="row-cover cover" style="background:${t.bg}"></span>
+        <span class="row-cover cover" style='background:${t.bg}'></span>
         <div class="pl-main"><div class="pl-title">${esc(t.title)}</div><div class="pl-artist">${esc(t.artist)}</div></div>
         <span class="pl-data">${t.bpm || ''}</span>
         <span class="pl-key">${esc(t.key)}</span>
@@ -257,7 +259,7 @@
     picker.innerHTML =
       `<div class="pl-picker" role="dialog">
         <div class="pl-picker-head">
-          <span class="row-cover cover" style="background:${t ? t.bg : ''}"></span>
+          <span class="row-cover cover" style='background:${t ? t.bg : ''}'></span>
           <div class="pl-picker-meta"><div class="pl-picker-title">${t ? esc(t.title) : 'Faixa'}</div><div class="pl-picker-sub">Adicionar à playlist</div></div>
           <button class="pl-picker-x" aria-label="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>

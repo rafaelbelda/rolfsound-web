@@ -273,7 +273,7 @@
         const it = document.createElement('button');
         it.className = 'rmx-loaditem'; it.type = 'button';
         it.innerHTML =
-          `<span class="row-cover cover" style="background:${d.bg}"></span>` +
+          `<span class="row-cover cover" style='background:${d.bg}'></span>` +
           `<span class="ri-main"><span class="ri-title">${d.title}</span><span class="ri-sub">${d.artist}</span></span>` +
           `<span class="ri-bpm">${d.bpm}</span><span class="ri-key">${d.key}</span>`;
         // tocar = mesmo caminho do acervo (loadTransport → core /api/play)

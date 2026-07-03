@@ -111,7 +111,9 @@
     const cells = [];
     for (let i = 0; i < 4; i++) {
       const bg = list[i] ? (list[i].querySelector('.row-cover')?.style.background || '') : 'linear-gradient(150deg,#1a1a1e,#0c0c0f)';
-      cells.push('<span style="background:' + bg + '"></span>');
+      // single-quoted: .style.background re-serializes url() with double
+      // quotes, which would otherwise close this attribute early.
+      cells.push("<span style='background:" + bg + "'></span>");
     }
     return cells.join('');
   }
@@ -153,7 +155,7 @@
       const albumsCount = new Set(g.rows.map((r) => rowMeta(r).album)).size;
       const bg = g.rows[0]?.querySelector('.row-cover')?.style.background || '';
       return '<div class="acv-card" data-key="' + esc(g.key) + '">' +
-        '<div class="acv-card-art round" style="background:' + bg + '">' +
+        "<div class=\"acv-card-art round\" style='background:" + bg + "'>" +
         '<div class="acv-card-play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></div></div>' +
         '<div class="acv-card-name">' + esc(g.key) + '</div>' +
         '<div class="acv-card-meta">' + albumsCount + (albumsCount === 1 ? ' álbum · ' : ' álbuns · ') + n + (n === 1 ? ' faixa' : ' faixas') + '</div>' +

@@ -153,7 +153,7 @@
     el.dataset.id = t.id;
     el.dataset.key = t.key; el.dataset.bpm = t.bpm; el.dataset.fmt = t.fmt;
     el.innerHTML =
-      `<span class="row-cover cover" style="background:${t.bg}"></span>` +
+      `<span class="row-cover cover" style='background:${t.bg}'></span>` +
       `<div class="bsc-main"><div class="bsc-title row-title">${highlight(t.title, F.q)}</div>` +
       `<div class="bsc-artist row-artist">${escapeHtml(t.artist)}</div></div>` +
       `<span class="bsc-data row-data">${t.bpm}</span>` +

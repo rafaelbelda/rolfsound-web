@@ -67,7 +67,7 @@
     const head = document.createElement('div');
     head.className = 'ctx-head';
     head.innerHTML =
-      `<span class="ctx-cover" style="${cover ? 'background:' + cover.style.background : ''}"></span>` +
+      `<span class="ctx-cover" style='${cover ? 'background:' + cover.style.background : ''}'></span>` +
       `<div class="ctx-meta"><div class="ctx-title">${title}</div>` +
       `<div class="ctx-sub">${artist.replace(/·/g, '·')} · ${bpm} BPM · ${key}</div></div>`;
     menu.appendChild(head);

@@ -170,10 +170,69 @@
   function toHex(r, g, b) {
     return '#' + [r, g, b].map((x) => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('');
   }
+  function setAccentFromRgb(r, g, b) {
+    const root = document.documentElement.style;
+    root.setProperty('--accent', toHex(r, g, b));
+    root.setProperty('--accent-soft', `rgba(${r},${g},${b},0.16)`);
+  }
+
+  // pulls the raw image URL out of a `background` CSS shorthand — works
+  // whether url() is single- or double-quoted (reading .style.background
+  // back from the DOM always re-serializes it with double quotes).
+  function urlFromBg(bg) {
+    const m = /url\((['"]?)(.*?)\1\)/i.exec(bg || '');
+    return m ? m[2] : '';
+  }
+
+  // Real photographic cover art carries no usable colour in its CSS string
+  // (only the neutral #141416 letterbox fallback) — the actual tone has to
+  // come from the pixels themselves. Sampled client-side on a hidden canvas
+  // and cached per URL so replaying a track doesn't re-decode it.
+  const accentCache = new Map();
+  let accentToken = 0;
+  const sampleCv = document.createElement('canvas');
+  sampleCv.width = 32; sampleCv.height = 32;
+  const sampleCx = sampleCv.getContext('2d', { willReadFrequently: true });
+  function sampleCoverColor(url, onReady) {
+    if (accentCache.has(url)) { onReady(accentCache.get(url)); return; }
+    const myToken = ++accentToken;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (myToken !== accentToken) return;   // a newer track loaded meanwhile
+      try {
+        sampleCx.clearRect(0, 0, 32, 32);
+        sampleCx.drawImage(img, 0, 0, 32, 32);
+        const data = sampleCx.getImageData(0, 0, 32, 32).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 16) continue;   // skip near-transparent pixels
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+        }
+        if (!n) return;
+        const hex = toHex(Math.round(r / n), Math.round(g / n), Math.round(b / n));
+        accentCache.set(url, hex);
+        onReady(hex);
+      } catch (_) {
+        // cross-origin cover without CORS headers taints the canvas — leave the accent as-is
+      }
+    };
+    img.src = url;
+  }
+
   // flood the whole UI with the accent pulled from the now-playing cover art.
-  // .style.background serializes colours to rgb(), so accept hex OR rgb().
   function applyAccent(bg) {
     if (accentMode !== 'album') return;   // a fixed accent is pinned
+    const url = urlFromBg(bg);
+    if (url) {
+      sampleCoverColor(url, (hex) => {
+        if (accentMode !== 'album') return;   // may have been pinned while the image loaded
+        const [r, g, b] = hexToRgb(hex);
+        setAccentFromRgb(r, g, b);
+      });
+      return;
+    }
+    // legacy placeholder covers (fake CSS gradients) carry a usable colour directly
     let r, g, b;
     const hx = /#([0-9a-f]{6})/i.exec(bg || '');
     if (hx) { [r, g, b] = hexToRgb('#' + hx[1]); }
@@ -182,9 +241,7 @@
       if (!m) return;
       r = +m[1]; g = +m[2]; b = +m[3];
     }
-    const root = document.documentElement.style;
-    root.setProperty('--accent', toHex(r, g, b));
-    root.setProperty('--accent-soft', `rgba(${r},${g},${b},0.16)`);
+    setAccentFromRgb(r, g, b);
   }
 
   function setAccentColor(hex) {
@@ -326,7 +383,7 @@
     row.innerHTML =
       '<span class="tpq-grip"><i></i><i></i><i></i></span>' +
       '<span class="tpq-idx"></span>' +
-      `<span class="row-cover cover" style="background:${d.bg}"></span>` +
+      `<span class="row-cover cover" style='background:${d.bg}'></span>` +
       `<div class="tpq-main"><div class="tpq-name">${d.title}</div><div class="tpq-artist">${d.artist}</div></div>` +
       `<span class="tpq-data">${d.bpm}</span><span class="tpq-key">${d.key}</span>` +
       `<span class="tpq-dur">${dur}</span>` +
