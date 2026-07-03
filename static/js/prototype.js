@@ -172,6 +172,57 @@
   function toHex(r, g, b) {
     return '#' + [r, g, b].map((x) => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('');
   }
+
+  // ---- colour-space helpers for adaptive accent derivation ----
+  // The accent is used as text/glow over dark panels, so we can't hand the UI
+  // whatever raw tone a cover averages to. We keep the cover's *hue* but let
+  // the design system own chroma + lightness so the accent stays vivid and
+  // legible. The work happens in OKLab/OKLCH (Björn Ottosson) rather than HSL:
+  // lightness is perceptually uniform and hue holds steady as we lift lightness
+  // for contrast — HSL would drift a blue toward purple while brightening it.
+  // Used by dominantAccent()/normalizeAccent() below.
+  function srgbToLinear(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function linearToSrgb(c) {
+    const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055;
+    return Math.round(Math.max(0, Math.min(1, v)) * 255);
+  }
+  function rgbToOklch(r, g, b) {
+    const lr = srgbToLinear(r), lg = srgbToLinear(g), lb = srgbToLinear(b);
+    const l = 0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb;
+    const m = 0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb;
+    const s = 0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb;
+    const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+    const L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+    const a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+    const bb = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+    let h = Math.atan2(bb, a) * 180 / Math.PI; if (h < 0) h += 360;
+    return [L, Math.hypot(a, bb), h];
+  }
+  function oklchToLinearRgb(L, C, h) {
+    const hr = h * Math.PI / 180, a = C * Math.cos(hr), b = C * Math.sin(hr);
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+    return [
+      4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ];
+  }
+  // whether an OKLCH point survives the round-trip into displayable sRGB
+  function inGamut([r, g, b]) { const e = 1e-3; return r >= -e && r <= 1 + e && g >= -e && g <= 1 + e && b >= -e && b <= 1 + e; }
+  function oklchToRgb(L, C, h) { const t = oklchToLinearRgb(L, C, h); return [linearToSrgb(t[0]), linearToSrgb(t[1]), linearToSrgb(t[2])]; }
+  // WCAG relative luminance + contrast ratio — used to hold the accent above a
+  // legibility floor against the panel it sits on.
+  function relLuminance(r, g, b) {
+    const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  }
+  function contrast(l1, l2) { const a = Math.max(l1, l2), b = Math.min(l1, l2); return (a + 0.05) / (b + 0.05); }
+  const PANEL_L = relLuminance(0x11, 0x11, 0x14);   // --panel #111114
+  const DEFAULT_ACCENT = '#c8693c';                 // brand accent, used when a cover has no usable hue
+
   function setAccentFromRgb(r, g, b) {
     const root = document.documentElement.style;
     root.setProperty('--accent', toHex(r, g, b));
@@ -190,6 +241,56 @@
   // (only the neutral #141416 letterbox fallback) — the actual tone has to
   // come from the pixels themselves. Sampled client-side on a hidden canvas
   // and cached per URL so replaying a track doesn't re-decode it.
+
+  // Find the cover's *characteristic* hue with a chroma-weighted circular
+  // histogram in OKLCH — a flat RGB average of a colourful image collapses to
+  // grey mud, so instead each coloured pixel votes for its hue bin and the peak
+  // wins. Returns [hue°, chroma] or null when the cover is essentially greyscale.
+  function dominantAccent(data) {
+    const BINS = 36;   // 10° per bin
+    const hist = new Float32Array(BINS), chromaSum = new Float32Array(BINS);
+    let coloredCount = 0, total = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 16) continue;   // skip near-transparent pixels
+      total++;
+      const [L, C, h] = rgbToOklch(data[i], data[i + 1], data[i + 2]);
+      if (L < 0.20 || L > 0.95 || C < 0.04) continue;   // black/white/grey carry no hue
+      coloredCount++;
+      const w = C * Math.max(0, 1 - Math.abs(L - 0.6) * 1.5);   // favour chromatic, mid-light pixels
+      if (w <= 0) continue;
+      const bin = Math.min(BINS - 1, Math.floor(h / (360 / BINS)));
+      hist[bin] += w; chromaSum[bin] += C * w;
+    }
+    if (!total || coloredCount < total * 0.02) return null;   // greyscale cover → no trustworthy hue
+    let peak = 0;
+    for (let i = 1; i < BINS; i++) if (hist[i] > hist[peak]) peak = i;
+    let hx = 0, hy = 0, cAcc = 0, wsum = 0;               // refine across the peak's neighbours
+    for (let d = -1; d <= 1; d++) {
+      const b = (peak + d + BINS) % BINS, ang = (b + 0.5) * (360 / BINS) * Math.PI / 180;
+      hx += Math.cos(ang) * hist[b]; hy += Math.sin(ang) * hist[b];
+      cAcc += chromaSum[b]; wsum += hist[b];
+    }
+    let hue = Math.atan2(hy, hx) * 180 / Math.PI; if (hue < 0) hue += 360;
+    return [hue, wsum ? cAcc / wsum : 0.13];
+  }
+
+  // Keep the cover's hue but pin chroma + lightness to a band the dark UI can
+  // always show: vivid (never washed/neon) and above a contrast floor vs the
+  // panel, raising perceptual lightness only as far as legibility needs. At
+  // each lightness we pull chroma back into sRGB gamut before rendering.
+  function normalizeAccent(hue, chroma) {
+    const Cwant = Math.min(0.16, Math.max(0.09, chroma));
+    let L = 0.64, best = oklchToRgb(L, Cwant, hue);
+    while (L <= 0.86) {
+      let C = Cwant;
+      while (C > 0.02 && !inGamut(oklchToLinearRgb(L, C, hue))) C -= 0.005;
+      best = oklchToRgb(L, C, hue);
+      if (contrast(relLuminance(...best), PANEL_L) >= 4.0) break;
+      L += 0.02;
+    }
+    return toHex(...best);
+  }
+
   const accentCache = new Map();
   let accentToken = 0;
   const sampleCv = document.createElement('canvas');
@@ -206,13 +307,8 @@
         sampleCx.clearRect(0, 0, 32, 32);
         sampleCx.drawImage(img, 0, 0, 32, 32);
         const data = sampleCx.getImageData(0, 0, 32, 32).data;
-        let r = 0, g = 0, b = 0, n = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 16) continue;   // skip near-transparent pixels
-          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
-        }
-        if (!n) return;
-        const hex = toHex(Math.round(r / n), Math.round(g / n), Math.round(b / n));
+        const dom = dominantAccent(data);
+        const hex = dom ? normalizeAccent(dom[0], dom[1]) : DEFAULT_ACCENT;
         accentCache.set(url, hex);
         onReady(hex);
       } catch (_) {

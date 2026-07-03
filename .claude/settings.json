@@ -39,7 +39,10 @@
       "Bash(.venv/Scripts/python.exe -c ' *)",
       "Bash(node --check static/js/versions.js)",
       "Bash(node --check static/js/track-panels.js)",
-      "Bash(echo \"track-panels OK\")"
+      "Bash(echo \"track-panels OK\")",
+      "Bash(node \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\20278958-a89b-4a2c-abe8-c17112639238\\\\scratchpad\\\\accent-test.js\")",
+      "Bash(node --check \"c:/Users/lucbo/Documents/rolfsound-pack/rolfsound-web/static/js/prototype.js\")",
+      "Bash(node \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-lucbo-Documents-rolfsound-pack-rolfsound-web\\\\20278958-a89b-4a2c-abe8-c17112639238\\\\scratchpad\\\\oklch-test.js\")"
     ]
   }
 }
