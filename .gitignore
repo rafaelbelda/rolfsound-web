@@ -20,6 +20,7 @@ node_modules/
 
 # Claude Code — permissões locais da máquina
 .claude/settings.local.json
+CLAUDE.md
 
 # SO / editor
 .DS_Store

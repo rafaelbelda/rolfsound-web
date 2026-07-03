@@ -81,14 +81,15 @@
     const beat = play ? Math.exp(-sinceBeat * 7) : 0;
     const vizState = { t: now / 1000, beat: beat, level: level };
 
-    // advance global playback while playing
-    if (play) {
-      if (!Player.engineDriven) {
-        Player.pos += dt / Player.dur;
-        if (Player.pos >= 1) {
-          Player.pos = 0;
-          document.dispatchEvent(new CustomEvent('rolf:ended'));
-        }
+    // advance global playback while playing.
+    // Com playback.js ativo (engineDriven), a posição vem do CORE por
+    // dead-reckoning e o próprio bridge renderiza .tp-fill/.tp-time —
+    // este bloco fake fica de fora por completo.
+    if (play && !Player.engineDriven) {
+      Player.pos += dt / Player.dur;
+      if (Player.pos >= 1) {
+        Player.pos = 0;
+        document.dispatchEvent(new CustomEvent('rolf:ended'));
       }
       document.querySelectorAll('.tp-fill').forEach((f) => { f.style.width = (Player.pos * 100).toFixed(2) + '%'; });
       const times = document.querySelectorAll('.transport .tp-time');

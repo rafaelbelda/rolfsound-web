@@ -25,7 +25,7 @@ from utils import core_client
 from utils.monitor_accumulator import get_accumulator
 
 from api.deps import require_admin
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload
 
 logger = logging.getLogger(__name__)
 
@@ -223,10 +223,14 @@ def _enrich_status(raw: dict) -> dict:
     pb = raw.get("playback", {})
     q  = raw.get("queue",    {})
 
-    if pb.get("playing"):
-        state = "playing"
-    elif pb.get("paused"):
+    # Precedência: paused PRIMEIRO. O core mantém playing=True durante a
+    # pausa (playing = "há faixa ativa"), então testar playing antes fazia
+    # o estado reportar "playing" com o áudio pausado — e o ícone da UI
+    # nunca virava.
+    if pb.get("paused"):
         state = "paused"
+    elif pb.get("playing"):
+        state = "playing"
     else:
         state = "idle"
 
@@ -323,6 +327,7 @@ def create_app() -> FastAPI:
     app.include_router(playlists.router,        prefix="/api")
     app.include_router(scheduled_queues.router, prefix="/api")
     app.include_router(bootstrap.router,        prefix="/api")
+    app.include_router(upload.router,           prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)

@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="static/css/dashboard-acervo.css" />
   <link rel="stylesheet" href="static/css/dashboard-config.css" />
   <link rel="stylesheet" href="static/css/dashboard-panels.css" />
+  <link rel="stylesheet" href="static/css/dashboard-import.css" />
   <link rel="stylesheet" href="static/css/prototype.css" />
   <link rel="stylesheet" href="static/css/seekbar.css" />
   <link rel="stylesheet" href="static/css/remixer-live.css" />
@@ -94,6 +95,9 @@
             <button class="active" data-view="list" aria-label="Lista"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
             <button data-view="grid" aria-label="Grade"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></button>
           </div>
+          <button class="btn-ghost btn-accent" data-import-open aria-label="Importar arquivos de áudio — ou solte-os em qualquer lugar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10M8 10l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Importar
+          </button>
         </header>
 
         <div class="acv-bar">
@@ -844,11 +848,15 @@
   <script src="static/js/acervo.js"></script>
   <script src="static/js/playlists.js"></script>
   <script src="static/js/track-panels.js"></script>
+  <script src="static/js/importer.js"></script>
   <script src="static/js/prototype-motion.js"></script>
   <script src="static/js/seekbar.js"></script>
   <script src="static/js/tp-scrub-line.js"></script>
-  <script src="static/js/remixer-engine.js"></script>
+  <script src="static/js/remixer-live.js"></script>
   <script src="static/js/search-engine.js"></script>
   <script src="static/js/discovery.js"></script>
+  <!-- playback.js por último: liga os botões aos endpoints do core e
+       assume o transporte (clona botões p/ derrubar handlers locais) -->
+  <script src="static/js/playback.js"></script>
 </body>
 </html>

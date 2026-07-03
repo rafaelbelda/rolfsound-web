@@ -87,6 +87,7 @@
     menu.appendChild(sep());
     menu.appendChild(item({ icon: ICON.fav, label: 'Favoritar', action: 'fav' }));
     menu.appendChild(item({ icon: ICON.edit, label: 'Editar informações', action: 'edit' }));
+    menu.appendChild(item({ icon: ICON.info, label: 'Ficha técnica', action: 'dossier' }));
     menu.appendChild(sep());
     menu.appendChild(item({ icon: ICON.trash, label: 'Remover do cofre', cls: 'danger', action: 'remove' }));
   }
@@ -94,7 +95,7 @@
   function buildLibraryMenu() {
     menu.innerHTML = '';
     menu.appendChild(label('Acervo'));
-    menu.appendChild(item({ icon: ICON.add, label: 'Nova faixa', kbd: '⌘N', action: 'new-track' }));
+    menu.appendChild(item({ icon: ICON.add, label: 'Importar arquivos', action: 'import' }));
     menu.appendChild(item({ icon: ICON.rip, label: 'Capturar / Rip', cls: 'accent', action: 'capturar' }));
     menu.appendChild(item({ icon: ICON.playlist, label: 'Nova playlist', action: 'new-playlist' }));
     menu.appendChild(sep());

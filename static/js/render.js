@@ -72,7 +72,10 @@
   if (ledger) ledger.insertAdjacentHTML('beforeend', tracks.map(rowHtml).join(''));
 
   /* ---------- Fila "A seguir" ---------- */
-  function queueRowHtml(t, i) {
+  // absIdx = posição ABSOLUTA na fila do core (usada por /api/queue/remove
+  // e /api/play {index}). playback.js reusa este markup ao re-renderizar
+  // a fila a partir do /api/status.
+  function queueRowHtml(t, i, absIdx) {
     return '<div class="tpq-row"' +
       ' data-bg="' + esc(t.cover || '') + '"' +
       ' data-title="' + esc(t.title) + '"' +
@@ -80,6 +83,7 @@
       ' data-bpm="' + (+t.bpm || 0) + '"' +
       ' data-id="' + esc(t.id) + '"' +
       ' data-key="' + esc(t.key) + '"' +
+      ' data-qindex="' + (absIdx == null ? i : absIdx) + '"' +
       ' data-dur="' + (+t.dur || 0) + '">' +
       '<span class="tpq-grip"><i></i><i></i><i></i></span>' +
       '<span class="tpq-idx">' + (i + 1) + '</span>' +
@@ -100,4 +104,7 @@
   /* ---------- Topbar: contagem do cofre ---------- */
   const storeCount = document.querySelector('.tb-status .store .meta span');
   if (storeCount) storeCount.textContent = tracks.length + (tracks.length === 1 ? ' faixa' : ' faixas');
+
+  // playback.js re-renderiza a fila com o mesmo markup ao sincronizar com o core
+  window.RolfQueueRowHtml = queueRowHtml;
 })();

@@ -3,8 +3,8 @@
    Drives .transport .tp-scrub (the flush hairline seek strip).
    Hover shows a floating timecode + reveals the bar; drag commits
    the position through the same Player/.tp-fill/.tp-time contract
-   the rest of the app already uses, so playback sync (prototype.js,
-   prototype-motion.js, remixer-engine.js) keeps working untouched.
+   the rest of the app already uses — the real seek goes to the core
+   via RolfPlayback (playback.js).
    The fullscreen visualizer's waveform seekbar is unrelated to this
    file — it still runs on seekbar.js.
    ============================================================ */
@@ -29,8 +29,9 @@
     if (t0) t0.textContent = mmss(frac * dur);
     var ve = document.querySelector('[data-viz-elapsed]');
     if (ve) ve.textContent = mmss(frac * dur);
-    if (window.RolfRemixer && window.RolfRemixer.playing && window.RolfRemixer.seek) {
-      try { window.RolfRemixer.seek(frac); } catch (e) {}
+    // o seek real acontece no core — via bridge (debounced)
+    if (window.RolfPlayback) {
+      try { window.RolfPlayback.seekFrac(frac); } catch (e) {}
     }
   }
 

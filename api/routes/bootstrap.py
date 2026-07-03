@@ -10,11 +10,12 @@ de faixa documentado em static/js/data.js.
 Mapeamento do schema antigo -> formato da UI:
   - fmt:   source 'recording' -> 'vinil'; resto -> 'digital'
   - state: status 'identified' -> 'master'; resto -> 'rip'
-  - bpm/key/tags: ainda nao existem no schema -> vazios ("-" na UI)
+  - tags:  derivadas de genre (schema so guarda um genero por faixa)
   - cover: thumbnail vira background CSS (url(...))
 """
 
 import json
+from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import Response
@@ -28,23 +29,32 @@ router = APIRouter()
 def _cover(thumbnail: str | None) -> str:
     if not thumbnail:
         return ""
-    return f'url("{thumbnail}") center/cover no-repeat, #141416'
+    t = thumbnail
+    # Caminho local no disco (scan antigo gravava caminho absoluto): as capas
+    # sidecar moram no diretório de música, servido pela montagem /thumbs.
+    if not t.startswith(("http://", "https://", "/")):
+        t = "/thumbs/" + Path(t).name
+    # Aspas simples: o valor entra em style="…" no render.js — aspas duplas
+    # fechariam o atributo e a capa não carregava.
+    t = t.replace("\\", "/").replace("'", "%27").replace('"', "%22")
+    return f"url('{t}') center/cover no-repeat, #141416"
 
 
 def _track(r: dict) -> dict:
+    genre = r.get("genre") or ""
     return {
         "id":     r.get("id") or "",
         "title":  r.get("title") or "Faixa",
         "artist": r.get("artist") or "",
-        "album":  "",
+        "album":  r.get("album") or "",
         "year":   str(r["year"]) if r.get("year") else "",
         "added":  (r.get("date_added") or 0) * 1000,
-        "bpm":    0,
-        "key":    "",
+        "bpm":    r.get("bpm") or 0,
+        "key":    r.get("key") or "",
         "fmt":    "vinil" if r.get("source") == "recording" else "digital",
         "state":  "master" if r.get("status") == "identified" else "rip",
         "fav":    False,
-        "tags":   [],
+        "tags":   [genre.lower()] if genre else [],
         "dur":    r.get("duration") or 0,
         "cover":  _cover(r.get("thumbnail")),
     }

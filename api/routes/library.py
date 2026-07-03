@@ -4,11 +4,23 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 from api.services.indexer import index_file
 
 from db import database
 
 router = APIRouter()
+
+
+class TrackMetadataUpdate(BaseModel):
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    year: int | None = None
+    genre: str | None = None
+    bpm: float | None = None
+    key: str | None = None
+
 
 _reindex_state = {
     "running": False,
@@ -75,6 +87,22 @@ async def get_track(track_id: str):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
         return track
+    finally:
+        conn.close()
+
+
+@router.patch("/library/{track_id}")
+async def update_track_route(track_id: str, req: TrackMetadataUpdate):
+    """Salva edições manuais de metadados (editor "Editar informações")."""
+    conn = database.get_connection()
+    try:
+        track = database.get_track(conn, track_id)
+        if not track:
+            raise HTTPException(status_code=404, detail="Track not found")
+        data = req.model_dump(exclude_unset=True)
+        database.update_track_metadata(conn, track_id, data)
+        conn.commit()
+        return {"ok": True, "track": database.get_track(conn, track_id)}
     finally:
         conn.close()
 
@@ -188,8 +216,12 @@ async def delete_track(track_id: str):
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
 
-        # Delete local thumbnail if it's a local path (not a URL)
+        # Delete local thumbnail if it's a local path (not a URL).
+        # "/thumbs/x.jpg" is the served alias for a sidecar in music_directory.
         thumb = track.get("thumbnail", "")
+        if thumb.startswith("/thumbs/"):
+            from utils.config import get as cfg_get
+            thumb = os.path.join(cfg_get("music_directory", "./music"), thumb[len("/thumbs/"):])
         if thumb and not thumb.startswith("http") and os.path.exists(thumb):
             os.remove(thumb)
 

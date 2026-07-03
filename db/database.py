@@ -59,7 +59,11 @@ def _create_tables(conn):
             discogs_id      TEXT,
             label           TEXT,
             year            INTEGER,
-            fingerprint     TEXT
+            fingerprint     TEXT,
+            album           TEXT,
+            genre           TEXT,
+            bpm             REAL,
+            key             TEXT
         );
 
         CREATE TABLE IF NOT EXISTS history (
@@ -189,12 +193,13 @@ def list_unidentified_tracks(conn) -> list[dict]:
 def update_track_metadata(conn, track_id: str, data: dict) -> None:
     allowed = {
         "title", "artist", "duration", "thumbnail",
-        "status", "mb_recording_id", "discogs_id", "label", "year", "fingerprint"
+        "status", "mb_recording_id", "discogs_id", "label", "year", "fingerprint",
+        "album", "genre", "bpm", "key",
     }
     updates = {k: v for k, v in data.items() if k in allowed and v is not None}
     if not updates:
         return
-    fields = ", ".join(f"{k} = ?" for k in updates)
+    fields = ", ".join(f'"{k}" = ?' for k in updates)
     values = list(updates.values()) + [track_id]
     conn.execute(f"UPDATE tracks SET {fields} WHERE id = ?", values)
 

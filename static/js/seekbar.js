@@ -41,12 +41,12 @@
     return (t && t.textContent.trim()) || 'rolfsound';
   }
 
-  // route a seek to wherever playback actually lives
+  // route a seek to where playback actually lives: o CORE (via bridge)
   function doSeek(frac) {
     frac = clamp01(frac);
     Player.pos = frac;
-    if (window.RolfRemixer && window.RolfRemixer.playing && window.RolfRemixer.seek) {
-      try { window.RolfRemixer.seek(frac); } catch (e) {}
+    if (window.RolfPlayback) {
+      try { window.RolfPlayback.seekFrac(frac); } catch (e) {}
     }
     // keep the elapsed read-outs in step immediately
     var t0 = document.querySelector('.transport .tp-time');

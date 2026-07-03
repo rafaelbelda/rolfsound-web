@@ -1,0 +1,266 @@
+/* ============================================================
+   ROLFSOUND V2 — Intake (importar arquivos) + Ficha técnica
+   · camada de drop: o cofre "toma a medida" do arquivo — retículo
+     com ticks de canto na linguagem de marcas de registro, mira
+     de fios cruzados e leitura de coordenadas ao vivo no cursor.
+   · ficha técnica: dossiê na gaveta do dock (mesma gaveta do
+     editor/álbum/artista) — capa, campos, fatos do arquivo e o
+     manifesto com cada etiqueta crua que o arquivo carrega.
+   ============================================================ */
+
+/* ---------- camada de drop ---------- */
+.intake {
+  position: fixed; inset: 0; z-index: 400;
+  display: grid; place-items: center;
+  background:
+    radial-gradient(rgba(232, 233, 238, 0.075) 1px, transparent 1.3px),
+    rgba(5, 5, 6, 0.88);
+  background-size: 30px 30px, auto;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.18s var(--ease), visibility 0.18s;
+  pointer-events: none;   /* drop é tratado na window; nada intercepta */
+}
+.intake.on { opacity: 1; visibility: visible; }
+
+/* fios cruzados — a mira acompanha o cursor via JS (left/top) */
+.intake-x, .intake-y { position: absolute; background: rgba(232, 233, 238, 0.13); }
+.intake-x { left: 0; right: 0; height: 1px; top: 50%; }
+.intake-y { top: 0; bottom: 0; width: 1px; left: 50%; }
+
+/* leitura de coordenadas junto ao cursor */
+.intake-read {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(14px, 14px);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+  background: rgba(5, 5, 6, 0.72);
+  border: 1px solid color-mix(in oklab, var(--accent) 32%, transparent);
+  border-radius: 7px; padding: 4px 9px;
+  white-space: nowrap;
+}
+
+/* retículo central */
+.intake-ret {
+  position: relative;
+  width: min(560px, 74vw);
+  padding: 58px 44px 50px;
+  text-align: center;
+  border: 1px solid rgba(232, 233, 238, 0.10);
+  border-radius: 24px;
+  background: rgba(12, 12, 15, 0.35);
+  transform: scale(0.985);
+  transition: transform 0.24s var(--ease);
+}
+.intake.on .intake-ret { transform: scale(1); }
+.intake-ret .tick {
+  position: absolute; width: 22px; height: 22px;
+  border: 0 solid var(--accent);
+  animation: intake-breathe 1.8s ease-in-out infinite;
+}
+.intake-ret .tick.tl { left: -1px;  top: -1px;    border-left-width: 2px; border-top-width: 2px;    border-top-left-radius: 12px; }
+.intake-ret .tick.tr { right: -1px; top: -1px;    border-right-width: 2px; border-top-width: 2px;   border-top-right-radius: 12px; }
+.intake-ret .tick.bl { left: -1px;  bottom: -1px; border-left-width: 2px; border-bottom-width: 2px; border-bottom-left-radius: 12px; }
+.intake-ret .tick.br { right: -1px; bottom: -1px; border-right-width: 2px; border-bottom-width: 2px; border-bottom-right-radius: 12px; }
+@keyframes intake-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.intake-eyebrow {
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.26em; text-transform: uppercase; color: var(--accent);
+}
+.intake-title {
+  margin-top: 14px;
+  font-family: var(--font-brand); font-weight: 600;
+  font-size: 40px; letter-spacing: -0.01em; color: var(--ink);
+}
+.intake-sub {
+  margin-top: 10px;
+  font-size: 13.5px; color: var(--ink-dim); line-height: 1.5;
+}
+.intake-fmts {
+  margin-top: 22px;
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint);
+}
+
+/* ---------- gaveta: trilho da sessão de intake ---------- */
+.imp-rail {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 12px 22px 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.imp-rail::-webkit-scrollbar { display: none; }
+.imp-chip {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 12px;
+  border: 1px solid var(--hair); border-radius: 9px;
+  background: none; color: var(--ink-dim); cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  max-width: 240px; white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.imp-chip .nm { overflow: hidden; text-overflow: ellipsis; }
+.imp-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+.imp-chip.on {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 42%, transparent);
+  background: var(--accent-soft);
+}
+.imp-chip .st {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-faint);
+}
+.imp-chip[data-st="enviando"] .st,
+.imp-chip[data-st="lendo"] .st,
+.imp-chip[data-st="identificando"] .st {
+  background: var(--accent);
+  animation: intake-breathe 1.1s ease-in-out infinite;
+}
+.imp-chip[data-st="ok"] .st { background: var(--accent); }
+.imp-chip[data-st="dup"] .st { background: none; border: 1.5px solid var(--accent); }
+.imp-chip[data-st="erro"] .st { background: #d96a6a; }
+.imp-chip.add { color: var(--ink-faint); border-style: dashed; }
+.imp-chip.add:hover { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 42%, transparent); }
+.imp-chip.add svg { width: 12px; height: 12px; }
+
+/* ---------- gaveta: corpo da ficha ---------- */
+.imp-body {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 168px minmax(0, 1fr) 300px;
+  gap: 24px; padding: 18px 22px 20px;
+}
+
+/* coluna da capa + fatos do arquivo */
+.imp-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.imp-art {
+  width: 150px; height: 150px; border-radius: 16px;
+  border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--hair));
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.4);
+  background-size: cover; background-position: center;
+  position: relative; flex: none;
+}
+.imp-art .no-art {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
+}
+.imp-coord {
+  width: 150px; text-align: center;
+  font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: 0.1em; color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.imp-facts {
+  width: 150px; display: flex; flex-direction: column; gap: 7px;
+  padding-top: 10px; border-top: 1px solid var(--hair-soft);
+}
+.imp-fact { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.imp-fact span {
+  font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+}
+.imp-fact b {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  color: var(--ink-dim); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 96px;
+}
+
+/* coluna dos campos — reusa .tpp-fields/.tpp-input do painel editor */
+.imp-fields-wrap { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.imp-fields-wrap::-webkit-scrollbar { display: none; }
+.imp-status {
+  display: flex; align-items: center; gap: 9px;
+  font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+}
+.imp-status::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--ink-faint); flex: none;
+}
+.imp-status.ok { color: var(--accent); }
+.imp-status.ok::before { background: var(--accent); }
+.imp-status.busy { color: var(--accent); }
+.imp-status.busy::before { background: var(--accent); animation: intake-breathe 1.1s ease-in-out infinite; }
+.imp-status.erro { color: #d96a6a; }
+.imp-status.erro::before { background: #d96a6a; }
+
+/* barra de progresso do envio */
+.imp-progress {
+  position: relative; height: 3px; border-radius: 2px;
+  background: var(--hair); overflow: hidden;
+}
+.imp-progress span {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+  background: var(--accent); border-radius: 2px;
+  transition: width 0.2s var(--ease);
+}
+
+/* coluna do manifesto — cada etiqueta crua do arquivo */
+.imp-manifest {
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--hair-soft); padding-left: 24px;
+}
+.imp-manifest-head {
+  flex: none; display: flex; align-items: center; gap: 9px;
+  font-family: var(--font-mono); font-size: 8.5px;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink-faint);
+  padding-bottom: 10px;
+}
+.imp-manifest-head::before {
+  content: ""; width: 5px; height: 5px;
+  border: 1px solid var(--dot-key); border-radius: 50%; flex: none;
+}
+.imp-manifest-head .n {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 9px; color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 32%, transparent);
+  background: var(--accent-soft); border-radius: 6px; padding: 1px 7px;
+}
+.imp-manifest-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.imp-manifest-scroll::-webkit-scrollbar { display: none; }
+.imp-tag {
+  display: grid; grid-template-columns: 108px 1fr; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--hair-soft);
+}
+.imp-tag:last-child { border-bottom: none; }
+.imp-tag .k {
+  font-family: var(--font-mono); font-size: 8.5px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+  overflow-wrap: anywhere; padding-top: 1px;
+}
+.imp-tag .v {
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
+  color: var(--ink-dim); overflow-wrap: anywhere;
+}
+.imp-manifest-empty {
+  padding: 18px 0;
+  font-family: var(--font-mono); font-size: 9.5px; line-height: 1.7;
+  letter-spacing: 0.06em; color: var(--ink-faint);
+}
+
+/* estado vazio / erro da ficha inteira */
+.imp-void {
+  flex: 1; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+}
+
+/* largura apertada: manifesto desce para baixo dos campos */
+@media (max-width: 1180px) {
+  .imp-body { grid-template-columns: 168px minmax(0, 1fr); }
+  .imp-manifest {
+    grid-column: 1 / -1; border-left: none; padding-left: 0;
+    border-top: 1px solid var(--hair-soft); padding-top: 12px;
+    max-height: 150px;
+  }
+}
+
+/* .tpp-btn define display:flex, que venceria o [hidden] do user-agent */
+.tp-panel [hidden] { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .intake, .intake-ret { transition: none; }
+  .intake-ret .tick, .imp-chip .st, .imp-status.busy::before { animation: none; }
+}

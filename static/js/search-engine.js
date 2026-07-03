@@ -167,11 +167,9 @@
       if (window.RolfLoadTransport) window.RolfLoadTransport(el);
     });
     el.addEventListener('dblclick', () => {
-      if (window.RolfRemixer) {
-        window.RolfRemixer.load({ id: t.id, bg: t.bg, title: t.title, artist: t.artist, bpm: t.bpm, key: t.key });
-        window.RolfRemixer.play();
-        const btn = $('.island .isl-btn[data-nav="remixer"]'); if (btn) btn.click();
-      }
+      // toca no core (mesmo caminho do clique) e abre o Remixer ao vivo
+      if (window.RolfLoadTransport) window.RolfLoadTransport(el);
+      const btn = $('.island .isl-btn[data-nav="remixer"]'); if (btn) btn.click();
     });
     return el;
   }

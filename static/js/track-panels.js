@@ -135,19 +135,37 @@
       </div>`;
     wireClose();
     const save = $('[data-edit-save]', inner);
-    if (save) save.addEventListener('click', () => {
+    if (save) save.addEventListener('click', async () => {
       const get = (f) => $(`[data-f="${f}"]`, inner)?.value.trim() || '';
       const v = { title: get('title'), artist: get('artist'), album: get('album'), year: get('year'), genre: get('genre'), bpm: get('bpm'), key: get('key') };
-      // write back to the row
-      row.dataset.title = v.title; row.dataset.artist = v.artist;
-      row.dataset.album = v.album; row.dataset.year = v.year; row.dataset.genre = v.genre;
-      row.dataset.bpm = v.bpm; row.dataset.key = v.key;
-      const t = row.querySelector('.row-title'); if (t) t.textContent = v.title;
-      const a = row.querySelector('.row-artist'); if (a) a.textContent = v.artist;
-      const b = row.querySelector('.row-data'); if (b) b.textContent = v.bpm;
-      const k = row.querySelector('.row-key'); if (k) k.textContent = v.key;
-      closeDrawer();
-      document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: v.title, kicker: 'Salvo' } }));
+      save.disabled = true;
+      try {
+        const res = await fetch(`api/library/${encodeURIComponent(m.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: v.title, artist: v.artist, album: v.album,
+            year: v.year ? Number(v.year) : null,
+            genre: v.genre, bpm: v.bpm ? Number(v.bpm) : null, key: v.key,
+          }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        // write back to the row only after the server confirms the save
+        row.dataset.title = v.title; row.dataset.artist = v.artist;
+        row.dataset.album = v.album; row.dataset.year = v.year; row.dataset.genre = v.genre;
+        row.dataset.bpm = v.bpm; row.dataset.key = v.key;
+        const t = row.querySelector('.row-title'); if (t) t.textContent = v.title;
+        const a = row.querySelector('.row-artist'); if (a) a.textContent = v.artist;
+        const b = row.querySelector('.row-data'); if (b) b.textContent = v.bpm;
+        const k = row.querySelector('.row-key'); if (k) k.textContent = v.key;
+        closeDrawer();
+        document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: v.title, kicker: 'Salvo' } }));
+      } catch (e) {
+        console.error('save track metadata failed:', e);
+        document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Não foi possível salvar', kicker: 'Erro' } }));
+      } finally {
+        save.disabled = false;
+      }
     });
     // autocomplete on artist + album (never on track title)
     attachAutocomplete($('[data-f="artist"]', inner), uniqueArtists);

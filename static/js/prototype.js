@@ -68,7 +68,7 @@
   const tp = {
     cover: $('.transport .tp-cover'),
     title: $('.transport .tp-title-text'),
-    artist: $('.transport .tp-artist'),
+    sub: $('.transport .tp-artist'),
   };
 
   function trackData(row) {
@@ -92,33 +92,49 @@
     if (vt) vt.textContent = mmss(Player.dur);
   }
 
-  function loadTransport(row) {
-    const d = trackData(row);
-    setDuration(d.dur);
+  // showTrack: aplica APENAS os visuais da faixa (transporte, marcador
+  // ativo, viz, remixer). Nunca fala com o servidor — é chamado tanto
+  // pelos cliques (otimista) quanto pelo playback.js ao reconciliar
+  // o estado real vindo do core.
+  function showTrack(d) {
+    setDuration(+d.dur || 0);
     applyAccent(d.bg);
     lastTrack = d;
     if (tp.cover) tp.cover.style.background = d.bg;
     if (tp.title) tp.title.textContent = d.title;
-    if (tp.sub) tp.sub.innerHTML =
-      `${d.artist} <span style="width:3px;height:3px;border-radius:50%;background:var(--ink-faint)"></span> ${d.bpm} BPM <span class="tag" style="margin-left:2px">${d.key}</span>`;
-    // move the active marker + eq into this row
+    if (tp.sub) tp.sub.innerHTML = d.artist
+      ? `${d.artist}${d.bpm ? ` <span style="width:3px;height:3px;border-radius:50%;background:var(--ink-faint)"></span> ${d.bpm} BPM` : ''}${d.key ? ` <span class="tag" style="margin-left:2px">${d.key}</span>` : ''}`
+      : '';
+    // move the active marker + eq into the matching acervo row
     $$('.row').forEach((r) => {
       r.classList.remove('active');
       const c = r.querySelector('.row-coord');
       const eq = c && c.querySelector('.eq');
       if (eq) eq.remove();
     });
-    row.classList.add('active');
-    const coordEl = row.querySelector('.row-coord');
-    if (coordEl && !coordEl.querySelector('.eq')) {
-      const eq = document.createElement('span');
-      eq.className = 'eq';
-      eq.innerHTML = '<i></i><i></i><i></i>';
-      coordEl.prepend(eq);
+    const match = $$('.screen[data-screen="acervo"] .row').find((r) => r.dataset.id === d.id);
+    if (match) {
+      match.classList.add('active');
+      const coordEl = match.querySelector('.row-coord');
+      if (coordEl && !coordEl.querySelector('.eq')) {
+        const eq = document.createElement('span');
+        eq.className = 'eq';
+        eq.innerHTML = '<i></i><i></i><i></i>';
+        coordEl.prepend(eq);
+      }
     }
-    setPlaying(true);
     syncViz(d);
     syncRemixer(d);
+  }
+
+  // loadTransport: visuais otimistas + manda o core tocar a faixa.
+  // O áudio sai no core — o navegador nunca reproduz nada.
+  function loadTransport(row) {
+    const d = trackData(row);
+    showTrack(d);
+    setPlaying(true);
+    Player.pos = 0;
+    if (window.RolfPlayback) window.RolfPlayback.playTrack(d.id, +d.dur || 0);
   }
 
   // Remixer is a LIVE performance surface over the now-playing track —
@@ -251,95 +267,54 @@
     setQueue(false);
   });
 
-  // play a queued track → load into transport, drop it from the queue
+  // A fila REAL vive no core. Os handlers abaixo fazem a mutação otimista
+  // no DOM e mandam a ação ao servidor; o poll do playback.js re-renderiza
+  // a lista a partir do estado verdadeiro (via RolfQueueRowHtml).
+  function queueAbsIndex(row) {
+    // posição absoluta na fila do core: gravada pelo render (data-qindex);
+    // fallback: posição visual após o índice atual
+    if (row.dataset.qindex != null && row.dataset.qindex !== '') return +row.dataset.qindex;
+    const rows = $$('.tpq-row', queueList);
+    const vis = rows.indexOf(row);
+    const cur = window.RolfPlayback ? window.RolfPlayback.state.currentQueueIdx : -1;
+    return cur + 1 + Math.max(0, vis);
+  }
+
+  // play a queued track → core toca por índice; remove otimista da lista
   if (queueList) queueList.addEventListener('click', (e) => {
     const x = e.target.closest('.tpq-x');
     const row = e.target.closest('.tpq-row');
     if (!row) return;
+    const abs = queueAbsIndex(row);
     if (x) {                       // remove from queue
       row.style.opacity = '0';
       setTimeout(() => { row.remove(); renumberQueue(); }, 140);
+      if (window.RolfPlayback) window.RolfPlayback.queueRemove(abs);
       return;
     }
-    playQueueRow(row);
-  });
-
-  // play raw track data (from queue / auto-advance) and restart playback
-  function playData(d) {
-    setDuration(+d.dur || 0);
-    applyAccent(d.bg);
-    lastTrack = d;
-    if (tp.cover) tp.cover.style.background = d.bg;
-    if (tp.title) tp.title.textContent = d.title;
-    if (tp.sub) tp.sub.innerHTML =
-      `${d.artist} <span style="width:3px;height:3px;border-radius:50%;background:var(--ink-faint)"></span> ${d.bpm} BPM <span class="tag" style="margin-left:2px">${d.key}</span>`;
-    // sync the active marker with a matching acervo row if present
-    $$('.row').forEach((r) => { r.classList.remove('active'); const eq = r.querySelector('.row-coord .eq'); if (eq) eq.remove(); });
-    const match = $$('.screen[data-screen="acervo"] .row').find((r) => r.dataset.id === d.id);
-    if (match) {
-      match.classList.add('active');
-      const ce = match.querySelector('.row-coord');
-      if (ce && !ce.querySelector('.eq')) { const eq = document.createElement('span'); eq.className = 'eq'; eq.innerHTML = '<i></i><i></i><i></i>'; ce.prepend(eq); }
-    }
-    setPlaying(true);
-    syncViz(d);
-    syncRemixer(d);
-    Player.pos = 0;
-  }
-  function playQueueRow(row) {
     const title = row.dataset.title;
-    playData({
-      bg: row.dataset.bg, title: row.dataset.title, artist: row.dataset.artist,
-      bpm: row.dataset.bpm, id: row.dataset.id, key: row.dataset.key,
-      dur: row.dataset.dur,
-    });
+    if (window.RolfPlayback) window.RolfPlayback.playQueueIndex(abs);
     row.remove();
     renumberQueue();
     toast(title, 'Tocando');
-  }
-
-  /* ---------------- prev / next / auto-advance ---------------- */
-  function visibleAcervoRows() {
-    return $$('.screen[data-screen="acervo"] .row')
-      .filter((r) => !r.classList.contains('is-collapsed') && getComputedStyle(r).display !== 'none');
-  }
-  function nextTrack() {
-    const q = queueList && queueList.querySelector('.tpq-row');
-    if (q) { playQueueRow(q); return; }
-    const list = visibleAcervoRows(); if (!list.length) return;
-    const i = list.findIndex((r) => r.classList.contains('active'));
-    loadTransport(list[(i + 1 + list.length) % list.length]);
-    Player.pos = 0;
-  }
-  function prevTrack() {
-    if (Player.pos > 0.04) { Player.pos = 0; return; }   // restart current first
-    const list = visibleAcervoRows(); if (!list.length) return;
-    let i = list.findIndex((r) => r.classList.contains('active'));
-    if (i < 0) i = 0;
-    loadTransport(list[(i - 1 + list.length) % list.length]);
-    Player.pos = 0;
-  }
-  $$('.tp-btn[aria-label="Próxima"]').forEach((b) => b.addEventListener('click', nextTrack));
-  $$('.tp-btn[aria-label="Anterior"]').forEach((b) => b.addEventListener('click', prevTrack));
-  document.addEventListener('rolf:ended', nextTrack);
+  });
 
   const queueClear = $('[data-queue-clear]');
   if (queueClear) queueClear.addEventListener('click', () => {
     $$('.tpq-row', queueList).forEach((r, i) => { setTimeout(() => { r.style.opacity = '0'; setTimeout(() => r.remove(), 130); }, i * 30); });
     setTimeout(() => { renumberQueue(); toast('Fila esvaziada', 'Limpar'); }, 200);
+    if (window.RolfPlayback) window.RolfPlayback.queueClear();
   });
+  // shuffle é um MODO do core (não um embaralhamento local da lista)
   const queueShuffle = $('[data-queue-shuffle]');
   if (queueShuffle) queueShuffle.addEventListener('click', () => {
-    const rows = $$('.tpq-row', queueList);
-    for (let i = rows.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      queueList.insertBefore(rows[j], rows[i].nextSibling);
+    if (window.RolfPlayback) {
+      window.RolfPlayback.toggleShuffle();
+      toast(window.RolfPlayback.state.shuffle ? 'Shuffle ligado' : 'Shuffle desligado', 'Fila');
     }
-    renumberQueue();
-    toast('Fila embaralhada', 'Shuffle');
   });
 
-  // "Adicionar à fila" from the row context menu
+  // "Adicionar à fila" from the row context menu — otimista + servidor
   function addToQueue(d) {
     if (!queueList) return;
     const dur = d.dur > 0 ? mmss(d.dur) : '—';
@@ -358,6 +333,7 @@
       '<button class="tpq-x" aria-label="Remover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
     queueList.appendChild(row);
     renumberQueue();
+    if (window.RolfPlayback) window.RolfPlayback.queueAdd(d.id);
   }
 
   /* favoritar · renomear · remover — real row mutations */
@@ -399,7 +375,7 @@
     const title = trackData(row).title;
     row.style.transition = 'opacity 0.15s, transform 0.15s';
     row.style.opacity = '0'; row.style.transform = 'translateX(-8px)';
-    setTimeout(() => { row.remove(); if (wasActive) nextTrack(); }, 160);
+    setTimeout(() => { row.remove(); if (wasActive && window.RolfPlayback) window.RolfPlayback.next(); }, 160);
     toast(title, 'Removida do cofre');
   }
 
@@ -415,6 +391,7 @@
       case 'rename':  if (row) startRename(row); break;
       case 'remove':  if (row) removeRow(row); break;
       case 'edit': case 'album': case 'artist': break;  // handled by track-panels.js
+      case 'import': case 'dossier': break;  // handled by importer.js
       case 'playlist': break;  // handled by playlists.js
       default:        toast(label || 'Ação', '·');
     }
@@ -430,17 +407,18 @@
     document.body.classList.toggle('paused', !v);
     $$('.tp-play, .st-play, .rl-play').forEach((b) => { b.innerHTML = v ? PAUSE_ICON : PLAY_ICON; });
   }
-  $$('.tp-play, .st-play, .rl-play').forEach((b) => {
-    b.addEventListener('click', () => setPlaying(!playing));
-  });
+  // Os cliques de play/pause/prev/next são de responsabilidade do
+  // playback.js (que os liga aos endpoints do core). Aqui só mantemos
+  // o renderizador visual — exposto adiante como RolfSetPlaying.
 
-  /* scrub bars — seek the shared playback position */
+  /* scrub bars — visual imediato + seek real no core (via bridge) */
   function seekTo(frac) {
     Player.pos = clamp01(frac);
     document.querySelectorAll('.tp-fill').forEach((f) => { f.style.width = (Player.pos * 100).toFixed(2) + '%'; });
     document.querySelectorAll('.transport .tp-time')[0] && (document.querySelectorAll('.transport .tp-time')[0].textContent = mmss(Player.pos * Player.dur));
     const ve = $('[data-viz-elapsed]'); if (ve) ve.textContent = mmss(Player.pos * Player.dur);
-    // NOTE: remixer .wave-playhead is positioned by remixer-engine.js (view-window aware)
+    if (window.RolfPlayback) window.RolfPlayback.seekFrac(Player.pos);
+    // NOTE: remixer .wave-playhead is positioned via Player.pos (prototype-motion)
   }
   $$('.tp-bar').forEach((bar) => {
     bar.addEventListener('click', (e) => {
@@ -448,18 +426,22 @@
       seekTo((e.clientX - r.left) / r.width);
     });
   });
-  // remixer waveform interaction is fully owned by remixer-engine.js (seek/loop/cue/zoom)
+  // remixer waveform interaction is owned by remixer-live.js (seek no core)
 
-  /* volume — draggable */
+  /* volume — draggable; o volume REAL é do core (POST /api/volume) */
   const volBar = $('.tp-vol-bar');
   const volFill = $('.tp-vol-fill');
-  function setVol(frac) {
+  function setVol(frac) {                  // visual apenas (usado pelo poll)
     Player.volume = clamp01(frac);
     if (volFill) volFill.style.width = (Player.volume * 100).toFixed(0) + '%';
   }
   if (volBar) {
     let vdrag = false;
-    const fromEv = (e) => { const r = volBar.getBoundingClientRect(); setVol((e.clientX - r.left) / r.width); };
+    const fromEv = (e) => {
+      const r = volBar.getBoundingClientRect();
+      setVol((e.clientX - r.left) / r.width);
+      if (window.RolfPlayback) window.RolfPlayback.setVolume(Player.volume);
+    };
     volBar.style.cursor = 'pointer';
     volBar.addEventListener('pointerdown', (e) => { vdrag = true; volBar.setPointerCapture(e.pointerId); fromEv(e); });
     volBar.addEventListener('pointermove', (e) => { if (vdrag) fromEv(e); });
@@ -481,8 +463,9 @@
     const b = e.target.closest('button'); if (!b) return;
     $$('button', g).forEach((x) => x.classList.remove('active')); b.classList.add('active');
   }));
-  // independent toggles
-  $$('.mod-toggle, .tp-btn[aria-label="Loop"], .tp-btn[aria-label="Shuffle"], .tp-btn[aria-label="Repeat"]').forEach((b) => {
+  // independent toggles (Shuffle/Repeat do transporte são modos do CORE —
+  // ligados pelo playback.js aos endpoints /api/queue/shuffle e /repeat)
+  $$('.mod-toggle, .tp-btn[aria-label="Loop"]').forEach((b) => {
     b.addEventListener('click', () => b.classList.toggle('on'));
   });
 
@@ -558,6 +541,14 @@
      loader + track parser so it can play results. */
   window.RolfLoadTransport = loadTransport;
   window.RolfTrackData = trackData;
+
+  /* ---------------- contratos p/ playback.js (bridge → core) ----------
+     Renderizadores visuais puros — o bridge chama estes hooks quando o
+     estado REAL do core chega pelo poll de /api/status. */
+  window.RolfShowTrack = showTrack;
+  window.RolfSetPlaying = setPlaying;
+  window.RolfSetVol = setVol;
+  window.RolfSetDuration = setDuration;
 
   /* ---------------- capturar / rip ---------------- */
   // source segmented

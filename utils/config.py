@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 _DEFAULTS = {
-    "core_url":                  "http://localhost:8765",
+    # 127.0.0.1 (não "localhost"): resolver localhost inclui ::1 e o
+    # happy-eyeballs do httpx espera 250ms no ::1 antes de cair no IPv4 —
+    # isso custava ~260ms em CADA chamada ao core.
+    "core_url":                  "http://127.0.0.1:8765",
     "server_port":               8766,
     "log_file_level":           logging.INFO,
     "music_directory":           "./music",

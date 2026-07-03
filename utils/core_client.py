@@ -121,15 +121,27 @@ async def get_monitor_samples(since: int = 0) -> dict | None:
     return await _get("/monitor/samples", {"since": since})
 async def get_events(since: int = 0):     return await _get("/events", {"since": since})
 
-async def play(filepath=None, track_id=None) -> dict | None:
+async def play(filepath=None, track_id=None, index=None) -> dict | None:
+    # index: play by queue position (core resolves the track); requires no filepath.
     p = {}
-    if filepath:  p["filepath"]  = filepath
-    if track_id:  p["track_id"]  = track_id
+    if filepath:          p["filepath"] = filepath
+    if track_id:          p["track_id"] = track_id
+    if index is not None: p["index"]    = index
     return await _post("/play", p)
 
 async def pause()                    -> dict | None: return await _post("/pause")
 async def skip()                     -> dict | None: return await _post("/skip")
 async def seek(position: float)      -> dict | None: return await _post("/seek", {"position": position})
+async def set_volume(volume: float)  -> dict | None: return await _post("/volume", {"volume": volume})
+
+async def remix_set(pitch_semitones=None, tempo_ratio=None) -> dict | None:
+    # Partial update: core preserves whichever param is omitted.
+    p = {}
+    if pitch_semitones is not None: p["pitch_semitones"] = pitch_semitones
+    if tempo_ratio     is not None: p["tempo_ratio"]     = tempo_ratio
+    return await _post("/remix", p)
+
+async def remix_reset()              -> dict | None: return await _post("/remix/reset")
 
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")

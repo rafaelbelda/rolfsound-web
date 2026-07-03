@@ -3,29 +3,37 @@
 Polls rolfsound-core for events and dispatches them to registered handlers.
 Runs in a dedicated background daemon thread.
 
-Since core_client is now fully async, each poll call uses asyncio.run()
-to execute the coroutine from the background thread without touching the
-main uvicorn event loop. This is safe because:
-  - asyncio.run() creates and tears down a fresh event loop per call
-  - The thread never shares state with the uvicorn loop
-  - Handlers are sync and dispatched directly in the poller thread
+TRANSPORTE HTTP
+───────────────
+Esta thread usa um httpx.Client SÍNCRONO próprio — nunca o AsyncClient
+compartilhado do core_client. O padrão antigo (asyncio.run() por chamada
+sobre o client compartilhado) funcionava por acidente enquanto o core
+fechava a conexão a cada request (HTTP/1.0); com keep-alive, as conexões
+criadas no event-loop descartável da thread iam parar no pool do uvicorn
+e explodiam com "bound to a different event loop" — podendo derrubar
+chamadas de playback. Thread bloqueante → client bloqueante.
 
 POLL_INTERVAL is intentionally conservative — this is for server-side
 event tracking (stream counts, history), not the UI. The dashboard has
 its own polling via /api/status and /api/monitor.
 """
 
-import asyncio
 import logging
 import threading
 import time
 from typing import Callable
 
-from utils import core_client
+import httpx
+
+from utils.config import get as cfg_get
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.0   # seconds — conservative, this is background bookkeeping
+
+# Mesmos timeouts do core_client: core é local, mas pode estar sob pressão
+# do sounddevice durante transições de playback.
+_TIMEOUT = httpx.Timeout(5.0, connect=2.0)
 
 
 class EventPoller:
@@ -34,12 +42,14 @@ class EventPoller:
         self._handlers: dict[str, list[Callable]] = {}
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._http: httpx.Client | None = None
 
     def on(self, event_type: str, handler: Callable) -> None:
         self._handlers.setdefault(event_type, []).append(handler)
 
     def start(self) -> None:
         self._stop_event.clear()
+        self._http = httpx.Client(timeout=_TIMEOUT)
         self._thread = threading.Thread(
             target=self._poll_loop,
             name="event-poller",
@@ -50,6 +60,12 @@ class EventPoller:
 
     def stop(self) -> None:
         self._stop_event.set()
+        if self._http is not None:
+            try:
+                self._http.close()
+            except Exception:
+                pass
+            self._http = None
         logger.info("EventPoller stopped")
 
     def _poll_loop(self) -> None:
@@ -60,17 +76,24 @@ class EventPoller:
                 logger.error(f"EventPoller error: {e}")
             time.sleep(POLL_INTERVAL)
 
-    def _poll_once(self) -> None:
-        # asyncio.run() is safe here — we're in a dedicated daemon thread,
-        # not in the uvicorn event loop thread.
+    def _fetch_events(self) -> dict | None:
+        if self._http is None:
+            return None
+        url = cfg_get("core_url", "http://127.0.0.1:8765").rstrip("/") + "/events"
         try:
-            result = asyncio.run(
-                core_client.get_events(since=self._last_event_id)
-            )
+            r = self._http.get(url, params={"since": self._last_event_id})
+            r.raise_for_status()
+            return r.json()
+        except httpx.ConnectError:
+            logger.debug("EventPoller: core unreachable")
+        except httpx.TimeoutException:
+            logger.debug("EventPoller: core timeout")
         except Exception as e:
             logger.debug(f"EventPoller get_events failed: {e}")
-            return
+        return None
 
+    def _poll_once(self) -> None:
+        result = self._fetch_events()
         if result is None:
             return
 
