@@ -34,6 +34,9 @@ _DEFAULTS = {
     "cleanup_min_streams":       3,
     "cleanup_days":              30,
     "allow_guest_queue_control": True,
+    # Mix de stems (mudo/solo/fader) na troca de faixa: False = resetar
+    # (mesmo espírito do reset_on_track_change do remix). Repassado ao core.
+    "stems_keep_mix":            False,
     # YouTube Data API v3 key — enables fast reliable search.
     # Leave empty to use yt-dlp as fallback.
     # Get a free key at: console.cloud.google.com

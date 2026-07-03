@@ -121,12 +121,15 @@ async def get_monitor_samples(since: int = 0) -> dict | None:
     return await _get("/monitor/samples", {"since": since})
 async def get_events(since: int = 0):     return await _get("/events", {"since": since})
 
-async def play(filepath=None, track_id=None, index=None) -> dict | None:
+async def play(filepath=None, track_id=None, index=None, stems=None, position=None) -> dict | None:
     # index: play by queue position (core resolves the track); requires no filepath.
+    # stems: {role: abspath} da variação Stem Ready — o core toca multipista.
     p = {}
     if filepath:          p["filepath"] = filepath
     if track_id:          p["track_id"] = track_id
     if index is not None: p["index"]    = index
+    if stems:             p["stems"]    = stems
+    if position:          p["position"] = position
     return await _post("/play", p)
 
 async def pause()                    -> dict | None: return await _post("/pause")
@@ -143,13 +146,26 @@ async def remix_set(pitch_semitones=None, tempo_ratio=None) -> dict | None:
 
 async def remix_reset()              -> dict | None: return await _post("/remix/reset")
 
+async def stems_mix(levels=None, mutes=None, solos=None) -> dict | None:
+    # Partial update: o core preserva o que for omitido.
+    p = {}
+    if levels is not None: p["levels"] = levels
+    if mutes  is not None: p["mutes"]  = mutes
+    if solos  is not None: p["solos"]  = solos
+    return await _post("/stems/mix", p)
+
+async def stems_keep_mix(enabled: bool) -> dict | None:
+    return await _post("/stems/keep_mix", {"enabled": enabled})
+
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
 
-async def queue_add(track_id, filepath, title="", thumbnail="", artist="", position=None) -> dict | None:
+async def queue_add(track_id, filepath, title="", thumbnail="", artist="", position=None, stems=None) -> dict | None:
     p = {"track_id": track_id, "filepath": filepath, "title": title, "thumbnail": thumbnail, "artist": artist}
     if position is not None:
         p["position"] = position
+    if stems:
+        p["stems"] = stems
     return await _post("/queue/add", p)
 
 async def queue_remove(position: int) -> dict | None: return await _post("/queue/remove", {"position": position})

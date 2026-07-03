@@ -47,10 +47,14 @@ async def get_queue():
 
 @router.post("/queue/add")
 async def add_to_queue(req: AddRequest):
-    # Resolve filepath and thumbnail from library if not provided
+    # Resolve filepath and thumbnail from library if not provided.
+    # Variação Stem Ready: os stems resolvidos viajam com a entrada da fila,
+    # para play_next/repeat tocarem multipista sem a web no meio.
     artist = ""
-    if req.track_id and (not req.filepath or not req.thumbnail):
+    stems = None
+    if req.track_id:
         from db import database
+        from api.routes.stems import resolve_stems
         conn = database.get_connection()
         try:
             track = database.get_track(conn, req.track_id)
@@ -63,12 +67,14 @@ async def add_to_queue(req: AddRequest):
                 if not req.thumbnail:
                     req.thumbnail = track.get("thumbnail", "")
                 artist = track.get("artist", "")
+                stems = resolve_stems(conn, track)
         finally:
             conn.close()
 
     result = await core_client.queue_add(
         req.track_id, req.filepath, req.title,
         thumbnail=req.thumbnail, artist=artist, position=req.position,
+        stems=stems,
     )
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")

@@ -212,6 +212,14 @@ async def delete_track(track_id: str):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
 
+        # Variação Stem Ready: file_path/thumbnail/sidecars pertencem ao
+        # MASTER — apagar arquivos aqui destruiria o áudio da original.
+        # Só a linha da variação sai (sidecars ficam).
+        if track.get("stem_source_id"):
+            database.delete_stem_variant(conn, track_id)
+            conn.commit()
+            return {"ok": True, "deleted": track_id}
+
         # Delete audio file
         filepath = track.get("file_path")
         if filepath and os.path.exists(filepath):

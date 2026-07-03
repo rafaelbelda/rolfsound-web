@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
     finally:
         conn.close()
 
+    # Variações Stem Ready: faixa com ≥2 stems e sem variação ganha a sua.
+    stems.backfill_variants_on_startup()
+
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
     manager = init_manager(database.get_connection)
@@ -80,6 +83,9 @@ async def lifespan(app: FastAPI):
     # Start the monitor accumulator — polls core's /monitor/samples and fans
     # out to connected SSE clients via /api/monitor/stream.
     get_accumulator().start()
+
+    # O core guarda o flag só em runtime — reenvia a preferência na subida.
+    await core_client.stems_keep_mix(bool(cfg.get("stems_keep_mix", False)))
 
     # ── Restore persisted queue state ─────────────────────────────────
     await _restore_queue_state()
@@ -121,6 +127,7 @@ async def _restore_queue_state() -> None:
             track.get("title", ""),
             thumbnail=track.get("thumbnail", ""),
             artist=track.get("artist", ""),
+            stems=track.get("stems"),
         )
 
     repeat_mode = state.get("repeat_mode", "off")
@@ -239,10 +246,18 @@ def _enrich_status(raw: dict) -> dict:
     title     = os.path.basename(current_filepath) if current_filepath else ""
     artist    = ""
     thumbnail = ""
-    track_id  = os.path.basename(current_filepath) if current_filepath else ""
+
+    # Precedência: o track_id do now_playing GANHA do lookup por file_path.
+    # A variação Stem Ready compartilha o file_path do master, então o path
+    # é ambíguo — só o core sabe qual das duas está tocando.
+    np = pb.get("now_playing", {})
+    track_id = (np.get("track_id") if np else "") or (
+        os.path.basename(current_filepath) if current_filepath else ""
+    )
 
     if current_filepath:
-        if current_filepath == _track_cache["path"]:
+        cache_key = (track_id, current_filepath)
+        if cache_key == _track_cache["path"]:
             cached = _track_cache["data"]
             track_id  = cached["track_id"]  or track_id
             title     = cached["title"]     or title
@@ -252,31 +267,36 @@ def _enrich_status(raw: dict) -> dict:
             try:
                 conn = database.get_connection()
                 try:
-                    row = conn.execute(
-                        "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
-                        (current_filepath,)
-                    ).fetchone()
+                    # Busca por id primeiro (não ambíguo); path é o fallback.
+                    row = None
+                    if np and np.get("track_id"):
+                        row = conn.execute(
+                            "SELECT id, title, artist, thumbnail FROM tracks WHERE id = ?",
+                            (np["track_id"],)
+                        ).fetchone()
+                    if not row:
+                        row = conn.execute(
+                            "SELECT id, title, artist, thumbnail FROM tracks WHERE file_path = ?",
+                            (current_filepath,)
+                        ).fetchone()
                     if row:
                         track_id  = row["id"]        or track_id
                         title     = row["title"]      or title
                         artist    = row["artist"]     or ""
                         thumbnail = row["thumbnail"]  or ""
-                    _track_cache["path"] = current_filepath
+                    _track_cache["path"] = cache_key
                     _track_cache["data"] = {"track_id": track_id, "title": title, "artist": artist, "thumbnail": thumbnail}
                 finally:
                     conn.close()
             except Exception as e:
                 logger.debug(f"Status enrichment DB lookup failed: {e}")
 
-    np = pb.get("now_playing", {})
     if np:
-        if not track_id or track_id == os.path.basename(current_filepath):
-            track_id  = np.get("track_id")  or track_id
-        if not title   or title   == os.path.basename(current_filepath):
-            title     = np.get("title")     or title
+        if not title or title == os.path.basename(current_filepath):
+            title = np.get("title") or title
         if not thumbnail:
             thumbnail = np.get("thumbnail") or ""
- 
+
     queue_tracks = []
     for t in q.get("tracks", []):
         queue_tracks.append({

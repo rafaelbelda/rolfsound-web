@@ -1,19 +1,23 @@
 /* ============================================================
-   ROLFSOUND V2 — STEMS (versão multipista da faixa)
+   ROLFSOUND V2 — STEMS (versão multipista "Stem Ready")
    Quatro papéis fixos: vocals · drums · bass · other.
 
-   · Botão "Stems" na barra da faixa do Remixer:
-       sem stems  → abre a gaveta de intake (upload dos arquivos)
-       2+ stems   → liga/desliga as lanes na waveform
-   · Lanes: a waveform única se abre em 4 camadas coloridas dentro
-     do MESMO .wave-frame — playhead, seek e loop continuam valendo.
-     Mudo/solo/gain são visuais nesta fase (como Filtro/EQ): a
-     reprodução multipista chega quando o core ganhar mix de stems.
-   · Gaveta (dock): 4 slots com drag & drop; múltiplos arquivos são
-     distribuídos pelo nome (ex.: *vocals*, *drums*); sobe via
-     POST /api/library/{id}/stems/{role}.
-   · Fonte da verdade dos papéis presentes: data-stems na row do
-     Acervo (bootstrap → render.js); este módulo a mantém em dia.
+   · O "modo stems" morreu: os stems são uma FAIXA-VARIAÇÃO no
+     grupo de versões da original. Tocar a variação = multipista,
+     sempre; tocar a original = master, sempre.
+   · Lanes SEMPRE visíveis quando a faixa carregada no Remixer é
+     a variação; mudo/solo/gain são AO VIVO (POST /api/remix/stems
+     com debounce ~120ms quando a variação está tocando) e
+     sincronizam via rolf:status → status.stems (guard 2.5s
+     pós-gesto local, padrão do remixer-live).
+   · Botão "Stems" da barra virou gestão: abre a gaveta (que opera
+     sempre sobre a ORIGINAL — dona dos sidecars).
+   · Gaveta (dock): 4 slots com drag & drop. Ao completar 2 camadas
+     a variação nasce sozinha (o servidor devolve `variant`);
+     cair para <2 desfaz. Este módulo espelha isso em
+     RolfsoundData.tracks/groups + selo "N versões" da original.
+   · Fonte da verdade dos papéis: RolfsoundData (a variação não
+     tem row no Acervo — a original fica limpa, sem badge).
    ============================================================ */
 (function () {
   'use strict';
@@ -45,75 +49,62 @@
 
   /* ---------- estado ---------- */
   let trackId = '';                 // faixa carregada no Remixer (via rolf:track)
-  let lanesOn = false;
-  const laneUi = {};                // {role: {vol, mute, solo}} — por sessão
+  let playingId = '';               // faixa TOCANDO no core (via rolf:status)
+  let lanesOn = false;              // derivado: a faixa carregada é a variação
+  let lastGestureMs = 0;            // guard: ignora sync do servidor pós-gesto
+  let mixTimer = null;              // debounce do POST /api/remix/stems
+  const laneUi = {};                // {role: {vol, mute, solo}} — espelho do mixer
   ROLES.forEach((r) => { laneUi[r.id] = { vol: 1, mute: false, solo: false }; });
 
   const rowFor = (id) =>
     id ? $('.screen[data-screen="acervo"] .row[data-id="' + cssEsc(id) + '"]') : null;
 
+  const tracksData = () => ((window.RolfsoundData || {}).tracks || []);
+  const dataTrack = (id) => tracksData().find((x) => x.id === id);
+  // variação Stem Ready? (stems_of = id da original dona dos sidecars)
+  const isVariant = (id) => { const t = dataTrack(id); return !!(t && t.stems_of); };
+  // a gaveta e os sidecars pertencem à ORIGINAL
+  const sourceOf = (id) => { const t = dataTrack(id); return (t && t.stems_of) || id; };
+  const variantOf = (sourceId) => tracksData().find((t) => t.stems_of === sourceId);
+
   function rolesFor(id) {
+    const t = dataTrack(id);
+    if (t) return (t.stems || []).slice();
     const row = rowFor(id);
     if (row) return (row.dataset.stems || '').split(/\s+/).filter(Boolean);
-    const t = ((window.RolfsoundData || {}).tracks || []).find((x) => x.id === id);
-    return (t && t.stems) || [];
-  }
-
-  /* espelha os papéis na row (dataset + badge) e no RolfsoundData */
-  function updateRowStems(id, roles) {
-    const row = rowFor(id);
-    if (row) {
-      row.dataset.stems = roles.join(' ');
-      const tags = row.querySelector('.row-tags');
-      if (tags && window.RolfStemsBadgeHtml) {
-        const old = tags.querySelector('.tag.stems');
-        if (old) old.remove();
-        const html = window.RolfStemsBadgeHtml(roles);
-        if (html) {
-          const state = tags.querySelector('.tag');        // tag de estado vem primeiro
-          if (state) state.insertAdjacentHTML('afterend', html);
-          else tags.insertAdjacentHTML('afterbegin', html);
-        }
-      }
-    }
-    const t = ((window.RolfsoundData || {}).tracks || []).find((x) => x.id === id);
-    if (t) t.stems = roles.slice();
+    return [];
   }
 
   /* ============================================================
-     BOTÃO na barra da faixa
+     BOTÃO na barra da faixa — virou gestão (abre a gaveta);
+     aceso quando a faixa carregada é a variação
      ============================================================ */
   function updateButton() {
     const btn = $('[data-stems-btn]');
     if (!btn) return;
-    const roles = trackId ? rolesFor(trackId) : [];
+    const variant = trackId ? isVariant(trackId) : false;
+    const roles = variant ? rolesFor(trackId) : [];
     btn.classList.toggle('disabled', !trackId);
-    btn.classList.toggle('none', !!trackId && !roles.length);
-    btn.classList.toggle('on', lanesOn);
-    btn.setAttribute('aria-pressed', lanesOn ? 'true' : 'false');
+    btn.classList.toggle('none', !!trackId && !variant);
+    btn.classList.toggle('on', variant);
+    btn.setAttribute('aria-pressed', variant ? 'true' : 'false');
     btn.title = !trackId ? 'Selecione uma faixa para usar stems'
-      : !roles.length ? 'Adicionar stems — envie as 4 camadas da faixa'
-      : lanesOn ? 'Desativar o modo Stems' : 'Ativar o modo Stems';
+      : variant ? 'Versão Stem Ready — gerenciar camadas'
+      : 'Gerenciar camadas de stems desta faixa';
     const ct = $('[data-stems-count]', btn);
     if (ct) {
-      if (roles.length && roles.length < 4) { ct.hidden = false; ct.textContent = roles.length + '/4'; }
+      if (variant && roles.length && roles.length < 4) { ct.hidden = false; ct.textContent = roles.length + '/4'; }
       else ct.hidden = true;
     }
   }
 
   function onButtonClick() {
     if (!trackId) { toast('Selecione uma faixa no Acervo', 'Stems'); return; }
-    const roles = rolesFor(trackId);
-    if (roles.length < 2) {
-      if (roles.length === 1) toast('Adicione pelo menos 2 camadas para ativar', 'Stems');
-      openDrawer(trackId);
-      return;
-    }
-    setLanes(!lanesOn);
+    openDrawer(sourceOf(trackId));
   }
 
   /* ============================================================
-     LANES — a waveform se abre em camadas
+     LANES — sempre visíveis quando a faixa carregada é a variação
      ============================================================ */
   function waveFrame() { return $('.rmx .wave-frame'); }
 
@@ -163,8 +154,8 @@
           '<canvas></canvas>' + chip +
           '<div class="stem-ctl">' +
             `<span class="stem-fader" title="Gain — ${role.label}"><span class="ff"></span><span class="fh"></span></span>` +
-            '<button class="stem-ms mute" title="Mudo">M</button>' +
-            '<button class="stem-ms solo" title="Solo">S</button>' +
+            '<button class="stem-ms mute' + (ui.mute ? ' on' : '') + '" title="Mudo">M</button>' +
+            '<button class="stem-ms solo' + (ui.solo ? ' on' : '') + '" title="Solo">S</button>' +
           '</div>';
         wireLane(lane, role.id);
         setFaderVisual(lane, ui.vol);
@@ -173,13 +164,34 @@
           '<button class="stem-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Adicionar camada</button>';
         const add = $('.stem-add', lane);
         add.addEventListener('pointerdown', (e) => e.stopPropagation());
-        add.addEventListener('click', () => openDrawer(trackId, role.id));
+        add.addEventListener('click', () => openDrawer(sourceOf(trackId), role.id));
       }
       lanes.appendChild(lane);
     });
 
     frame.appendChild(lanes);
     applyMuteSolo();
+  }
+
+  /* ---------- gestos AO VIVO → StemMixer do core ----------
+     Estado completo (levels+mutes+solos) com debounce ~120ms, só quando a
+     variação carregada é a que está tocando. lastGestureMs abre a janela de
+     guard contra o eco do rolf:status (padrão do remixer-live). */
+  function pushMix() {
+    lastGestureMs = Date.now();
+    if (!window.RolfPlayback || !window.RolfPlayback.stemsMix) return;
+    if (!trackId || playingId !== trackId) return;   // variação não está tocando
+    if (mixTimer) clearTimeout(mixTimer);
+    mixTimer = setTimeout(() => {
+      mixTimer = null;
+      const levels = {}, mutes = {}, solos = {};
+      ROLES.forEach((r) => {
+        levels[r.id] = laneUi[r.id].vol;
+        mutes[r.id]  = laneUi[r.id].mute;
+        solos[r.id]  = laneUi[r.id].solo;
+      });
+      window.RolfPlayback.stemsMix({ levels, mutes, solos });
+    }, 120);
   }
 
   function wireLane(lane, roleId) {
@@ -192,11 +204,13 @@
       ui.mute = !ui.mute;
       e.currentTarget.classList.toggle('on', ui.mute);
       applyMuteSolo();
+      pushMix();
     });
     $('.stem-ms.solo', lane).addEventListener('click', (e) => {
       ui.solo = !ui.solo;
       e.currentTarget.classList.toggle('on', ui.solo);
       applyMuteSolo();
+      pushMix();
     });
 
     const fader = $('.stem-fader', lane);
@@ -206,6 +220,7 @@
       ui.vol = clamp01((e.clientX - r.left) / r.width);
       setFaderVisual(lane, ui.vol);
       paintLane($('canvas', lane), roleId);
+      pushMix();
     };
     fader.addEventListener('pointerdown', (e) => {
       drag = true; fader.setPointerCapture(e.pointerId); fromEv(e); e.preventDefault();
@@ -214,6 +229,39 @@
     const end = (e) => { if (!drag) return; drag = false; try { fader.releasePointerCapture(e.pointerId); } catch (_) {} };
     fader.addEventListener('pointerup', end);
     fader.addEventListener('pointercancel', end);
+  }
+
+  /* ---------- sync vindo do core (rolf:status → status.stems) ----------
+     Página recarregada com a variação tocando fica certa sozinha; gestos
+     de outro cliente também chegam por aqui. */
+  function refreshLaneVisuals() {
+    $$('.stem-lane:not(.empty)').forEach((lane) => {
+      const ui = laneUi[lane.dataset.role];
+      if (!ui) return;
+      const m = $('.stem-ms.mute', lane); if (m) m.classList.toggle('on', ui.mute);
+      const s = $('.stem-ms.solo', lane); if (s) s.classList.toggle('on', ui.solo);
+      setFaderVisual(lane, ui.vol);
+    });
+    applyMuteSolo();
+  }
+
+  function onStatus(e) {
+    const st = e.detail || {};
+    playingId = st.track_id || '';
+    const stems = st.stems;
+    if (!stems) return;
+    if (Date.now() - lastGestureMs < 2500) return;     // gesto local manda
+    if (!trackId || playingId !== trackId) return;     // mixer é da faixa tocando
+    let changed = false;
+    ROLES.forEach((r) => {
+      const ui = laneUi[r.id];
+      const lv = (stems.levels && typeof stems.levels[r.id] === 'number') ? clamp01(stems.levels[r.id]) : 1;
+      const mu = !!(stems.mutes && stems.mutes[r.id]);
+      const so = !!(stems.solos && stems.solos[r.id]);
+      if (ui.vol !== lv || ui.mute !== mu || ui.solo !== so) changed = true;
+      ui.vol = lv; ui.mute = mu; ui.solo = so;
+    });
+    if (changed && lanesOn) refreshLaneVisuals();
   }
 
   function setFaderVisual(lane, vol) {
@@ -353,6 +401,7 @@
   async function openDrawer(id, focusRole) {
     if (!dock || !panel || !inner) return;
     if (!id) return;
+    id = sourceOf(id);   // a gaveta aberta na variação gerencia os sidecars da original
     if (drawer.id && drawer.id !== id) {
       // envios da faixa anterior morrem com a sessão dela
       Object.values(drawer.busy).forEach((b) => { try { b.xhr.abort(); } catch (_) {} });
@@ -360,7 +409,9 @@
     }
     drawer.id = id;
     const row = rowFor(id);
-    drawer.title = (row && row.dataset.title) || ($('.rmx-track-title') || {}).textContent || id;
+    const t = dataTrack(id);
+    drawer.title = (row && row.dataset.title) || (t && t.title)
+      || ($('.rmx-track-title') || {}).textContent || id;
     drawer.meta = {}; drawer.err = {}; drawer.warn = {};
     try {
       const res = await fetch('api/library/' + encodeURIComponent(id) + '/stems');
@@ -387,12 +438,8 @@
     if (!dock) return;
     dock.classList.remove('panel-open');
     if (panel) panel.setAttribute('aria-hidden', 'true');
-    // completou 2+ camadas para a faixa aberta no Remixer → liga o modo
-    const roles = rolesFor(trackId);
-    if (drawer.id && drawer.id === trackId && roles.length >= 2 && !lanesOn) {
-      setLanes(true);
-      toast('Modo Stems ativo — ' + roles.length + ' camadas', 'Stems');
-    }
+    // a variação nasce sozinha na 2ª camada (toast em applyVariantChange) —
+    // nada de "ligar modo" aqui
   }
 
   const mmss = (sec) => {
@@ -456,7 +503,7 @@
       '<div class="stm-foot">' +
         '<span>' + n + '/4 camadas</span><span class="sep"></span>' +
         (drawer.duration ? '<span>Master · ' + mmss(drawer.duration) + ' — os stems cobrem a faixa inteira</span>'
-                         : '<span>Reprodução multipista chega numa próxima fase</span>') +
+                         : '<span>Com 2+ camadas nasce a versão Stem Ready — tocá-la é tocar multipista</span>') +
       '</div></div>';
     wireDrawer();
   }
@@ -540,6 +587,7 @@
             drawer.meta[role] = data.stem;
             drawer.warn[role] = data.warning || '';
           }
+          applyVariantChange(data.variant);   // antes: a variação precisa existir no data
           applyRoleChange(id, role, true);
           toast(roleOf(role).label + ' no lugar', 'Stems');
         } else if (mine) {
@@ -567,9 +615,12 @@
     try {
       const res = await fetch('api/library/' + encodeURIComponent(id) + '/stems/' + role, { method: 'DELETE' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
+      let data = null;
+      try { data = await res.json(); } catch (_) {}
       delete drawer.meta[role];
       delete drawer.warn[role];
       applyRoleChange(id, role, false);
+      applyVariantChange(data && data.variant);
       toast(roleOf(role).label + ' removido', 'Stems');
     } catch (e) {
       console.error('stem delete failed:', e);
@@ -578,18 +629,77 @@
     if (drawerOpen()) renderDrawer();
   }
 
-  /* pós-mudança: row + badge + botão + lanes (se a faixa é a do Remixer) */
-  function applyRoleChange(id, role, added) {
-    const set = new Set(rolesFor(id));
-    if (added) set.add(role); else set.delete(role);
-    const roles = ROLES.map((r) => r.id).filter((rid) => set.has(rid));
-    updateRowStems(id, roles);
-    if (id === trackId) {
+  /* pós-mudança de papel: espelha na VARIAÇÃO (dona do badge/lanes) e
+     reconstrói as lanes se a variação é a faixa carregada no Remixer */
+  function applyRoleChange(sourceId, role, added) {
+    const v = variantOf(sourceId);
+    if (v) {
+      const set = new Set(v.stems || []);
+      if (added) set.add(role); else set.delete(role);
+      v.stems = ROLES.map((r) => r.id).filter((rid) => set.has(rid));
+    }
+    if (trackId && sourceOf(trackId) === sourceId) {
       updateButton();
-      if (lanesOn) {
-        if (roles.length >= 2) setLanes(true);            // reconstrói as lanes
-        else { setLanes(false); toast('Modo Stems desligado — menos de 2 camadas', 'Stems'); }
+      if (isVariant(trackId)) setLanes(true);   // reconstrói as lanes
+    }
+  }
+
+  /* ---------- nascimento/desfazimento da variação Stem Ready ----------
+     O servidor devolve `variant` no upload/delete; espelhamos em
+     RolfsoundData.tracks/groups e no selo "N versões" da original. */
+  function updateVersionsBadge(primaryId, count) {
+    const row = rowFor(primaryId);
+    if (!row || !window.RolfVersionsBadgeHtml) return;
+    const tags = row.querySelector('.row-tags');
+    if (!tags) return;
+    const old = tags.querySelector('.tag.versions');
+    if (old) old.remove();
+    const html = window.RolfVersionsBadgeHtml(count);
+    if (html) {
+      const state = tags.querySelector('.tag');           // tag de estado vem primeiro
+      if (state) state.insertAdjacentHTML('afterend', html);
+      else tags.insertAdjacentHTML('afterbegin', html);
+    }
+  }
+
+  function applyVariantChange(variant) {
+    if (!variant) return;
+    const data = window.RolfsoundData = window.RolfsoundData || {};
+    data.tracks = data.tracks || [];
+    data.groups = data.groups || {};
+
+    if (variant.created && variant.track) {
+      if (!data.tracks.some((t) => t.id === variant.track.id)) data.tracks.push(variant.track);
+      if (variant.group_id && variant.group) {
+        data.groups[variant.group_id] = variant.group;
+        // a original pode ter acabado de virar grupo — espelha no seu track
+        const src = dataTrack(variant.track.stems_of);
+        if (src) { src.group = variant.group_id; src.primary = (variant.group.primary === src.id); }
+        updateVersionsBadge(variant.group.primary, (variant.group.members || []).length);
       }
+      toast('Versão Stem Ready criada — toque-a para ouvir multipista', 'Stems');
+    } else if (variant.removed) {
+      const i = data.tracks.findIndex((t) => t.id === variant.id);
+      if (i >= 0) data.tracks.splice(i, 1);
+      const gid = variant.group_id;
+      if (gid) {
+        if (variant.group) {
+          data.groups[gid] = variant.group;
+          updateVersionsBadge(variant.group.primary, (variant.group.members || []).length);
+        } else {
+          // grupo dissolvido (sobrou só a original)
+          const grp = data.groups[gid];
+          const primary = grp && grp.primary;
+          delete data.groups[gid];
+          if (primary) {
+            updateVersionsBadge(primary, 0);
+            const src = dataTrack(primary);
+            if (src) { src.group = ''; src.primary = false; src.vlabel = ''; }
+          }
+        }
+      }
+      if (variant.id === trackId) { setLanes(false); updateButton(); }
+      toast('Versão Stem Ready desfeita — menos de 2 camadas', 'Stems');
     }
   }
 
@@ -631,6 +741,29 @@
   }, true);
 
   /* ============================================================
+     CONFIG — "Manter mix de stems ao trocar de faixa"
+     O visual (.on) é do handler genérico de [data-sw] no prototype.js;
+     aqui só carregamos o valor salvo e persistimos a mudança
+     (POST /api/settings → config.json da web + repasse ao core).
+     ============================================================ */
+  function wireKeepMixToggle() {
+    const sw = $('[data-stems-keep]');
+    if (!sw) return;
+    fetch('api/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => { if (cfg) sw.classList.toggle('on', !!cfg.stems_keep_mix); })
+      .catch(() => {});
+    sw.addEventListener('click', () => {
+      const enabled = sw.classList.contains('on');   // prototype.js já togglou
+      fetch('api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { stems_keep_mix: enabled } }),
+      }).catch((e) => console.error('stems keep_mix save failed:', e));
+    });
+  }
+
+  /* ============================================================
      WIRING
      ============================================================ */
   function buildManageTool() {
@@ -641,7 +774,7 @@
     b.type = 'button';
     b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M14.5 5.5l4 4L9 19l-4 .9.9-4z"/></svg>Stems';
     b.title = 'Gerenciar os stems desta faixa';
-    b.addEventListener('click', () => openDrawer(trackId));
+    b.addEventListener('click', () => openDrawer(sourceOf(trackId)));
     tools.appendChild(b);
   }
 
@@ -654,23 +787,25 @@
         if (!trackId) return;
         e.preventDefault();
         e.stopPropagation();
-        openDrawer(trackId);
+        openDrawer(sourceOf(trackId));
       });
     }
     buildManageTool();
+    wireKeepMixToggle();
     updateButton();
 
-    // faixa carregada/trocada no Remixer (prototype.js → showTrack)
+    // faixa carregada/trocada no Remixer (prototype.js → showTrack):
+    // variação ⇒ lanes sempre construídas; original/comum ⇒ sem lanes
     document.addEventListener('rolf:track', (e) => {
       const d = e.detail || {};
       if (d.id === trackId) return;
       trackId = d.id || '';
-      if (lanesOn) {
-        if (rolesFor(trackId).length >= 2) setLanes(true);  // reconstrói para a nova faixa
-        else setLanes(false);
-      }
+      setLanes(isVariant(trackId));
       updateButton();
     });
+
+    // estado do mixer vindo do core (mudo/solo/fader + faixa tocando)
+    document.addEventListener('rolf:status', onStatus);
 
     // menu de contexto do Acervo: "Stems · Multipista"
     document.addEventListener('rolf:ctx', (e) => {

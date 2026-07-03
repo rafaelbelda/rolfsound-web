@@ -1,18 +1,18 @@
 # api/routes/stems.py
 """
-Stems — a versão multipista de uma faixa do cofre.
+Stems — a versão multipista de uma faixa do cofre ("Stem Ready").
 
 Quatro papéis fixos (vocals · drums · bass · other). Quem possui os stems
 sobe cada arquivo para o slot correspondente; eles viram sidecars da faixa
 master no diretório de música ({id}.stem.{role}.ext) e são catalogados em
-track_stems. Nesta fase os stems são catalogados e exibidos no Remixer
-(lanes + controles visuais); a reprodução multipista chega quando o core
-ganhar mixagem de stems.
+track_stems. Ao completar 2 camadas nasce automaticamente a faixa-variação
+"Stems" no grupo de versões da original — tocá-la é tocar multipista no
+core. Cair para <2 camadas desfaz a variação.
 
 GET    /api/library/{id}/stems                  slots preenchidos + fatos
 POST   /api/library/{id}/stems/{role}           sobe/substitui um stem
 DELETE /api/library/{id}/stems/{role}           remove arquivo + registro
-GET    /api/library/{id}/stems/{role}/download  serve o arquivo (fase 2)
+GET    /api/library/{id}/stems/{role}/download  serve o arquivo
 """
 
 import logging
@@ -48,6 +48,99 @@ def _require_track(conn, track_id: str) -> dict:
     return track
 
 
+def _redirect_variant(conn, track_id: str) -> tuple[str, dict]:
+    """A gaveta aberta na variação opera sobre a original: os sidecars são
+    de X e a variação nunca ganha variação própria."""
+    track = _require_track(conn, track_id)
+    src = track.get("stem_source_id")
+    if src:
+        return src, _require_track(conn, src)
+    return track_id, track
+
+
+def resolve_stems(conn, track: dict) -> dict | None:
+    """{role: abspath} dos stems da ORIGINAL de uma variação, filtrando o que
+    existe no disco. <2 válidos ⇒ None (o play cai no master). Usado por
+    /api/play e /api/queue/add."""
+    source_id = track.get("stem_source_id")
+    if not source_id:
+        return None
+    out = {}
+    for s in database.get_stems(conn, source_id):
+        p = s.get("file_path")
+        if p and os.path.exists(p):
+            out[s["role"]] = str(Path(p).resolve())
+    return out if len(out) >= 2 else None
+
+
+def _variant_ui_payload(conn, variant: dict) -> dict:
+    """Faixa no formato da UI + grupo, para o front atualizar RolfsoundData
+    sem reload (a variação não tem row no Acervo)."""
+    from api.routes.bootstrap import _track
+    source_id = variant.get("stem_source_id") or ""
+    roles = [s["role"] for s in database.get_stems(conn, source_id)]
+    group_id = variant.get("version_group_id") or ""
+    group = None
+    if group_id:
+        grp = database.get_version_group(conn, group_id)
+        if grp:
+            group = {
+                "primary": grp.get("primary_track_id"),
+                "members": [t["id"] for t in database.get_group_members(conn, group_id)],
+            }
+    return {
+        "id": variant["id"],
+        "group_id": group_id,
+        "group": group,
+        "track": _track(variant, roles, primary=False),
+    }
+
+
+def sync_stem_variant(conn, source_id: str) -> dict | None:
+    """Reconcilia a variação com o nº de camadas: ≥2 cria, <2 desfaz.
+    Retorna o payload `variant` da resposta (ou None se nada mudou)."""
+    roles = [s["role"] for s in database.get_stems(conn, source_id)]
+    variant = database.get_stem_variant(conn, source_id)
+
+    if len(roles) >= 2 and not variant:
+        source = database.get_track(conn, source_id)
+        variant = database.create_stem_variant(conn, source)
+        conn.commit()
+        logger.info(f"stems: variação criada — {variant['id']}")
+        return {"created": True, **_variant_ui_payload(conn, variant)}
+
+    if len(roles) < 2 and variant:
+        database.delete_stem_variant(conn, variant["id"])
+        conn.commit()
+        logger.info(f"stems: variação desfeita — {variant['id']} (<2 camadas)")
+        payload = {"removed": True, "id": variant["id"],
+                   "group_id": variant.get("version_group_id") or "",
+                   "group": None}
+        gid = variant.get("version_group_id")
+        if gid:
+            grp = database.get_version_group(conn, gid)
+            if grp:
+                payload["group"] = {
+                    "primary": grp.get("primary_track_id"),
+                    "members": [t["id"] for t in database.get_group_members(conn, gid)],
+                }
+        return payload
+
+    return None
+
+
+def backfill_variants_on_startup() -> None:
+    """Chamado do lifespan (api/app.py), junto do scan_and_reconcile."""
+    conn = database.get_connection()
+    try:
+        created = database.backfill_stem_variants(conn)
+        conn.commit()
+        if created:
+            logger.info(f"stems: backfill criou {created} variação(ões) Stem Ready")
+    finally:
+        conn.close()
+
+
 def _require_role(role: str) -> str:
     if role not in ROLES:
         raise HTTPException(status_code=404, detail=f"Papel de stem desconhecido: {role}")
@@ -71,7 +164,7 @@ def _stem_dict(row: dict) -> dict:
 async def list_stems(track_id: str):
     conn = database.get_connection()
     try:
-        track = _require_track(conn, track_id)
+        track_id, track = _redirect_variant(conn, track_id)
         stems = {r["role"]: _stem_dict(r) for r in database.get_stems(conn, track_id)}
     finally:
         conn.close()
@@ -95,7 +188,7 @@ async def upload_stem(track_id: str, role: str, file: UploadFile = File(...)):
 
     conn = database.get_connection()
     try:
-        track = _require_track(conn, track_id)
+        track_id, track = _redirect_variant(conn, track_id)
         previous = database.get_stem(conn, track_id, role)
     finally:
         conn.close()
@@ -136,6 +229,8 @@ async def upload_stem(track_id: str, role: str, file: UploadFile = File(...)):
         )
         conn.commit()
         stem = database.get_stem(conn, track_id, role)
+        # 2ª camada completa ⇒ a variação Stem Ready nasce sozinha.
+        variant = sync_stem_variant(conn, track_id)
     finally:
         conn.close()
 
@@ -148,7 +243,8 @@ async def upload_stem(track_id: str, role: str, file: UploadFile = File(...)):
         )
 
     logger.info(f"stems: {dest.name} catalogado ({ROLE_LABEL[role]} de '{track_id}')")
-    return {"ok": True, "stem": _stem_dict(stem), "warning": warning}
+    return {"ok": True, "stem": _stem_dict(stem), "warning": warning,
+            "variant": variant}
 
 
 @router.delete("/library/{track_id}/stems/{role}")
@@ -156,12 +252,14 @@ async def delete_stem(track_id: str, role: str):
     _require_role(role)
     conn = database.get_connection()
     try:
-        _require_track(conn, track_id)
+        track_id, _track_row = _redirect_variant(conn, track_id)
         stem = database.get_stem(conn, track_id, role)
         if not stem:
             raise HTTPException(status_code=404, detail="Stem não encontrado")
         database.delete_stem(conn, track_id, role)
         conn.commit()
+        # Caiu para <2 camadas ⇒ a variação é desfeita.
+        variant = sync_stem_variant(conn, track_id)
     finally:
         conn.close()
 
@@ -172,7 +270,7 @@ async def delete_stem(track_id: str, role: str):
         except OSError as e:
             logger.warning(f"stems: não removeu {path}: {e}")
 
-    return {"ok": True, "deleted": role}
+    return {"ok": True, "deleted": role, "variant": variant}
 
 
 @router.get("/library/{track_id}/stems/{role}/download")
@@ -180,7 +278,7 @@ async def download_stem(track_id: str, role: str):
     _require_role(role)
     conn = database.get_connection()
     try:
-        _require_track(conn, track_id)
+        track_id, _track_row = _redirect_variant(conn, track_id)
         stem = database.get_stem(conn, track_id, role)
     finally:
         conn.close()

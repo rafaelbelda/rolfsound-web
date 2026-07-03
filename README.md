@@ -59,7 +59,7 @@ SQLite (db/library.db)
 | `search-engine.js` | Busca avançada — client-side sobre o acervo (Camelot, BPM, tags) |
 | `track-panels.js` | gavetas de editor / álbum / artista no dock |
 | `remixer-live.js` | superfície de controle do core (pitch/tempo via `/api/remix`, seek na waveform, picker de faixa) |
-| `stems.js` | versão multipista: botão Stems no Remixer, lanes coloridas na waveform (vocals·drums·bass·other), gaveta de upload dos 4 slots (`/api/library/{id}/stems/*`). Mudo/solo/gain visuais — reprodução multipista aguarda o core |
+| `stems.js` | versão multipista "Stem Ready": lanes coloridas sempre visíveis quando a variação está carregada no Remixer (vocals·drums·bass·other), mudo/solo/gain AO VIVO no core (`/api/remix/stems`, sync via `rolf:status`), gaveta de upload dos 4 slots (`/api/library/{id}/stems/*`) que cria/desfaz a variação na 2ª camada, toggle "manter mix" na Config |
 | `discovery.js` | aba Discovery (só ativa com `account.admin`) |
 | `seekbar.js`, `tp-scrub-line.js`, `prototype-motion.js`, `ui-scale.js` | seek do visualizer, scrub do transporte, animação, escala |
 
@@ -76,7 +76,11 @@ Telas Capturar e Config são mockups estáticos (hardware/conta) — ainda sem d
 - `api/routes/stems.py` — stems por faixa (4 papéis fixos): GET/POST/DELETE
   `/api/library/{id}/stems[/{role}]`. Arquivos viram sidecars
   `{id}.stem.{role}.ext` no diretório de música (ignorados pelo scan) e
-  registram em `track_stems`; o bootstrap devolve `stems: [roles]` por faixa.
+  registram em `track_stems`. Com ≥2 camadas nasce a **faixa-variação
+  "Stems"** (`id = {X.id}::stems`, `stem_source_id = X.id`) no grupo de
+  versões da original; tocá-la envia os paths dos stems ao core, que
+  decodifica em lockstep e mixa ao vivo. O bootstrap manda os papéis só na
+  variação (`stems: [roles]`, `stems_of`) — a original fica limpa.
 - `database.scan_and_reconcile` no startup importa arquivos soltos de `./music`.
 
 ## Discovery e o gate de admin

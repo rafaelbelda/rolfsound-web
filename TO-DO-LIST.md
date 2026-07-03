@@ -33,11 +33,13 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
 
 ## 5. Remixer — parâmetros que aguardam o core
 
-- [ ] **Stems fase 2** — reprodução multipista via faixa-variação "Stem
+- [x] **Stems fase 2** — reprodução multipista via faixa-variação "Stem
       Ready" (irmã no grupo de versões; tocá-la = sempre multipista no core,
-      com mudo/solo/gain ao vivo). **Plano completo e fechado em
-      [STEMS.md](STEMS.md)** — modelo, contratos, mudanças por arquivo nos
-      dois repos e ordem de execução.
+      com mudo/solo/gain ao vivo). Implementado nos dois repos conforme
+      [STEMS.md](STEMS.md): `StemMixer` + fontes de decode em lockstep no
+      core, variação automática na 2ª camada na web, lanes ao vivo no
+      Remixer, toggle "Manter mix de stems" na Config.
+      ⚠ Requer apagar `db/library.db` (coluna nova `stem_source_id`).
 - [ ] **Filtro / EQ / Loop / Saída** — hoje são controles visuais em
       `remixer-live.js`; ganham efeito quando o core expor esses parâmetros.
 

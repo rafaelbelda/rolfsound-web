@@ -65,7 +65,10 @@ def _create_tables(conn):
             bpm             REAL,
             key             TEXT,
             version_group_id TEXT,
-            version_label    TEXT
+            version_label    TEXT,
+            -- variação "Stem Ready": id da faixa original dona dos sidecars
+            -- (NULL = faixa normal). V.id = "{X.id}::stems".
+            stem_source_id  TEXT
         );
 
         CREATE TABLE IF NOT EXISTS version_groups (
@@ -279,6 +282,10 @@ def increment_streams(conn, track_id):
 
 
 def delete_track(conn, track_id):
+    # Variações Stem Ready caem em cascata: os sidecars pertencem à original,
+    # então sem X a variação não tem o que tocar.
+    for variant in list_stem_variants(conn, track_id):
+        delete_stem_variant(conn, variant["id"])
     # Se a faixa pertence a um grupo de versões, sai dele primeiro (o helper
     # reatribui o primary / dissolve o grupo conforme o caso).
     remove_from_version_group(conn, track_id)
@@ -431,6 +438,96 @@ def stems_map(conn) -> dict:
     for r in rows:
         out.setdefault(r["track_id"], []).append(r["role"])
     return out
+
+
+# ── Variação "Stem Ready" (faixa-variação que toca multipista) ───────────────
+# A variação V de X nasce automática ao completar 2 camadas na gaveta:
+#   id = "{X.id}::stems" (determinístico ⇒ criação idempotente)
+#   stem_source_id = X.id, version_label = 'Stems', file_path = X.file_path
+#   (fallback: tocá-la "cru" toca o master), demais campos copiados de X.
+# Ela entra no grupo de versões de X (criando-o se preciso; primary segue X).
+
+def stem_variant_id(source_id: str) -> str:
+    return f"{source_id}::stems"
+
+
+def get_stem_variant(conn, source_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM tracks WHERE stem_source_id = ?", (source_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_stem_variants(conn, source_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM tracks WHERE stem_source_id = ?", (source_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_stem_variant(conn, source_track: dict) -> dict:
+    """Cria (ou devolve, se já existe) a variação Stem Ready de source_track."""
+    import time as _time
+    source_id = source_track["id"]
+    existing = get_stem_variant(conn, source_id)
+    if existing:
+        return existing
+
+    vid = stem_variant_id(source_id)
+    conn.execute("""
+        INSERT OR REPLACE INTO tracks
+            (id, title, artist, album, duration, thumbnail, file_path,
+             date_added, published_date, streams, source, status,
+             genre, bpm, key, year, label, version_label, stem_source_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'Stems', ?)
+    """, (
+        vid,
+        source_track.get("title"),
+        source_track.get("artist"),
+        source_track.get("album"),
+        source_track.get("duration"),
+        source_track.get("thumbnail"),
+        source_track.get("file_path"),
+        int(_time.time()),
+        source_track.get("published_date"),
+        source_track.get("source"),
+        source_track.get("status", "unidentified"),
+        source_track.get("genre"),
+        source_track.get("bpm"),
+        source_track.get("key"),
+        source_track.get("year"),
+        source_track.get("label"),
+        source_id,
+    ))
+
+    group_id = source_track.get("version_group_id")
+    if not group_id:
+        group_id = create_version_group(conn, source_id)
+    add_to_version_group(conn, group_id, vid)
+    return get_track(conn, vid)
+
+
+def delete_stem_variant(conn, variant_id: str) -> None:
+    """Remove SÓ a linha da variação (nunca arquivos: file_path é do master)."""
+    remove_from_version_group(conn, variant_id)
+    conn.execute("DELETE FROM tracks WHERE id = ?", (variant_id,))
+
+
+def backfill_stem_variants(conn) -> int:
+    """Subida do app: faixa com ≥2 stems e sem variação ⇒ cria V (idempotente)."""
+    created = 0
+    smap = stems_map(conn)
+    for track_id, roles in smap.items():
+        if len(roles) < 2:
+            continue
+        track = get_track(conn, track_id)
+        if not track or track.get("stem_source_id"):
+            continue
+        if get_stem_variant(conn, track_id):
+            continue
+        create_stem_variant(conn, track)
+        created += 1
+    return created
 
 
 # ── History ───────────────────────────────────────────────────────────────────

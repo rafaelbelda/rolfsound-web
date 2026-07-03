@@ -29,6 +29,13 @@ class RemixRequest(BaseModel):
     tempo_ratio: float | None = None
 
 
+class StemsMixRequest(BaseModel):
+    # Atualização parcial: o core preserva o que for omitido.
+    levels: dict[str, float] | None = None
+    mutes: dict[str, bool] | None = None
+    solos: dict[str, bool] | None = None
+
+
 @router.post("/play")
 async def play(req: PlayRequest = None):
     filepath = req.filepath if req else ""
@@ -46,13 +53,20 @@ async def play(req: PlayRequest = None):
     # request usually arrives with just track_id — resolve the filepath here.
     # Core has no database; sending track_id alone would only work for the
     # track already at the queue's current index.
-    if track_id and not filepath:
+    # Variação Stem Ready: resolve também os paths dos stems da original —
+    # o core toca multipista. O filepath enviado continua sendo o master
+    # (identidade + fallback no core quando <2 stems válidos).
+    stems = None
+    if track_id:
         from db import database
+        from api.routes.stems import resolve_stems
         conn = database.get_connection()
         try:
             track = database.get_track(conn, track_id)
             if track:
-                filepath = track.get("file_path", "") or ""
+                if not filepath:
+                    filepath = track.get("file_path", "") or ""
+                stems = resolve_stems(conn, track)
         finally:
             conn.close()
         if not filepath:
@@ -71,9 +85,14 @@ async def play(req: PlayRequest = None):
     result = await core_client.play(
         filepath=filepath if filepath else None,
         track_id=track_id if track_id else None,
+        stems=stems,
     )
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
+    # "stems" na resposta: a UI toasta o fallback quando a variação caiu
+    # no master (o core devolve o efetivo; sem chave = eco do resolvido aqui).
+    if "stems" not in result:
+        result["stems"] = bool(stems)
     return result
 
 
@@ -122,6 +141,16 @@ async def remix(req: RemixRequest):
 @router.post("/remix/reset")
 async def remix_reset():
     result = await core_client.remix_reset()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+# Mudo/solo/fader das lanes de stems — repassado ao StemMixer do core
+# (ganhos ao vivo, com rampa anti-click por bloco).
+@router.post("/remix/stems")
+async def remix_stems(req: StemsMixRequest):
+    result = await core_client.stems_mix(req.levels, req.mutes, req.solos)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

@@ -188,8 +188,15 @@
     document.dispatchEvent(new CustomEvent('rolf:status', { detail: status }));
   }
 
+  // faixa do RolfsoundData pelo id — fallback p/ quem não tem row no
+  // Acervo (a variação Stem Ready vive só na gaveta de versões)
+  function dataTrack(id) {
+    return id ? ((window.RolfsoundData || {}).tracks || []).find((t) => t.id === id) : null;
+  }
+
   // monta a visão de faixa p/ os visuais: prefere a row do Acervo
-  // (tem capa/gradiente, BPM, tom, duração), senão dados do status
+  // (tem capa/gradiente, BPM, tom, duração), depois RolfsoundData,
+  // senão dados do status
   function trackView(status) {
     const id = status.track_id || '';
     const esc = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"');
@@ -198,6 +205,14 @@
       const d = window.RolfTrackData(row);
       if (!(+d.dur > 0) && status.duration > 0) d.dur = status.duration;
       return d;
+    }
+    const t = dataTrack(id);
+    if (t) {
+      return {
+        id, title: t.title || 'Faixa', artist: t.artist || '', bg: t.cover || '',
+        bpm: t.bpm || '', key: t.key || '',
+        dur: (+t.dur > 0) ? t.dur : (status.duration || 0),
+      };
     }
     return {
       id,
@@ -216,6 +231,10 @@
     if (row && window.RolfTrackData) {
       const d = window.RolfTrackData(row);
       return { id, cover: d.bg, title: d.title, artist: d.artist, bpm: d.bpm, key: d.key, dur: d.dur };
+    }
+    const dt = dataTrack(id);
+    if (dt) {
+      return { id, cover: dt.cover || '', title: dt.title || 'Faixa', artist: dt.artist || '', bpm: dt.bpm || '', key: dt.key || '', dur: dt.dur || 0 };
     }
     return {
       id,
@@ -304,7 +323,14 @@
       lastTrackKey = id + '|*optimistic*';
       if (window.RolfSetPlaying) window.RolfSetPlaying(true);
       try {
-        await api('/api/play', { track_id: id });
+        const res = await api('/api/play', { track_id: id });
+        // variação Stem Ready que caiu no master (<2 stems no disco)
+        const t = dataTrack(id);
+        if (t && t.stems_of && res && res.stems === false) {
+          document.dispatchEvent(new CustomEvent('rolf:toast', {
+            detail: { text: 'Stems indisponíveis — tocando o master', kicker: 'Stems' },
+          }));
+        }
         schedulePoll(300);
       } catch (e) { console.error('play failed:', e); schedulePoll(600); }
     },
@@ -494,6 +520,10 @@
     },
     remixReset() {
       return api('/api/remix/reset').catch((e) => console.error('remix reset failed:', e));
+    },
+    // mudo/solo/fader das lanes de stems → StemMixer do core (ao vivo)
+    stemsMix(payload) {
+      return api('/api/remix/stems', payload).catch((e) => console.error('stems mix failed:', e));
     },
   };
 

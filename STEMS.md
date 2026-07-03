@@ -28,6 +28,14 @@ já está pronta — ver `api/routes/stems.py` e `static/js/stems.js`.
 - **Fallback gracioso**: se <2 stems válidos no disco na hora do play, a
   variação toca o master da original (a soma em ganho cheio soa igual ao
   master, então nada quebra de forma audível).
+- **Só tenho os stems (não existe master)**: nenhum mecanismo novo — importa
+  um dos stems (o mais completo, ex.: instrumental) como faixa normal X,
+  sobe todas as camadas na gaveta (a variação V nasce sozinha) e, na gaveta
+  de versões, marca a **estrela em V** para torná-la a versão principal:
+  V passa a aparecer no Acervo (com o badge de 4 pontos) e a tocar por
+  padrão, sempre multipista. O fallback de V (tocar `file_path` quando <2
+  stems no disco) toca só aquele stem — degradação aceitável, já que não
+  existe master melhor.
 
 ## 2. Arquitetura do fluxo
 
@@ -63,8 +71,9 @@ Pontos estruturais:
 
 ### 3.1 Banco (web, `db/database.py`)
 
-- `ALTER TABLE tracks ADD COLUMN stem_source_id TEXT` (migração idempotente
-  via `PRAGMA table_info`, como as demais).
+- **Sem migração** (CLAUDE.md): nova coluna `stem_source_id TEXT` entra
+  direto no `CREATE TABLE tracks` de `_create_tables`. Apagar
+  `db/library.db` e deixar o boot recriar + rescan.
 - A variação V de uma faixa X:
   - `id = "{X.id}::stems"` (determinístico ⇒ criação idempotente; seguro com
     `encodeURIComponent`/`CSS.escape` já usados na UI).
@@ -108,7 +117,7 @@ senão level`.
   `config.json` da web e repassa ao core (`/stems/keep_mix`). Reenviar no
   startup (lifespan) — o core guarda só em runtime.
 
-## 4. Implementação — CORE (`rolfsound-pack/rolfsound`)
+## 4. Implementação — CORE (`./rolfsound-core`)
 
 ### 4.1 `services/stem_mixer.py` (novo)
 
@@ -172,7 +181,8 @@ senão level`.
 
 ### 5.1 `db/database.py`
 
-- Migração `stem_source_id` + helpers: `get_stem_variant(conn, source_id)`,
+- Coluna `stem_source_id` em `_create_tables` (sem migração) + helpers:
+  `get_stem_variant(conn, source_id)`,
   `create_stem_variant(conn, source_track) → V` (copia campos, cria/junta
   grupo), `delete_stem_variant`, `list_stem_variants` (p/ backfill e cascade).
 
@@ -261,7 +271,9 @@ senão level`.
   <2 ⇒ toca o `filepath` (master). `status.stems.active=false` ⇒ UI não marca
   mix ativo.
 - **Deletar X** ⇒ deleta V em cascata (sidecars são de X). Deletar V ⇒ só a
-  variação some; sidecars ficam.
+  variação some; sidecars ficam. **Atenção**: `V.file_path == X.file_path` —
+  a rota DELETE não pode apagar arquivos do disco quando a faixa tem
+  `stem_source_id` (apagaria o áudio do master).
 - **Gaveta aberta na V** ⇒ opera em X (redirect por `stem_source_id`).
 - **`scan_and_reconcile`**: conferir que V (file_path duplicado de X) não é
   deduplicada/removida pelo reconcile; se X sumir do disco e for removida, V

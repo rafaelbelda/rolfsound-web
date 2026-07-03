@@ -128,6 +128,18 @@
   function primaryVer() { return drawer.versions.find((v) => v.is_primary) || drawer.versions[0]; }
   function songTitle() { const p = primaryVer(); return p ? p.title : 'Faixa'; }
 
+  // mini badge de 4 pontos: esta versão é a Stem Ready (toca multipista)
+  function stemBadgeHtml(v) {
+    if (!v.stem_ready) return '';
+    const t = ((window.RolfsoundData || {}).tracks || []).find((x) => x.id === v.id);
+    const roles = (t && t.stems) || [];
+    if (window.RolfStemsBadgeHtml) {
+      const html = window.RolfStemsBadgeHtml(roles.length ? roles : ['vocals', 'drums', 'bass', 'other']);
+      if (html) return html;
+    }
+    return '<span class="tag stems" title="Stem Ready — toca multipista">Stems</span>';
+  }
+
   function verRowHtml(v, i) {
     const sub = [v.artist, (+v.bpm ? v.bpm + ' BPM' : ''), v.key].filter(Boolean).join(' · ');
     const labelBtn = v.label
@@ -140,6 +152,7 @@
       '<span class="row-cover cover ver-cover" style="background:' + (v.cover || '') + '"></span>' +
       '<div class="ver-main"><div class="ver-name">' + esc(v.title) + '</div>' +
         '<div class="ver-sub">' + esc(sub) + '</div></div>' +
+      stemBadgeHtml(v) +
       labelBtn +
       '<span class="ver-dur">' + mmss(v.dur) + '</span>' +
       '<div class="ver-actions">' +

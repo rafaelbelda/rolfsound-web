@@ -58,9 +58,12 @@ def _track(r: dict, stems: list | None = None, primary: bool = False) -> dict:
         "tags":   [genre.lower()] if genre else [],
         "dur":    r.get("duration") or 0,
         "cover":  cover_css(r.get("thumbnail")),
-        # papéis de stems presentes ('vocals'|'drums'|'bass'|'other') —
-        # badge no Acervo + modo Stems no Remixer
+        # papéis de stems ('vocals'|'drums'|'bass'|'other') — só a VARIAÇÃO
+        # Stem Ready os carrega (badge de 4 pontos + lanes no Remixer);
+        # a original fica limpa
         "stems":  stems or [],
+        # variação Stem Ready: id da original dona dos sidecars ("" = normal)
+        "stems_of": r.get("stem_source_id") or "",
         # agrupamento de versões: group = id do grupo (ou ""), primary = é a
         # versão que representa a "pasta" no Acervo, vlabel = rótulo da versão
         "group":  group,
@@ -77,8 +80,14 @@ async def bootstrap_js():
         gmap = database.groups_map(conn)
         # {track_id: group_id} para os que são primary do seu grupo
         primary_ids = {g["primary"] for g in gmap.values() if g.get("primary")}
+        # Papéis de stems vão SÓ para a variação (smap é keyed pela original,
+        # que fica limpa: sem badge, sem lanes)
         tracks = [
-            _track(r, smap.get(r.get("id")), primary=(r.get("id") in primary_ids))
+            _track(
+                r,
+                smap.get(r.get("stem_source_id")) if r.get("stem_source_id") else [],
+                primary=(r.get("id") in primary_ids),
+            )
             for r in database.list_tracks(conn)
         ]
         known = {t["id"] for t in tracks}
