@@ -33,10 +33,11 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
 
 ## 5. Remixer — parâmetros que aguardam o core
 
-- [ ] **Stems fase 2** — reprodução multipista: mix de 4 stems no core
-      (`rolfsound/services/remix_engine.py`, projeto irmão) com
-      níveis/mudo/solo vindos da UI. Os controles nas lanes e o
-      `GET /api/library/{id}/stems/{role}/download` já estão prontos.
+- [ ] **Stems fase 2** — reprodução multipista via faixa-variação "Stem
+      Ready" (irmã no grupo de versões; tocá-la = sempre multipista no core,
+      com mudo/solo/gain ao vivo). **Plano completo e fechado em
+      [STEMS.md](STEMS.md)** — modelo, contratos, mudanças por arquivo nos
+      dois repos e ordem de execução.
 - [ ] **Filtro / EQ / Loop / Saída** — hoje são controles visuais em
       `remixer-live.js`; ganham efeito quando o core expor esses parâmetros.
 
