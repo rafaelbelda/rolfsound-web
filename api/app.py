@@ -25,7 +25,7 @@ from utils import core_client
 from utils.monitor_accumulator import get_accumulator
 
 from api.deps import require_admin
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload, stems, versions
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload, stems, versions, albums
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +49,22 @@ async def lifespan(app: FastAPI):
         added = database.scan_and_reconcile(conn, music_dir)
         if added:
             logger.info(f"Library scan: added {added} previously untracked files")
+        # Rede de segurança: faixa sem álbum (imports antigos, gravações) vira single.
+        filled = database.backfill_album_ids(conn)
+        if filled:
+            logger.info(f"Albums backfill: assigned single-albums to {filled} tracks")
     finally:
         conn.close()
 
     # Variações Stem Ready: faixa com ≥2 stems e sem variação ganha a sua.
     stems.backfill_variants_on_startup()
+
+    # Forma de onda real (Remixer): faixas importadas antes desse recurso
+    # existir ainda não têm picos — enfileira a extração em background.
+    from api.services.indexer import enqueue_missing_waveform_backfill
+    queued = enqueue_missing_waveform_backfill()
+    if queued:
+        logger.info(f"Waveform backfill: {queued} faixa(s) na fila de extração")
 
     cleanup_temp_files(cfg.get("download_temp_directory", "./cache"))
 
@@ -200,9 +211,12 @@ def _register_event_handlers(poller):
         try:
             existing = db.get_track(conn, track_id)
             if not existing and os.path.exists(filepath):
+                title = os.path.basename(filepath)
+                # Gravação avulsa entra como single (seu próprio álbum).
+                album_id = db.create_single_album(conn, title, "")
                 db.insert_track(conn, {
                     "id":             track_id,
-                    "title":          os.path.basename(filepath),
+                    "title":          title,
                     "artist":         "",
                     "duration":       None,
                     "thumbnail":      None,
@@ -211,6 +225,7 @@ def _register_event_handlers(poller):
                     "published_date": None,
                     "streams":        0,
                     "source":         "recording",
+                    "album_id":       album_id,
                 })
                 conn.commit()
                 logger.info(f"Auto-inserted recording into library: {track_id}")
@@ -350,6 +365,7 @@ def create_app() -> FastAPI:
     app.include_router(upload.router,           prefix="/api")
     app.include_router(stems.router,            prefix="/api")
     app.include_router(versions.router,         prefix="/api")
+    app.include_router(albums.router,           prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)

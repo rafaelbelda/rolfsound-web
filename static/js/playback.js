@@ -31,10 +31,11 @@
   const S = {
     playState: 'idle',          // 'idle' | 'playing' | 'paused'
     currentId: null,
-    duration: 0,                // segundos
-    sliderPos: 0,               // segundos (âncora)
+    duration: 0,                // segundos (tempo da FONTE, sem remix)
+    sliderPos: 0,               // segundos (âncora, tempo da fonte)
     sliderAnchorMs: 0,          // 0 = congelado
     guardUntilMs: 0,            // janela pós-ação: poll não sobrescreve
+    tempoRatio: 1,              // remix: 1 = tempo original
     queue: [],                  // fila completa do core
     currentQueueIdx: -1,
     shuffle: false,
@@ -61,10 +62,25 @@
     return res.json().catch(() => ({}));
   }
 
-  /* ---------------- dead reckoning ---------------- */
+  /* ---------------- dead reckoning ----------------
+     Posição interna sempre em TEMPO DA FONTE. Com remix ativo o áudio
+     percorre a fonte a tempoRatio segundos por segundo de relógio. */
   function deadReckon() {
     if (!S.sliderAnchorMs || !S.duration) return S.sliderPos;
-    return Math.min(S.sliderPos + (Date.now() - S.sliderAnchorMs) / 1000, S.duration);
+    return Math.min(S.sliderPos + (Date.now() - S.sliderAnchorMs) / 1000 * S.tempoRatio, S.duration);
+  }
+
+  // Troca o ratio re-ancorando primeiro: o tempo já decorrido foi
+  // percorrido no ratio ANTIGO — sem isso o playhead saltaria.
+  function setTempoRatio(r) {
+    r = Math.max(0.5, Math.min(2, +r || 1));
+    if (Math.abs(r - S.tempoRatio) < 0.001) return;
+    S.sliderPos = deadReckon();
+    if (S.sliderAnchorMs) S.sliderAnchorMs = Date.now();
+    S.tempoRatio = r;
+    lastSecond = -1;                     // força re-render do decorrido
+    // total exibido "morfa" junto (a faixa ficou mais longa/curta)
+    if (S.duration > 0 && window.RolfSetDuration) window.RolfSetDuration(S.duration / r);
   }
 
   /* ---------------- polling ---------------- */
@@ -105,9 +121,14 @@
   let lastTrackKey = null;
   let lastQueueSig = null;
   let lastVolActionMs = 0;
+  let lastRemixActionMs = 0;
 
   function applyServerStatus(status) {
     const guarded = Date.now() < S.guardUntilMs;
+
+    // remix do servidor (ignora por 2s após gesto local no knob)
+    const serverRatio = (status.remix && +status.remix.tempo_ratio) || 1;
+    if (Date.now() - lastRemixActionMs > 2000) setTempoRatio(serverRatio);
 
     const newState = status.state || 'idle';
     const prevState = S.playState;
@@ -120,9 +141,11 @@
       const nowPlaying = newState === 'playing';
 
       // Compensa o lag entre a medição no core e a chegada aqui.
+      // O lag é relógio de parede; a posição anda em tempo da fonte,
+      // então escala pelo ratio vigente no servidor.
       const measuredAt = status.position_updated_at || 0;
       const lag = (measuredAt > 0 && nowPlaying)
-        ? Math.max(0, Date.now() / 1000 - measuredAt) : 0;
+        ? Math.max(0, Date.now() / 1000 - measuredAt) * serverRatio : 0;
       const serverPos = Math.min((status.position || 0) + lag, status.duration || Infinity);
 
       if (prevState === 'idle' && !wasPlaying && !nowPlaying) {
@@ -169,7 +192,7 @@
         const d = trackView(status);
         if (window.RolfShowTrack) window.RolfShowTrack(d);
       }
-      if (status.duration > 0 && window.RolfSetDuration) window.RolfSetDuration(status.duration);
+      if (status.duration > 0 && window.RolfSetDuration) window.RolfSetDuration(status.duration / S.tempoRatio);
     } else if (!S.currentId && !guarded && lastTrackKey !== null) {
       lastTrackKey = null;        // voltou a idle sem faixa
     }
@@ -282,16 +305,18 @@
   function tick() {
     if (S.duration > 0) {
       const pos = deadReckon();
+      // A fração da barra vive em tempo da fonte (invariante ao remix);
+      // os timecodes exibidos "morfam": ÷ tempoRatio = relógio de parede.
       const frac = clamp01(pos / S.duration);
       Player.pos = frac;
-      Player.dur = S.duration;
+      Player.dur = S.duration / S.tempoRatio;
 
       const pct = Math.round(frac * 2000) / 20;    // passo 0.05%
       if (pct !== lastPct) {
         lastPct = pct;
         $$('.tp-fill').forEach((f) => { f.style.width = pct + '%'; });
       }
-      const sec = Math.floor(pos);
+      const sec = Math.floor(pos / S.tempoRatio);
       if (sec !== lastSecond) {
         lastSecond = sec;
         const t0 = $('.transport .tp-time-l');
@@ -514,11 +539,19 @@
       catch (e) { console.error('repeat failed:', e); }
     },
 
-    // remix roda no core — knobs do Remixer chamam isto
+    // remix roda no core — knobs do Remixer chamam isto.
+    // O ratio local muda já (timecodes morfam no gesto); o poll só
+    // corrige depois da janela de 2s se o servidor divergir.
     remixSet(params) {
+      if (params && typeof params.tempo_ratio === 'number') {
+        lastRemixActionMs = Date.now();
+        setTempoRatio(params.tempo_ratio);
+      }
       return api('/api/remix', params).catch((e) => console.error('remix failed:', e));
     },
     remixReset() {
+      lastRemixActionMs = Date.now();
+      setTempoRatio(1);
       return api('/api/remix/reset').catch((e) => console.error('remix reset failed:', e));
     },
     // mudo/solo/fader das lanes de stems → StemMixer do core (ao vivo)

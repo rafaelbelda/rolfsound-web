@@ -233,6 +233,7 @@
      ============================================================ */
   function openPanel() {
     dock.classList.add('panel-open', 'panel-tall');
+    panel.style.height = '';   // solta altura sob medida deixada pelo Ver álbum
     dock.classList.remove('queue-open');
     const qb = $('[data-queue-open]'); if (qb) qb.classList.remove('is-on');
     const q = $('[data-queue]'); if (q) q.setAttribute('aria-hidden', 'true');
@@ -289,21 +290,26 @@
       .filter(Boolean).join(' · ');
   }
 
+  // Ano e gênero são do álbum agora (editor "Editar álbum"); aqui a faixa só
+  // ajusta o próprio nº. "Álbum" é membership: vazio = Single.
   const FIELDS = [
-    ['title',  'Título da faixa', 'col2', ''],
-    ['artist', 'Artista', '', ''],
-    ['album',  'Álbum', '', ''],
-    ['year',   'Ano de lançamento', '', 'mono'],
-    ['genre',  'Gênero', '', ''],
-    ['bpm',    'BPM', '', 'mono'],
-    ['key',    'Tom', '', 'mono'],
+    ['title',    'Título da faixa', 'col2', ''],
+    ['artist',   'Artista', '', ''],
+    ['album',    'Álbum', '', ''],
+    ['track_no', 'Nº da faixa', '', 'mono'],
+    ['bpm',      'BPM', '', 'mono'],
+    ['key',      'Tom', '', 'mono'],
+    ['tags',     'Tags', 'col2', ''],
   ];
 
   function fieldsHtml(t) {
-    return '<div class="tpp-fields">' + FIELDS.map(([k, label, col, mono]) =>
-      '<div class="tpp-field' + (col ? ' ' + col : '') + '"><span class="tpp-label">' + label + '</span>' +
-      '<input class="tpp-input' + (mono ? ' mono' : '') + '" data-f="' + k + '" value="' + esc(t[k] == null ? '' : t[k]) + '"></div>'
-    ).join('') + '</div>';
+    return '<div class="tpp-fields">' + FIELDS.map(([k, label, col, mono]) => {
+      const raw = t[k];
+      const val = Array.isArray(raw) ? raw.join(' ') : (raw == null ? '' : raw);
+      return '<div class="tpp-field' + (col ? ' ' + col : '') + '"><span class="tpp-label">' + label + '</span>' +
+        '<input class="tpp-input' + (mono ? ' mono' : '') + '" data-f="' + k + '" value="' + esc(val) +
+        (k === 'tags' ? '" placeholder="separadas por espaço' : '') + '"></div>';
+    }).join('') + '</div>';
   }
 
   function statusHtml(item) {
@@ -431,21 +437,30 @@
   async function saveEdits(item, btn) {
     const t = item.dossier.track;
     const get = (f) => { const el = $('[data-f="' + f + '"]', inner); return el ? el.value.trim() : ''; };
-    const v = { title: get('title'), artist: get('artist'), album: get('album'), year: get('year'), genre: get('genre'), bpm: get('bpm'), key: get('key') };
+    const v = { title: get('title'), artist: get('artist'), album: get('album'), trackNo: get('track_no'), bpm: get('bpm'), key: get('key'), tags: get('tags') };
+    const tagList = v.tags.split(/\s+/).filter(Boolean);
+    const origAlbum = (t.album == null ? '' : String(t.album));
+    const body = {
+      title: v.title, artist: v.artist,
+      track_no: v.trackNo ? Number(v.trackNo) : 0,
+      bpm: v.bpm ? Number(v.bpm) : null, key: v.key,
+      tags: tagList,
+    };
+    // membership só quando o campo Álbum mudou (vazio = Single)
+    if (v.album !== origAlbum) body.album = v.album;
     btn.disabled = true;
     try {
       const res = await fetch('api/library/' + encodeURIComponent(t.id), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: v.title, artist: v.artist, album: v.album,
-          year: v.year ? Number(v.year) : null,
-          genre: v.genre, bpm: v.bpm ? Number(v.bpm) : null, key: v.key,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      Object.assign(t, { title: v.title, artist: v.artist, album: v.album, year: v.year, genre: v.genre, bpm: v.bpm, key: v.key });
-      syncRow(item, v);
+      // faixa canônica do servidor (album/year/genre herdados via JOIN)
+      const data = await res.json().catch(() => ({}));
+      const tr = (data && data.track) || {};
+      Object.assign(t, { title: v.title, artist: v.artist, album: tr.album || '', album_id: tr.album_id, year: tr.year, genre: tr.genre, track_no: v.trackNo, bpm: v.bpm, key: v.key, tags: tagList });
+      syncRow(item, v, tagList, tr);
       btn.hidden = true;
       const headTitle = $('.tpp-h-title', inner);
       if (headTitle) headTitle.textContent = v.title || item.name;
@@ -459,16 +474,30 @@
   }
 
   /* espelha edições na row do ledger (fichas de faixas já renderizadas) */
-  function syncRow(item, v) {
+  function syncRow(item, v, tagList, tr) {
+    tr = tr || {};
     const row = item.row ||
       $('.screen[data-screen="acervo"] .row[data-id="' + (CSS && CSS.escape ? CSS.escape(item.dossier.track.id) : item.dossier.track.id) + '"]');
     if (!row) return;
     row.dataset.title = v.title; row.dataset.artist = v.artist;
-    row.dataset.album = v.album; row.dataset.year = v.year;
-    row.dataset.genre = v.genre; row.dataset.bpm = v.bpm; row.dataset.key = v.key;
+    row.dataset.album = tr.album || '';
+    if (tr.album_id) row.dataset.albumId = tr.album_id;
+    row.dataset.albumKind = tr.album_kind || 'album';
+    row.dataset.albumTotal = tr.album_total || '';
+    row.dataset.year = (tr.year != null && tr.year !== '') ? String(tr.year) : '';
+    row.dataset.genre = tr.genre || '';
+    row.dataset.trackNo = v.trackNo || '';
+    row.dataset.bpm = v.bpm; row.dataset.key = v.key;
+    row.dataset.tags = (tagList || []).join(' ');
     const set = (sel, val) => { const el = row.querySelector(sel); if (el) el.textContent = val; };
     set('.row-title', v.title); set('.row-artist', v.artist);
     set('.row-data', v.bpm); set('.row-key', v.key);
+    const tagsEl = row.querySelector('.row-tags');
+    if (tagsEl && tagList) {
+      tagsEl.querySelectorAll('.usertag').forEach((el) => el.remove());
+      tagsEl.insertAdjacentHTML('beforeend', tagList.map((tg) =>
+        '<span class="tag mut usertag">' + esc(tg.charAt(0).toUpperCase() + tg.slice(1)) + '</span>').join(''));
+    }
   }
 
   /* ---------- ficha de uma faixa que já está no cofre ---------- */
@@ -501,4 +530,27 @@
     if (action === 'import') picker.click();
     if (action === 'dossier' && row) openDossierFor(row);
   });
+
+  /* ============================================================
+     CONFIG — "Detecção de BPM e tom" (analisa ao importar)
+     O visual (.on) é do handler genérico de [data-sw] no prototype.js;
+     aqui só carregamos o valor salvo e persistimos a mudança.
+     ============================================================ */
+  function wireBpmAnalysisToggle() {
+    const sw = $('[data-bpm-analysis]');
+    if (!sw) return;
+    fetch('api/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => { if (cfg) sw.classList.toggle('on', cfg.bpm_key_analysis_enabled !== false); })
+      .catch(() => {});
+    sw.addEventListener('click', () => {
+      const enabled = sw.classList.contains('on');   // prototype.js já togglou
+      fetch('api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { bpm_key_analysis_enabled: enabled } }),
+      }).catch((e) => console.error('bpm analysis toggle save failed:', e));
+    });
+  }
+  wireBpmAnalysisToggle();
 })();

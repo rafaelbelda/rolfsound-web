@@ -71,8 +71,13 @@ Telas Capturar e Config são mockups estáticos (hardware/conta) — ainda sem d
   playback, history, settings, downloads, monitor, recordings, discogs.
 - `api/routes/bootstrap.py` — monta o `RolfsoundData` do SQLite. Mapeamento do
   schema antigo: `source 'recording'`→vinil, `status 'identified'`→master;
-  **tags/fav ainda não existem no schema** (tags derivam de `genre`, fav é
-  sempre falso).
+  `tags` (JSON array) e `fav` são colunas próprias, editáveis nas gavetas de
+  metadados e no "Favoritar" do menu de contexto.
+- `api/services/audio_analysis/` — detecção de BPM/tom via extrator Essentia
+  externo (`tools/setup_essentia.py` baixa o binário por plataforma). Chamado
+  de dentro de `index_file` (mesmo funil do AcoustID/Discogs); sem o binário
+  configurado é um no-op silencioso. Liga/desliga em Config
+  (`bpm_key_analysis_enabled`).
 - `api/routes/stems.py` — stems por faixa (4 papéis fixos): GET/POST/DELETE
   `/api/library/{id}/stems[/{role}]`. Arquivos viram sidecars
   `{id}.stem.{role}.ext` no diretório de música (ignorados pelo scan) e

@@ -6,6 +6,8 @@ import json
 import httpx
 from pathlib import Path
 
+from utils import config as cfg
+
 logger = logging.getLogger(__name__)
 
 ACOUSTID_KEY = "inv3qSYC56"
@@ -115,10 +117,14 @@ async def fingerprint(path: str) -> dict | None:
         logger.debug(f"pyacoustid fingerprint failed ({e}), falling back to fpcalc")
 
     # --- Fallback: fpcalc subprocess ---
-    result = subprocess.run(
-        [_FPCALC, "-json", path],
-        capture_output=True, text=True
-    )
+    try:
+        result = subprocess.run(
+            [_FPCALC, "-json", path],
+            capture_output=True, text=True
+        )
+    except OSError as e:
+        logger.debug(f"fpcalc unavailable ({e}), no fingerprint for {path}")
+        return None
     if result.returncode != 0:
         logger.warning(f"fpcalc failed (returncode={result.returncode}): {result.stderr.strip()}")
         return None
@@ -375,9 +381,135 @@ async def identify_track(file_path: str, fallback_title: str = "") -> dict:
     }
 
 
+async def analyze_bpm_key(file_path: str) -> dict:
+    """
+    Roda a detecção de BPM/tom (Essentia) para file_path.
+    Retorna {"bpm":.., "key":..} (chaves ausentes se não detectado) ou {} se
+    o toggle estiver desligado. Requer tools/setup_essentia.py já rodado;
+    sem o binário configurado isso é um no-op silencioso — nunca propaga
+    exceção pro chamador.
+    """
+    if not cfg.get("bpm_key_analysis_enabled", True):
+        return {}
+    try:
+        from api.services.audio_analysis.essentia import analyze_file
+        return await analyze_file(file_path)
+    except Exception as e:
+        logger.debug(f"audio analysis skipped for {file_path}: {e}")
+        return {}
+
+
+# ── Fila de análise em background (uma faixa por vez) ────────────────────────
+# O extrator Essentia é lento e às vezes flaky (binário beta de 2015); rodá-lo
+# inline no upload trava um intake em lote. Cada arquivo importado entra
+# nesta fila e um único worker processa em sequência — nunca N processos
+# Essentia concorrentes numa importação de várias faixas.
+
+_bpm_key_queue: "asyncio.Queue | None" = None
+_bpm_key_worker: "asyncio.Task | None" = None
+
+
+def enqueue_bpm_key_analysis(track_id: str, file_path: str,
+                              embedded_bpm: float | None, embedded_key: str | None) -> None:
+    """Agenda a análise de BPM/tom para depois — nunca bloqueia o chamador."""
+    import asyncio
+    global _bpm_key_queue, _bpm_key_worker
+    if _bpm_key_queue is None:
+        _bpm_key_queue = asyncio.Queue()
+    if _bpm_key_worker is None or _bpm_key_worker.done():
+        _bpm_key_worker = asyncio.create_task(_bpm_key_worker_loop())
+    _bpm_key_queue.put_nowait((track_id, file_path, embedded_bpm, embedded_key))
+
+
+async def _bpm_key_worker_loop() -> None:
+    from db import database
+    while True:
+        track_id, file_path, embedded_bpm, embedded_key = await _bpm_key_queue.get()
+        try:
+            analysis = await analyze_bpm_key(file_path)
+            fill = {}
+            if not embedded_bpm and analysis.get("bpm"):
+                fill["bpm"] = analysis["bpm"]
+            if not embedded_key and analysis.get("key"):
+                fill["key"] = analysis["key"]
+            if fill:
+                conn = database.get_connection()
+                try:
+                    database.update_track_metadata(conn, track_id, fill)
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception:
+            logger.exception(f"bpm/key background analysis failed for {track_id}")
+        finally:
+            _bpm_key_queue.task_done()
+
+
+# ── Fila de extração de forma de onda (uma faixa por vez) ────────────────────
+# Decodificar o arquivo inteiro é bem mais leve que o Essentia, mas ainda é
+# CPU-bound — fila própria (não a do BPM/tom) pra a onda ficar pronta rápido
+# mesmo com um lote grande de análise Essentia enfileirado atrás.
+
+_waveform_queue: "asyncio.Queue | None" = None
+_waveform_worker: "asyncio.Task | None" = None
+
+
+def enqueue_waveform_analysis(track_id: str, file_path: str) -> None:
+    """Agenda a extração dos picos da forma de onda — nunca bloqueia o chamador."""
+    import asyncio
+    global _waveform_queue, _waveform_worker
+    if _waveform_queue is None:
+        _waveform_queue = asyncio.Queue()
+    if _waveform_worker is None or _waveform_worker.done():
+        _waveform_worker = asyncio.create_task(_waveform_worker_loop())
+    _waveform_queue.put_nowait((track_id, file_path))
+
+
+def enqueue_missing_waveform_backfill() -> int:
+    """Chamado do lifespan (api/app.py): faixas importadas antes desse recurso
+    existir não têm picos ainda — enfileira todas de uma vez (a fila já
+    processa uma por vez, então isso não afoga o boot nem a CPU)."""
+    import os
+    from db import database
+    conn = database.get_connection()
+    try:
+        missing = database.list_tracks_missing_waveform(conn)
+    finally:
+        conn.close()
+    n = 0
+    for row in missing:
+        file_path = row.get("file_path")
+        if file_path and os.path.exists(file_path):
+            enqueue_waveform_analysis(row["id"], file_path)
+            n += 1
+    return n
+
+
+async def _waveform_worker_loop() -> None:
+    import time
+    from db import database
+    from api.services.audio_analysis.waveform import extract_peaks
+
+    while True:
+        track_id, file_path = await _waveform_queue.get()
+        try:
+            peaks = await extract_peaks(file_path)
+            conn = database.get_connection()
+            try:
+                database.upsert_waveform(conn, track_id, peaks, int(time.time()))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            logger.exception(f"waveform extraction failed for {track_id}")
+        finally:
+            _waveform_queue.task_done()
+
+
 async def index_file(track_id: str, file_path: str) -> dict:
     """
-    Identifica a faixa via AcoustID + Discogs e persiste os metadados no DB.
+    Identifica a faixa via AcoustID + Discogs, roda a análise de BPM/tom
+    (Essentia) e persiste os metadados no DB.
     Retorna o dict de metadados (com chave 'status').
     """
     from db import database
@@ -393,12 +525,19 @@ async def index_file(track_id: str, file_path: str) -> dict:
         conn.close()
 
     # Run fpcalc separately to capture the raw fingerprint string for dedup.
-    raw_fp = await fingerprint(file_path)
+    # Best-effort like upload.py's own fingerprint call: never let a missing
+    # chromaprint/fpcalc take down bpm/tom + forma de onda below.
+    try:
+        raw_fp = await fingerprint(file_path)
+    except Exception as e:
+        logger.debug(f"index_file: fingerprint indisponível para {file_path}: {e}")
+        raw_fp = None
 
     meta = await identify_track(file_path, fallback_title=fallback_title)
     logger.info(f"index_file {track_id}: status={meta['status']} reason={meta.get('reason')}")
 
     update: dict = {"status": meta["status"]}
+    identified_year = None
     if meta["status"] == "identified":
         update.update({
             "title":           meta.get("title"),
@@ -407,8 +546,9 @@ async def index_file(track_id: str, file_path: str) -> dict:
             "mb_recording_id": meta.get("mb_recording_id"),
             "discogs_id":      meta.get("discogs_id"),
             "label":           meta.get("label"),
-            "year":            meta.get("year"),
         })
+        # year é do álbum agora (não da faixa) — aplicado abaixo, sem sobrescrever.
+        identified_year = meta.get("year")
         # Só sobrescreve thumbnail se o Discogs devolveu uma
         if meta.get("thumbnail"):
             update["thumbnail"] = meta["thumbnail"]
@@ -417,9 +557,30 @@ async def index_file(track_id: str, file_path: str) -> dict:
     if raw_fp and raw_fp.get("fingerprint"):
         update["fingerprint"] = raw_fp["fingerprint"]
 
+    # BPM/tom via Essentia — independente de status (funciona até em faixas
+    # não identificadas).
+    analysis = await analyze_bpm_key(file_path)
+    if analysis.get("bpm"):
+        update["bpm"] = analysis["bpm"]
+    if analysis.get("key"):
+        update["key"] = analysis["key"]
+
+    # Forma de onda real (Remixer) — mesma lógica de "independe de status",
+    # em background pra não segurar quem chamou index_file.
+    enqueue_waveform_analysis(track_id, file_path)
+
     conn = database.get_connection()
     try:
         database.update_track_metadata(conn, track_id, update)
+        # O ano identificado é do álbum: preenche só se ainda estiver vazio
+        # (não sobrescreve um ano que o usuário já pôs no álbum).
+        if identified_year:
+            track = database.get_track(conn, track_id)
+            album_id = track.get("album_id") if track else None
+            if album_id:
+                album = database.get_album(conn, album_id)
+                if album and not album.get("year"):
+                    database.update_album(conn, album_id, {"year": identified_year})
         conn.commit()
     finally:
         conn.close()

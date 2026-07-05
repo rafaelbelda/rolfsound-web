@@ -12,6 +12,10 @@
   const tracks = Array.isArray(D.tracks) ? D.tracks : [];
   const queue = Array.isArray(D.queue) ? D.queue : [];
   const groups = (D.groups && typeof D.groups === 'object') ? D.groups : {};
+  // Mapa id→álbum (title/artist/year/genre/total/count/kind/cover). Os editores
+  // e o "Ver álbum" leem daqui em vez de reconstruir a partir das linhas.
+  const albums = (D.albums && typeof D.albums === 'object') ? D.albums : {};
+  window.RolfAlbums = albums;
 
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -72,7 +76,8 @@
 
   /* ---------- Acervo: rows do ledger ---------- */
   function rowHtml(t) {
-    const tags = (t.tags || []).map((tg) => '<span class="tag mut">' + esc(cap(tg)) + '</span>').join('');
+    const tags = (t.tags || []).map((tg) => '<span class="tag mut usertag">' + esc(cap(tg)) + '</span>').join('');
+    const favStar = t.fav ? '<span class="tag fav-star">★</span>' : '';
     const vcount = t.primary ? groupCount(t) : 0;
     return '<div class="row"' +
       ' data-id="' + esc(t.id) + '"' +
@@ -90,14 +95,19 @@
       ' data-title="' + esc(t.title) + '"' +
       ' data-artist="' + esc(t.artist) + '"' +
       (t.album ? ' data-album="' + esc(t.album) + '"' : '') +
+      (t.album_id ? ' data-album-id="' + esc(t.album_id) + '"' : '') +
+      (t.album_total ? ' data-album-total="' + (+t.album_total) + '"' : '') +
+      (t.album_kind ? ' data-album-kind="' + esc(t.album_kind) + '"' : '') +
+      (t.track_no ? ' data-track-no="' + (+t.track_no) + '"' : '') +
       (t.year ? ' data-year="' + esc(t.year) + '"' : '') +
+      (t.genre ? ' data-genre="' + esc(t.genre) + '"' : '') +
       ' data-dur="' + (+t.dur || 0) + '">' +
       '<div class="row-coord">' + dateLabel(t.added) + '</div>' +
       '<span class="row-cover cover" style="background:' + (t.cover || '') + '"></span>' +
       '<div class="row-main"><div class="row-title">' + esc(t.title) + '</div><div class="row-artist">' + esc(t.artist) + '</div></div>' +
       '<div class="row-data">' + (+t.bpm || '') + '</div>' +
       '<div class="row-key">' + esc(t.key) + '</div>' +
-      '<div class="row-tags">' + (STATE_TAG[t.state] || '') + stemsBadgeHtml(t.stems) + versionsBadgeHtml(vcount) + tags + '</div>' +
+      '<div class="row-tags">' + favStar + (STATE_TAG[t.state] || '') + stemsBadgeHtml(t.stems) + versionsBadgeHtml(vcount) + tags + '</div>' +
       '<div class="fmt">' + (FMT_SVG[t.fmt] || '') + (FMT_LABEL[t.fmt] || '') + '</div>' +
       '<div class="row-dur">' + mmss(t.dur) + '</div>' +
       '</div>';

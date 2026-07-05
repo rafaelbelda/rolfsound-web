@@ -15,12 +15,15 @@ router = APIRouter()
 class TrackMetadataUpdate(BaseModel):
     title: str | None = None
     artist: str | None = None
+    # "album" é membership (nome do álbum; vazio/"Single" = single próprio),
+    # não um campo da faixa. year/genre do álbum se editam em PATCH /albums.
     album: str | None = None
-    year: int | None = None
-    genre: str | None = None
+    track_no: int | None = None
     bpm: float | None = None
     key: str | None = None
     version_label: str | None = None
+    tags: list[str] | None = None
+    fav: bool | None = None
 
 
 _reindex_state = {
@@ -80,6 +83,21 @@ async def download_track(track_id: str):
         conn.close()
 
 
+@router.get("/library/{track_id}/waveform")
+async def get_track_waveform(track_id: str):
+    """Picos de amplitude (0..1) da faixa inteira, pro Remixer desenhar a
+    onda real. 404 enquanto a extração em background ainda não rodou —
+    o front cai de volta pro placeholder sintético nesse caso."""
+    conn = database.get_connection()
+    try:
+        waveform = database.get_waveform(conn, track_id)
+        if not waveform:
+            raise HTTPException(status_code=404, detail="Waveform not analyzed yet")
+        return waveform
+    finally:
+        conn.close()
+
+
 @router.get("/library/{track_id}")
 async def get_track(track_id: str):
     conn = database.get_connection()
@@ -101,6 +119,22 @@ async def update_track_route(track_id: str, req: TrackMetadataUpdate):
         if not track:
             raise HTTPException(status_code=404, detail="Track not found")
         data = req.model_dump(exclude_unset=True)
+
+        # "album" é membership: resolve/cria o álbum e reatribui a faixa. Não é
+        # coluna da faixa — title/year/genre do álbum se editam em PATCH /albums.
+        if "album" in data:
+            album_name = (data.pop("album") or "").strip()
+            artist = data.get("artist", track.get("artist")) or ""
+            if album_name and album_name != "Single":
+                album_id = database.find_or_create_album(conn, album_name, artist)
+            elif track.get("album_kind") == "single":
+                album_id = track.get("album_id")   # já é single: mantém
+            else:
+                album_id = database.create_single_album(
+                    conn, track.get("title") or "", artist)
+            if album_id and album_id != track.get("album_id"):
+                database.set_track_album(conn, track_id, album_id)
+
         database.update_track_metadata(conn, track_id, data)
         conn.commit()
         return {"ok": True, "track": database.get_track(conn, track_id)}

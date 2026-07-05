@@ -128,6 +128,12 @@ def _year_of(date_str: str) -> int | None:
     return int(m.group()) if m else None
 
 
+def _tracknum_of(s: str) -> int | None:
+    """Número da faixa a partir da tag 'tracknumber' (aceita '3' ou '3/12')."""
+    m = re.match(r"\s*(\d+)", s or "")
+    return int(m.group(1)) if m else None
+
+
 def _float_of(s: str) -> float | None:
     try:
         v = float(str(s).replace(",", "."))
@@ -376,6 +382,15 @@ async def upload_track(file: UploadFile = File(...)):
 
     conn = database.get_connection()
     try:
+        # Álbum: tag de álbum ⇒ find-or-create por (artista, álbum) e semeia
+        # year/genre; sem tag de álbum a faixa vira seu próprio single.
+        if tags["album"]:
+            album_id = database.find_or_create_album(
+                conn, tags["album"], tags["artist"] or "",
+                year=_year_of(tags["date"]), genre=tags["genre"] or None)
+        else:
+            album_id = database.create_single_album(
+                conn, tags["title"] or stem, tags["artist"] or "")
         database.insert_track(conn, {
             "id":             track_id,
             "title":          tags["title"] or stem,
@@ -391,13 +406,14 @@ async def upload_track(file: UploadFile = File(...)):
             "mb_recording_id": None,
             "discogs_id":     None,
             "label":          tags["label"] or None,
-            "year":           _year_of(tags["date"]),
+            "album_id":       album_id,
         })
+        embedded_bpm = _float_of(tags["bpm"])
+        embedded_key = tags["key"] or None
         database.update_track_metadata(conn, track_id, {
-            "album": tags["album"] or None,
-            "genre": tags["genre"] or None,
-            "bpm":   _float_of(tags["bpm"]),
-            "key":   tags["key"] or None,
+            "bpm":      embedded_bpm,
+            "key":      embedded_key,
+            "track_no": _tracknum_of(tags["tracknumber"]),
         })
         conn.commit()
     finally:
@@ -421,6 +437,22 @@ async def upload_track(file: UploadFile = File(...)):
                 conn.close()
     except Exception as e:
         logger.debug(f"upload: fingerprint indisponível: {e}")
+
+    # BPM/tom via Essentia — em background e um arquivo de cada vez (fila em
+    # api/services/indexer.py), nunca bloqueia a resposta do upload nem
+    # dispara N processos Essentia concorrentes numa importação em lote. Só
+    # preenche o que o arquivo não já trouxe embutido (etiqueta do arquivo é
+    # tratada como autoritativa). Ao contrário do fluxo /identify,
+    # upload_track nunca chama index_file quando o arquivo já tem
+    # título/artista embutidos (identified=True logo acima) — sem isso,
+    # faixas já etiquetadas nunca seriam analisadas.
+    from api.services import indexer
+    if not embedded_bpm or not embedded_key:
+        indexer.enqueue_bpm_key_analysis(track_id, str(dest), embedded_bpm, embedded_key)
+
+    # Forma de onda real (Remixer) — nunca vem embutida no arquivo, então
+    # sempre enfileira, ao contrário do BPM/tom acima.
+    indexer.enqueue_waveform_analysis(track_id, str(dest))
 
     conn = database.get_connection()
     try:

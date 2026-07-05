@@ -80,6 +80,7 @@
       return;
     }
     dock.classList.add('panel-open', 'panel-tall');
+    panel.style.height = '';   // solta altura sob medida deixada pelo Ver álbum
     dock.classList.remove('queue-open');
     const qb = $('[data-queue-open]'); if (qb) qb.classList.remove('is-on');
     const q = $('[data-queue]'); if (q) q.setAttribute('aria-hidden', 'true');

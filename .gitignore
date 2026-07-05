@@ -15,6 +15,9 @@ music/
 cache/
 config.json
 
+# Binário do extrator Essentia — tools/setup_essentia.py baixa por plataforma
+tools/essentia/
+
 # Node (se entrar tooling de frontend no futuro)
 node_modules/
 

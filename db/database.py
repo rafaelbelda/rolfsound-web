@@ -43,6 +43,23 @@ def get_connection():
 
 def _create_tables(conn):
     conn.executescript("""
+        -- Álbum como entidade de primeira classe. A faixa aponta para um álbum
+        -- (tracks.album_id) e herda title/year/genre daqui via JOIN — não há mais
+        -- cópia por linha. Faixa avulsa vira o próprio álbum (kind='single',
+        -- title='Single'). total_tracks = "número de músicas" (NULL = derivar da
+        -- contagem real). cover explícita é opcional (senão deriva das faixas).
+        CREATE TABLE IF NOT EXISTS albums (
+            id            TEXT PRIMARY KEY,
+            title         TEXT NOT NULL,
+            artist        TEXT,
+            year          INTEGER,
+            genre         TEXT,
+            total_tracks  INTEGER,
+            cover         TEXT,
+            kind          TEXT NOT NULL DEFAULT 'album',
+            created_at    INTEGER NOT NULL DEFAULT 0
+        );
+
         CREATE TABLE IF NOT EXISTS tracks (
             id              TEXT PRIMARY KEY,
             title           TEXT,
@@ -58,17 +75,22 @@ def _create_tables(conn):
             mb_recording_id TEXT,
             discogs_id      TEXT,
             label           TEXT,
-            year            INTEGER,
             fingerprint     TEXT,
-            album           TEXT,
-            genre           TEXT,
+            -- álbum dono da faixa; title/year/genre da faixa vêm daqui (JOIN)
+            album_id        TEXT REFERENCES albums(id),
             bpm             REAL,
             key             TEXT,
+            -- número da faixa dentro do álbum (tag #/tracknumber); ordena o
+            -- painel "Ver álbum". NULL = sem número embutido no arquivo
+            track_no        INTEGER,
             version_group_id TEXT,
             version_label    TEXT,
             -- variação "Stem Ready": id da faixa original dona dos sidecars
             -- (NULL = faixa normal). V.id = "{X.id}::stems".
-            stem_source_id  TEXT
+            stem_source_id  TEXT,
+            -- tags livres (JSON array de strings); fav = favoritada no Acervo
+            tags            TEXT NOT NULL DEFAULT '[]',
+            fav             INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS version_groups (
@@ -154,14 +176,50 @@ def _create_tables(conn):
             added_at  INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (track_id, role)
         );
+
+        -- Envelope de amplitude da faixa inteira (picos 0..1), calculado uma vez
+        -- na importação (ver api/services/audio_analysis/waveform.py) e servido
+        -- sob demanda pro Remixer. Tabela própria (não coluna de tracks) pra não
+        -- inflar o SELECT * usado pelo Acervo/bootstrap com um blob grande.
+        CREATE TABLE IF NOT EXISTS track_waveforms (
+            track_id  TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+            peaks     TEXT NOT NULL,
+            buckets   INTEGER NOT NULL,
+            added_at  INTEGER NOT NULL DEFAULT 0
+        );
     """)
 
 
 # ── Tracks ────────────────────────────────────────────────────────────────────
 
+# A faixa herda title/year/genre do álbum: todo read traz esses campos via JOIN
+# (album = a.title, então "Single" para singles). Assim o código a jusante que
+# lê track["album"]/["year"]/["genre"] continua funcionando sem cópia por linha.
+_TRACK_SELECT = """
+    SELECT t.*,
+           a.title        AS album,
+           a.year         AS year,
+           a.genre        AS genre,
+           a.total_tracks AS album_total,
+           a.kind         AS album_kind
+    FROM tracks t
+    LEFT JOIN albums a ON a.id = t.album_id
+"""
+
+
+def _parse_track(d: dict) -> dict:
+    """tags é persistido como JSON (array de strings) na coluna TEXT."""
+    import json
+    try:
+        d["tags"] = json.loads(d.get("tags") or "[]")
+    except (TypeError, ValueError):
+        d["tags"] = []
+    return d
+
+
 def get_track(conn, track_id):
-    row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return dict(row) if row else None
+    row = conn.execute(_TRACK_SELECT + " WHERE t.id = ?", (track_id,)).fetchone()
+    return _parse_track(dict(row)) if row else None
 
 
 def insert_track(conn, track):
@@ -169,11 +227,11 @@ def insert_track(conn, track):
         INSERT OR REPLACE INTO tracks
             (id, title, artist, duration, thumbnail, file_path,
              date_added, published_date, streams, source,
-             status, mb_recording_id, discogs_id, label, year)
+             status, mb_recording_id, discogs_id, label, album_id)
         VALUES
             (:id, :title, :artist, :duration, :thumbnail, :file_path,
              :date_added, :published_date, :streams, :source,
-             :status, :mb_recording_id, :discogs_id, :label, :year)
+             :status, :mb_recording_id, :discogs_id, :label, :album_id)
     """, {
         "id":             track.get("id"),
         "title":          track.get("title"),
@@ -189,7 +247,7 @@ def insert_track(conn, track):
         "mb_recording_id": track.get("mb_recording_id"),
         "discogs_id":     track.get("discogs_id"),
         "label":          track.get("label"),
-        "year":           track.get("year"),
+        "album_id":       track.get("album_id"),
     })
 
 
@@ -199,26 +257,35 @@ def get_all_track_ids(conn):
 
 
 def list_tracks(conn):
-    rows = conn.execute("SELECT * FROM tracks ORDER BY date_added DESC").fetchall()
-    return [dict(r) for r in rows]
+    rows = conn.execute(_TRACK_SELECT + " ORDER BY t.date_added DESC").fetchall()
+    return [_parse_track(dict(r)) for r in rows]
 
 
 def list_unidentified_tracks(conn) -> list[dict]:
-    rows = conn.execute("""
-        SELECT * FROM tracks
-        WHERE status = 'unidentified' OR status IS NULL
-        ORDER BY date_added DESC
-    """).fetchall()
-    return [dict(r) for r in rows]
+    rows = conn.execute(
+        _TRACK_SELECT
+        + " WHERE t.status = 'unidentified' OR t.status IS NULL"
+        + " ORDER BY t.date_added DESC"
+    ).fetchall()
+    return [_parse_track(dict(r)) for r in rows]
 
 
 def update_track_metadata(conn, track_id: str, data: dict) -> None:
+    # album/year/genre agora vivem no álbum (ver update_album / set_track_album);
+    # aqui ficam só os campos próprios da faixa.
+    import json
     allowed = {
         "title", "artist", "duration", "thumbnail",
-        "status", "mb_recording_id", "discogs_id", "label", "year", "fingerprint",
-        "album", "genre", "bpm", "key", "version_label",
+        "status", "mb_recording_id", "discogs_id", "label", "fingerprint",
+        "bpm", "key", "track_no", "version_label", "tags", "fav",
     }
     updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if "tags" in updates:
+        updates["tags"] = json.dumps(updates["tags"])
+    if "fav" in updates:
+        updates["fav"] = int(bool(updates["fav"]))
+    if "bpm" in updates:
+        updates["bpm"] = round(updates["bpm"])
     if not updates:
         return
     fields = ", ".join(f'"{k}" = ?' for k in updates)
@@ -252,13 +319,15 @@ def scan_and_reconcile(conn, music_dir):
             if candidate.exists():
                 thumb = str(candidate)
                 break
+        # Arquivo solto sem tags entra como single (o próprio arquivo é o álbum).
+        album_id = create_single_album(conn, f.stem, "")
         conn.execute("""
             INSERT OR IGNORE INTO tracks
                 (id, title, artist, duration, thumbnail, file_path,
-                 date_added, published_date, streams, source, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 date_added, published_date, streams, source, status, album_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (track_id, f.stem, "", None, thumb, str(f),
-              int(_time.time()), None, 0, "local", "unidentified"))
+              int(_time.time()), None, 0, "local", "unidentified", album_id))
         added += 1
         logger.info(f"Library scan: added {f.name}")
     if added:
@@ -268,13 +337,13 @@ def scan_and_reconcile(conn, music_dir):
 
 def search_tracks(conn, query, limit=50):
     pattern = f"%{query}%"
-    rows = conn.execute("""
-        SELECT * FROM tracks
-        WHERE title LIKE ? OR artist LIKE ?
-        ORDER BY streams DESC, date_added DESC
-        LIMIT ?
-    """, (pattern, pattern, limit)).fetchall()
-    return [dict(r) for r in rows]
+    rows = conn.execute(
+        _TRACK_SELECT
+        + " WHERE t.title LIKE ? OR t.artist LIKE ? OR a.title LIKE ?"
+        + " ORDER BY t.streams DESC, t.date_added DESC LIMIT ?",
+        (pattern, pattern, pattern, limit)
+    ).fetchall()
+    return [_parse_track(dict(r)) for r in rows]
 
 
 def increment_streams(conn, track_id):
@@ -289,9 +358,152 @@ def delete_track(conn, track_id):
     # Se a faixa pertence a um grupo de versões, sai dele primeiro (o helper
     # reatribui o primary / dissolve o grupo conforme o caso).
     remove_from_version_group(conn, track_id)
+    row = conn.execute(
+        "SELECT album_id FROM tracks WHERE id = ?", (track_id,)
+    ).fetchone()
+    old_album = row["album_id"] if row else None
     conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
     conn.execute("DELETE FROM track_stems WHERE track_id = ?", (track_id,))
+    conn.execute("DELETE FROM track_waveforms WHERE track_id = ?", (track_id,))
+    # Álbum que ficou sem faixas não faz sentido (singles, sobretudo).
+    if old_album:
+        delete_album_if_empty(conn, old_album)
+
+
+# ── Albums (entidade de primeira classe; a faixa herda title/year/genre daqui) ─
+
+def get_album(conn, album_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM albums WHERE id = ?", (album_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_albums(conn) -> list[dict]:
+    rows = conn.execute("SELECT * FROM albums ORDER BY title COLLATE NOCASE").fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_album(conn, title, artist=None, year=None, genre=None,
+                 total_tracks=None, kind="album") -> str:
+    import secrets, time
+    album_id = "al_" + secrets.token_hex(6)
+    conn.execute("""
+        INSERT INTO albums (id, title, artist, year, genre, total_tracks, kind, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (album_id, (title or "").strip() or "Álbum", artist or None, year, genre,
+          total_tracks, kind, int(time.time())))
+    return album_id
+
+
+def create_single_album(conn, track_title="", artist=None) -> str:
+    """Single: cada faixa avulsa é o próprio álbum, rotulado 'Single'. Sempre
+    cria um novo (o single é único da faixa)."""
+    return create_album(conn, "Single", artist, total_tracks=1, kind="single")
+
+
+def find_or_create_album(conn, title, artist=None, year=None, genre=None) -> str:
+    """Casa um álbum 'de verdade' por (artista, título) case-insensitive; senão
+    cria. Sem título ⇒ single. year/genre só semeiam na criação."""
+    title = (title or "").strip()
+    if not title:
+        return create_single_album(conn, "", artist)
+    row = conn.execute("""
+        SELECT id FROM albums
+        WHERE kind = 'album'
+          AND lower(title) = lower(?)
+          AND lower(COALESCE(artist, '')) = lower(COALESCE(?, ''))
+        LIMIT 1
+    """, (title, artist)).fetchone()
+    if row:
+        return row["id"]
+    return create_album(conn, title, artist, year, genre, kind="album")
+
+
+def update_album(conn, album_id: str, data: dict) -> None:
+    allowed = {"title", "artist", "year", "genre", "total_tracks", "cover", "kind"}
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if "title" in updates:
+        updates["title"] = (updates["title"] or "").strip() or "Álbum"
+    if not updates:
+        return
+    fields = ", ".join(f'"{k}" = ?' for k in updates)
+    values = list(updates.values()) + [album_id]
+    conn.execute(f"UPDATE albums SET {fields} WHERE id = ?", values)
+
+
+def set_track_album(conn, track_id: str, album_id: str) -> None:
+    """Reatribui a faixa a um álbum e faz GC do álbum antigo se ficou vazio."""
+    row = conn.execute(
+        "SELECT album_id FROM tracks WHERE id = ?", (track_id,)
+    ).fetchone()
+    old_album = row["album_id"] if row else None
+    conn.execute("UPDATE tracks SET album_id = ? WHERE id = ?", (album_id, track_id))
+    # A variação Stem Ready segue o master (divide o mesmo álbum).
+    conn.execute(
+        "UPDATE tracks SET album_id = ? WHERE stem_source_id = ?", (album_id, track_id)
+    )
+    if old_album and old_album != album_id:
+        delete_album_if_empty(conn, old_album)
+
+
+def delete_album_if_empty(conn, album_id: str) -> None:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM tracks WHERE album_id = ?", (album_id,)
+    ).fetchone()
+    if not row or row["n"] == 0:
+        conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+
+
+def album_ids_in_album(conn, album_id: str) -> list[str]:
+    """Faixas do álbum (inclui variações), usado para refletir edições na UI."""
+    rows = conn.execute(
+        "SELECT id FROM tracks WHERE album_id = ?", (album_id,)
+    ).fetchall()
+    return [r["id"] for r in rows]
+
+
+def albums_map(conn) -> dict:
+    """{album_id: {…campos do álbum…, track_count}} — usado pelo bootstrap.
+    track_count ignora variações Stem Ready (compartilham o álbum do master)."""
+    rows = conn.execute("SELECT * FROM albums").fetchall()
+    counts = conn.execute("""
+        SELECT album_id, COUNT(*) AS n FROM tracks
+        WHERE album_id IS NOT NULL AND stem_source_id IS NULL
+        GROUP BY album_id
+    """).fetchall()
+    cmap = {r["album_id"]: r["n"] for r in counts}
+    out: dict = {}
+    for r in rows:
+        d = dict(r)
+        d["track_count"] = cmap.get(r["id"], 0)
+        out[r["id"]] = d
+    return out
+
+
+def backfill_album_ids(conn) -> int:
+    """Boot: faixa sem album_id ganha um single-album (rede de segurança). A
+    variação Stem Ready herda o álbum do master. Espelha backfill_stem_variants."""
+    created = 0
+    rows = conn.execute("""
+        SELECT id, title, artist, stem_source_id FROM tracks
+        WHERE album_id IS NULL
+        ORDER BY (stem_source_id IS NOT NULL) ASC
+    """).fetchall()
+    for r in rows:
+        if r["stem_source_id"]:
+            src = conn.execute(
+                "SELECT album_id FROM tracks WHERE id = ?", (r["stem_source_id"],)
+            ).fetchone()
+            if src and src["album_id"]:
+                conn.execute("UPDATE tracks SET album_id = ? WHERE id = ?",
+                             (src["album_id"], r["id"]))
+                continue
+        album_id = create_single_album(conn, r["title"] or "", r["artist"] or "")
+        conn.execute("UPDATE tracks SET album_id = ? WHERE id = ?", (album_id, r["id"]))
+        created += 1
+    if created:
+        conn.commit()
+    return created
 
 
 # ── Version groups (versões alternativas da mesma música) ─────────────────────
@@ -440,6 +652,41 @@ def stems_map(conn) -> dict:
     return out
 
 
+# ── Waveform (envelope de amplitude da faixa inteira) ─────────────────────────
+
+def upsert_waveform(conn, track_id: str, peaks: list[float], added_at: int) -> None:
+    import json
+    conn.execute("""
+        INSERT INTO track_waveforms (track_id, peaks, buckets, added_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(track_id) DO UPDATE SET
+            peaks    = excluded.peaks,
+            buckets  = excluded.buckets,
+            added_at = excluded.added_at
+    """, (track_id, json.dumps(peaks), len(peaks), added_at))
+
+
+def get_waveform(conn, track_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT peaks, buckets FROM track_waveforms WHERE track_id = ?", (track_id,)
+    ).fetchone()
+    if not row:
+        return None
+    import json
+    return {"peaks": json.loads(row["peaks"]), "buckets": row["buckets"]}
+
+
+def list_tracks_missing_waveform(conn) -> list[dict]:
+    """Faixas com arquivo no disco e sem picos calculados ainda — usado pelo
+    backfill de boot (faixas importadas antes desse recurso existir)."""
+    rows = conn.execute("""
+        SELECT t.id, t.file_path FROM tracks t
+        LEFT JOIN track_waveforms w ON w.track_id = t.id
+        WHERE w.track_id IS NULL AND t.file_path IS NOT NULL
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── Variação "Stem Ready" (faixa-variação que toca multipista) ───────────────
 # A variação V de X nasce automática ao completar 2 camadas na gaveta:
 #   id = "{X.id}::stems" (determinístico ⇒ criação idempotente)
@@ -474,17 +721,19 @@ def create_stem_variant(conn, source_track: dict) -> dict:
         return existing
 
     vid = stem_variant_id(source_id)
+    # A variação divide o álbum com o master (mesmo album_id) — title/year/genre
+    # vêm de lá via JOIN, sem cópia.
     conn.execute("""
         INSERT OR REPLACE INTO tracks
-            (id, title, artist, album, duration, thumbnail, file_path,
+            (id, title, artist, album_id, duration, thumbnail, file_path,
              date_added, published_date, streams, source, status,
-             genre, bpm, key, year, label, version_label, stem_source_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'Stems', ?)
+             bpm, key, label, version_label, stem_source_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'Stems', ?)
     """, (
         vid,
         source_track.get("title"),
         source_track.get("artist"),
-        source_track.get("album"),
+        source_track.get("album_id"),
         source_track.get("duration"),
         source_track.get("thumbnail"),
         source_track.get("file_path"),
@@ -492,10 +741,8 @@ def create_stem_variant(conn, source_track: dict) -> dict:
         source_track.get("published_date"),
         source_track.get("source"),
         source_track.get("status", "unidentified"),
-        source_track.get("genre"),
         source_track.get("bpm"),
         source_track.get("key"),
-        source_track.get("year"),
         source_track.get("label"),
         source_id,
     ))

@@ -17,9 +17,18 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
 
 ## 2. Migração de schema
 
-- [ ] `ALTER TABLE tracks` com `tags` e `fav` (bpm/key/album já existem;
-      tags hoje derivam só de `genre`, fav é sempre falso no bootstrap).
-- [ ] Análise de BPM/tom ao importar (o Config já tem o toggle na UI).
+- [x] `tags` e `fav` são colunas reais em `tracks` (tags: JSON array,
+      editável nas duas gavetas "Editar informações"/ficha técnica; fav:
+      persiste o "Favoritar" do menu de contexto, que antes só existia no
+      DOM). ⚠ Requer apagar `db/library.db` (colunas novas).
+- [x] Análise de BPM/tom ao importar — portado da branch `debug`
+      (`tools/setup_essentia.py` + `api/services/audio_analysis/`, extrator
+      Essentia real, não um placeholder). Roda dentro de `index_file`
+      (mesmo funil do AcoustID/Discogs); toggle "Detecção de BPM e tom" no
+      Config liga/desliga (`bpm_key_analysis_enabled`). **Requer rodar
+      `python tools/setup_essentia.py` uma vez** para baixar o binário do
+      extrator (por plataforma) — sem isso a análise é um no-op silencioso
+      e bpm/key seguem só editáveis à mão.
 
 ## 3. Acervo ao vivo
 

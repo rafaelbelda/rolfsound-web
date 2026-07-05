@@ -50,13 +50,15 @@
     const d = r.dataset;
     const def = { album: 'Sem álbum', year: '' };
     return {
-      artist: d.artist || r.querySelector('.row-artist')?.textContent.trim() || 'Rolf',
-      album:  d.album  || def.album,
-      year:   d.year   || def.year,
-      bg:     r.querySelector('.row-cover')?.style.background || '',
+      artist:  d.artist || r.querySelector('.row-artist')?.textContent.trim() || 'Rolf',
+      album:   d.album  || def.album,
+      // agrupa por album_id (singles distintos não fundem, mesmo nomeados "Single")
+      albumId: d.albumId || (d.album || def.album),
+      year:    d.year   || def.year,
+      bg:      r.querySelector('.row-cover')?.style.background || '',
     };
   }
-  const ALL_ALBUMS  = new Set(rows.map((r) => rowMeta(r).album)).size;
+  const ALL_ALBUMS  = new Set(rows.map((r) => rowMeta(r).albumId)).size;
   const ALL_ARTISTS = new Set(rows.map((r) => rowMeta(r).artist)).size;
 
   const state = {
@@ -101,11 +103,13 @@
     const map = new Map();
     rows.filter(matches).forEach((r) => {
       const m = rowMeta(r);
-      const key = field === 'album' ? m.album : m.artist;
-      if (!map.has(key)) map.set(key, { key, artist: m.artist, year: m.year, rows: [] });
+      // key = identidade (album_id p/ álbuns); name = rótulo exibido
+      const key = field === 'album' ? m.albumId : m.artist;
+      const name = field === 'album' ? m.album : m.artist;
+      if (!map.has(key)) map.set(key, { key, name, artist: m.artist, year: m.year, rows: [] });
       map.get(key).rows.push(r);
     });
-    return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
   function collageCells(list) {
     const cells = [];
@@ -137,7 +141,7 @@
       return '<div class="acv-card" data-key="' + esc(g.key) + '">' +
         '<div class="acv-card-art"><div class="collage">' + collageCells(g.rows) + '</div>' +
         '<div class="acv-card-play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></div></div>' +
-        '<div class="acv-card-name">' + esc(g.key) + '</div>' +
+        '<div class="acv-card-name">' + esc(g.name) + '</div>' +
         '<div class="acv-card-meta">' + esc(g.artist) + ' · ' + esc(g.year) + ' · ' + n + (n === 1 ? ' faixa' : ' faixas') + '</div>' +
         '</div>';
     }).join('');
@@ -152,12 +156,12 @@
     artistsWrap.classList.toggle('is-empty', groups.length === 0);
     artistsGrid.innerHTML = groups.map((g) => {
       const n = g.rows.length;
-      const albumsCount = new Set(g.rows.map((r) => rowMeta(r).album)).size;
+      const albumsCount = new Set(g.rows.map((r) => rowMeta(r).albumId)).size;
       const bg = g.rows[0]?.querySelector('.row-cover')?.style.background || '';
       return '<div class="acv-card" data-key="' + esc(g.key) + '">' +
         "<div class=\"acv-card-art round\" style='background:" + bg + "'>" +
         '<div class="acv-card-play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></div></div>' +
-        '<div class="acv-card-name">' + esc(g.key) + '</div>' +
+        '<div class="acv-card-name">' + esc(g.name) + '</div>' +
         '<div class="acv-card-meta">' + albumsCount + (albumsCount === 1 ? ' álbum · ' : ' álbuns · ') + n + (n === 1 ? ' faixa' : ' faixas') + '</div>' +
         '</div>';
     }).join('');

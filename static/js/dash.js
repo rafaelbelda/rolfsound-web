@@ -117,6 +117,42 @@
   }
 
   /* ---- waveform + beatgrid for the Remixer ---- */
+  /* ---- forma de onda real: busca os picos calculados no import (ver
+         api/services/audio_analysis/waveform.py) e repinta quando chegam.
+         Enquanto não analisada (ou fetch falhou), paintWave cai no
+         envelope sintético de sempre — nunca fica em branco. ---- */
+  const waveCache = new Map();   // trackId -> number[] | null (sem dado)
+
+  function hashSeed(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % 1000;
+  }
+
+  function fetchWavePeaks(trackId) {
+    if (!trackId || waveCache.has(trackId)) return;
+    waveCache.set(trackId, null);   // guarda de "em voo" — mock enquanto isso
+    fetch(`/api/library/${encodeURIComponent(trackId)}/waveform`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const peaks = data && Array.isArray(data.peaks) && data.peaks.length ? data.peaks : null;
+        if (!peaks) return;
+        waveCache.set(trackId, peaks);
+        document.querySelectorAll('canvas.wave-canvas').forEach(paintWave);
+      })
+      .catch(() => {});
+  }
+
+  document.addEventListener('rolf:track', (e) => {
+    const id = e.detail && e.detail.id;
+    if (!id) return;
+    document.querySelectorAll('canvas.wave-canvas').forEach((cv) => {
+      cv.dataset.trackId = id;
+      cv.dataset.seed = hashSeed(id);
+    });
+    fetchWavePeaks(id);
+  });
+
   function paintWave(cv) {
     const accent = accentOf(cv);
     const w = cv.clientWidth, h = cv.clientHeight;
@@ -134,8 +170,15 @@
     const mid = h / 2;
     const [ar, ag, ab] = hexRgb(accent);
 
-    // stable pseudo-waveform envelope
+    // picos reais da faixa (buscados no listener 'rolf:track' acima), quando
+    // já analisados; senão cai no envelope sintético de sempre.
+    const real = waveCache.get(cv.dataset.trackId);
+
     function amp(i) {
+      if (real && real.length) {
+        return real[Math.min(real.length - 1, Math.floor((i / n) * real.length))] || 0.02;
+      }
+      // stable pseudo-waveform envelope (placeholder até a análise terminar)
       const t = i / n;
       const macro = 0.35 + 0.45 * Math.abs(Math.sin(t * Math.PI * 2.3 + seed));
       const micro = 0.55 + 0.45 * Math.sin(i * 0.7 + seed * 2.1);

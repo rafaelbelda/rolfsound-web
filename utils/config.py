@@ -37,6 +37,13 @@ _DEFAULTS = {
     # Mix de stems (mudo/solo/fader) na troca de faixa: False = resetar
     # (mesmo espírito do reset_on_track_change do remix). Repassado ao core.
     "stems_keep_mix":            False,
+    # Detecção de BPM/tom ao importar (toggle "Detecção de BPM e tom" no
+    # Config) — roda o extrator Essentia em api/services/audio_analysis.
+    "bpm_key_analysis_enabled":  True,
+    # Caminho do binário essentia_streaming_extractor_music — preenchido por
+    # tools/setup_essentia.py. Vazio = análise desligada até rodar o setup.
+    "essentia_extractor_path":   "",
+    "essentia_profile_path":     "./config/essentia_profile.yaml",
     # YouTube Data API v3 key — enables fast reliable search.
     # Leave empty to use yt-dlp as fallback.
     # Get a free key at: console.cloud.google.com

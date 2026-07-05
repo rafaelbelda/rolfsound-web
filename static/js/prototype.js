@@ -569,6 +569,15 @@
       if (on && !star) { star = document.createElement('span'); star.className = 'tag fav-star'; star.textContent = '★'; tags.prepend(star); }
       if (!on && star) star.remove();
     }
+    // otimista: já reflete na row, persiste em paralelo
+    const id = row.dataset.id;
+    if (id) {
+      fetch(`api/library/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fav: on }),
+      }).catch((e) => console.error('save fav failed:', e));
+    }
     return on;
   }
   function startRename(row) {

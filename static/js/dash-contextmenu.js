@@ -93,6 +93,7 @@
       action: 'versions',
     }));
     menu.appendChild(item({ icon: ICON.album, label: 'Ver álbum', action: 'album' }));
+    menu.appendChild(item({ icon: ICON.edit, label: 'Editar álbum', action: 'album-edit' }));
     menu.appendChild(item({ icon: ICON.artist, label: 'Ver artista', action: 'artist' }));
     menu.appendChild(sep());
     menu.appendChild(item({ icon: ICON.fav, label: 'Favoritar', action: 'fav' }));

@@ -62,7 +62,11 @@
       "Bash(curl -s http://127.0.0.1:8766/api/queue)",
       "Bash(curl -s http://127.0.0.1:8766/api/playlists/3/tracks)",
       "Bash(python -c \"import sys;s=sys.stdin.read\\(\\);import json;d=json.loads\\(s.split\\('=',1\\)[1].rstrip\\(\\).rstrip\\(';'\\)\\);print\\('playlists no bootstrap:',d['playlists']\\)\")",
-      "PowerShell($c = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($c\\) { $p = Get-Process -Id $c.OwningProcess; \"$\\($p.Id\\) $\\($p.Path\\)\" } else { \"none\" })"
+      "PowerShell($c = Get-NetTCPConnection -LocalPort 8766 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if \\($c\\) { $p = Get-Process -Id $c.OwningProcess; \"$\\($p.Id\\) $\\($p.Path\\)\" } else { \"none\" })",
+      "Bash(python -c ' *)",
+      "Bash(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\playback.js\")",
+      "Bash(python -m pytest tests/test_playback_service.py -q)",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 8765,8766 -ErrorAction SilentlyContinue)"
     ]
   }
 }

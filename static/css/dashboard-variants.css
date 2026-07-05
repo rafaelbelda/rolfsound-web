@@ -85,20 +85,20 @@
 }
 .tp-main {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 320px 1fr 320px;
+  display: grid; grid-template-columns: minmax(340px, 1fr) auto minmax(340px, 1fr);
   align-items: center; gap: 24px;
   padding: 0 26px;
 }
-.tp-now { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.tp-cover { width: 52px; height: 52px; border-radius: 11px; }
-.tp-info { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.tp-now { display: flex; align-items: center; gap: 14px; min-width: 0; width: 100%; }
+.tp-cover { width: 52px; height: 52px; border-radius: 11px; flex: none; }
+.tp-info { min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
 .tp-title {
-  font-size: 18px; font-weight: 600; color: var(--ink);
+  font-size: 18px; font-weight: 600; color: var(--ink); text-align: left;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tp-artist {
-  font-size: 14px; font-weight: 500; color: var(--ink-dim);
-  margin-left: 9px;
+  font-size: 14px; font-weight: 500; color: var(--ink-dim); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tp-center { display: flex; align-items: center; justify-content: center; }
 .tp-ctrls { display: flex; align-items: center; gap: 22px; }
