@@ -696,7 +696,8 @@
     const b = e.target.closest('button'); if (!b) return;
     $$('button', g).forEach((x) => x.classList.remove('active')); b.classList.add('active');
   }));
-  $$('.loop-grid').forEach((g) => g.addEventListener('click', (e) => {
+  // .pad-grid fica de fora: os pads de sample têm dono (remixer-live.js)
+  $$('.loop-grid:not(.pad-grid)').forEach((g) => g.addEventListener('click', (e) => {
     const b = e.target.closest('.loop-cell'); if (!b) return;
     $$('.loop-cell', g).forEach((x) => x.classList.remove('on')); b.classList.add('on');
   }));
@@ -715,7 +716,16 @@
   const KNOB = {
     Pitch:  { min: -12, max: 12, step: 1, fmt: (v) => `<span class="acc">${v > 0 ? '+' : ''}${v}</span><small>st</small>` },
     Tempo:  { min: 80, max: 160, step: 1, fmt: (v) => `${v}<small>bpm</small>` },
-    Filtro: { min: 0.1, max: 18, step: 0.1, fmt: (v) => `${v.toFixed(1)}<small>kHz</small>` },
+    // Filtro em escala LOG (20 Hz–20 kHz): v é log2(Hz) — o knob percorre
+    // oitavas, não Hz lineares (o miolo musical fica utilizável). O fmt
+    // converte de volta. remixer-live.js usa o MESMO mapeamento no POST /fx.
+    Filtro: {
+      min: Math.log2(20), max: Math.log2(20000), step: 0.01,
+      fmt: (v) => {
+        const hz = Math.pow(2, v);
+        return hz >= 1000 ? `${(hz / 1000).toFixed(1)}<small>kHz</small>` : `${Math.round(hz)}<small>Hz</small>`;
+      },
+    },
   };
 
   function moduleOf(knob) {

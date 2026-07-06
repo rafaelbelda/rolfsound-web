@@ -55,8 +55,22 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
       core, variação automática na 2ª camada na web, lanes ao vivo no
       Remixer, toggle "Manter mix de stems" na Config.
       ⚠ Requer apagar `db/library.db` (coluna nova `stem_source_id`).
-- [ ] **Filtro / EQ / Loop / Saída** — hoje são controles visuais em
-      `remixer-live.js`; ganham efeito quando o core expor esses parâmetros.
+- [x] **Filtro / EQ / Saída** — efeito real no core: `FxEngine` (grafo PyAV
+      gêmeo do remix, estágio pós-remix do pump) com filtro LP/HP de cutoff
+      log (20 Hz–20 kHz) e EQ de 3 bandas ±12 dB; `POST /api/fx` (parcial,
+      como /remix), Mute real (`/api/mute`, flag própria — o fader não perde
+      a posição) e medidor de saída ao vivo (`GET /api/levels`, picos L/R do
+      callback; a UI só faz o poll com a tela Remixer visível).
+- [x] **Pads de loop** — o módulo Loop virou um pad de samples com 6 slots
+      (plano em [FX-PADS.md](FX-PADS.md)): pad vazio arma a seleção na
+      waveform (arrastar, snap por compasso via BPM), pad gravado SUBSTITUI
+      a faixa pelo trecho em loop no core (slip — a timeline segue andando;
+      desligar volta onde a música estaria), botão direito limpa, In/Out
+      refinam as bordas no playhead. Os trechos viram PCM em RAM no core
+      (`PadSampler`, captura sample-accurate do arquivo, passa por
+      pitch/tempo/FX como a faixa) e persistem por faixa em `track_pads`
+      (schema base — sem migração); a web reempurra os pads salvos a cada
+      play/avanço de fila, porque troca de faixa limpa os pads no core.
 
 ## 6. Superfície mobile
 

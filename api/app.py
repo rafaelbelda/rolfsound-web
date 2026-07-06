@@ -25,7 +25,7 @@ from utils import core_client
 from utils.monitor_accumulator import get_accumulator
 
 from api.deps import require_admin
-from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload, stems, versions, albums
+from api.routes import search, library, queue, playback, history, settings, downloads, monitor, recordings, discogs, playlists, scheduled_queues, bootstrap, upload, stems, versions, albums, pads
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,13 @@ def _register_event_handlers(poller):
         track_id = data.get("track_id")
         if not track_id:
             return
+        # Troca de faixa limpa os pads no core — reempurra os salvos da
+        # nova faixa (best-effort, roda na thread do poller).
+        try:
+            from api.routes.pads import push_pads_to_core_sync
+            push_pads_to_core_sync(track_id)
+        except Exception as e:
+            logger.debug(f"pads push on track_changed failed: {e}")
         conn = db.get_connection()
         try:
             # Skip detection: if previous track changed before 30% of duration, mark as skipped.
@@ -332,6 +339,7 @@ def _enrich_status(raw: dict) -> dict:
     raw["duration"]             = pb.get("duration_s",          0)
     raw["position_updated_at"]  = pb.get("position_updated_at", time.time())
     raw["volume"]               = pb.get("volume",              1.0)
+    raw["muted"]                = pb.get("muted",               False)
     raw["queue"]                = queue_tracks
     raw["queue_current_index"]  = q.get("current_index", -1)
     raw["repeat_mode"]          = q.get("repeat_mode", "off")
@@ -366,6 +374,7 @@ def create_app() -> FastAPI:
     app.include_router(stems.router,            prefix="/api")
     app.include_router(versions.router,         prefix="/api")
     app.include_router(albums.router,           prefix="/api")
+    app.include_router(pads.router,             prefix="/api")
 
     music_dir = cfg.get("music_directory", "./music")
     Path(music_dir).mkdir(parents=True, exist_ok=True)

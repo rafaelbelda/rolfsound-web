@@ -29,6 +29,19 @@ class RemixRequest(BaseModel):
     tempo_ratio: float | None = None
 
 
+class FxRequest(BaseModel):
+    # Atualização parcial: o core preserva o que for omitido.
+    filter_mode: str | None = None        # 'lp' | 'hp'
+    filter_cutoff_hz: float | None = None  # 20–20000
+    eq_low_db: float | None = None         # -12..+12
+    eq_mid_db: float | None = None
+    eq_high_db: float | None = None
+
+
+class MuteRequest(BaseModel):
+    muted: bool
+
+
 class StemsMixRequest(BaseModel):
     # Atualização parcial: o core preserva o que for omitido.
     levels: dict[str, float] | None = None
@@ -93,6 +106,11 @@ async def play(req: PlayRequest = None):
     # no master (o core devolve o efetivo; sem chave = eco do resolvido aqui).
     if "stems" not in result:
         result["stems"] = bool(stems)
+    # Troca de faixa limpou os pads no core — reempurra os salvos desta
+    # faixa (a fila do engine garante a ordem: play processa antes).
+    if track_id:
+        from api.routes.pads import push_pads_to_core
+        await push_pads_to_core(track_id)
     return result
 
 
@@ -141,6 +159,47 @@ async def remix(req: RemixRequest):
 @router.post("/remix/reset")
 async def remix_reset():
     result = await core_client.remix_reset()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+# Filtro/EQ rodam NO CORE (fx_engine, estágio pós-remix do pump) — mesma
+# filosofia do remix: a UI só manda parâmetros.
+@router.post("/fx")
+async def fx(req: FxRequest):
+    result = await core_client.fx_set(
+        filter_mode=req.filter_mode,
+        filter_cutoff_hz=req.filter_cutoff_hz,
+        eq_low_db=req.eq_low_db,
+        eq_mid_db=req.eq_mid_db,
+        eq_high_db=req.eq_high_db,
+    )
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/fx/reset")
+async def fx_reset():
+    result = await core_client.fx_reset()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+@router.post("/mute")
+async def mute(req: MuteRequest):
+    result = await core_client.set_mute(req.muted)
+    if result is None:
+        raise HTTPException(status_code=503, detail="Core unavailable")
+    return result
+
+
+# Medidor de saída (picos L/R do callback) — poll quente da tela Remixer.
+@router.get("/levels")
+async def levels():
+    result = await core_client.get_levels()
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

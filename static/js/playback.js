@@ -558,6 +558,17 @@
     stemsMix(payload) {
       return api('/api/remix/stems', payload).catch((e) => console.error('stems mix failed:', e));
     },
+    // filtro/EQ rodam no core (fx_engine) — o Remixer manda os params
+    fxSet(params) {
+      return api('/api/fx', params).catch((e) => console.error('fx failed:', e));
+    },
+    fxReset() {
+      return api('/api/fx/reset').catch((e) => console.error('fx reset failed:', e));
+    },
+    // mudo é flag do core (não volume=0) — o fader não perde a posição
+    setMute(muted) {
+      return api('/api/mute', { muted: !!muted }).catch((e) => console.error('mute failed:', e));
+    },
   };
 
   window.RolfPlayback = RolfPlayback;

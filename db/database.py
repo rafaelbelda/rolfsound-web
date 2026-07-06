@@ -187,6 +187,18 @@ def _create_tables(conn):
             buckets   INTEGER NOT NULL,
             added_at  INTEGER NOT NULL DEFAULT 0
         );
+
+        -- Pads de sample do Remixer: 6 slots por faixa com trechos (in/out em
+        -- segundos da fonte). O áudio NÃO é persistido — o core recaptura do
+        -- arquivo da faixa quando a web reempurra os pads no play.
+        CREATE TABLE IF NOT EXISTS track_pads (
+            track_id  TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            pad_index INTEGER NOT NULL CHECK (pad_index BETWEEN 0 AND 5),
+            start_s   REAL NOT NULL,
+            end_s     REAL NOT NULL,
+            added_at  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (track_id, pad_index)
+        );
     """)
 
 
@@ -650,6 +662,35 @@ def stems_map(conn) -> dict:
     for r in rows:
         out.setdefault(r["track_id"], []).append(r["role"])
     return out
+
+
+# ── Pads de sample (módulo Loop do Remixer) ───────────────────────────────────
+
+def get_pads(conn, track_id) -> list[dict]:
+    rows = conn.execute(
+        "SELECT pad_index, start_s, end_s FROM track_pads "
+        "WHERE track_id = ? ORDER BY pad_index",
+        (track_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_pad(conn, track_id, pad_index, start_s, end_s, added_at):
+    conn.execute("""
+        INSERT INTO track_pads (track_id, pad_index, start_s, end_s, added_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(track_id, pad_index) DO UPDATE SET
+            start_s  = excluded.start_s,
+            end_s    = excluded.end_s,
+            added_at = excluded.added_at
+    """, (track_id, pad_index, start_s, end_s, added_at))
+
+
+def delete_pad(conn, track_id, pad_index):
+    conn.execute(
+        "DELETE FROM track_pads WHERE track_id = ? AND pad_index = ?",
+        (track_id, pad_index),
+    )
 
 
 # ── Waveform (envelope de amplitude da faixa inteira) ─────────────────────────

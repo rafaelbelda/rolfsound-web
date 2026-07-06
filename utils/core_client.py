@@ -146,6 +146,30 @@ async def remix_set(pitch_semitones=None, tempo_ratio=None) -> dict | None:
 
 async def remix_reset()              -> dict | None: return await _post("/remix/reset")
 
+async def fx_set(filter_mode=None, filter_cutoff_hz=None,
+                 eq_low_db=None, eq_mid_db=None, eq_high_db=None) -> dict | None:
+    # Partial update: core preserves whichever param is omitted.
+    p = {}
+    if filter_mode      is not None: p["filter_mode"]      = filter_mode
+    if filter_cutoff_hz is not None: p["filter_cutoff_hz"] = filter_cutoff_hz
+    if eq_low_db        is not None: p["eq_low_db"]        = eq_low_db
+    if eq_mid_db        is not None: p["eq_mid_db"]        = eq_mid_db
+    if eq_high_db       is not None: p["eq_high_db"]       = eq_high_db
+    return await _post("/fx", p)
+
+async def fx_reset()                 -> dict | None: return await _post("/fx/reset")
+async def set_mute(muted: bool)      -> dict | None: return await _post("/mute", {"muted": muted})
+async def get_levels()               -> dict | None: return await _get("/levels")
+
+async def pad_set(index: int, start_s: float, end_s: float) -> dict | None:
+    return await _post("/pads/set", {"index": index, "start_s": start_s, "end_s": end_s})
+
+async def pad_clear(index: int | None = None) -> dict | None:
+    return await _post("/pads/clear", {"index": index} if index is not None else {})
+
+async def pad_on(index: int)         -> dict | None: return await _post("/pads/on", {"index": index})
+async def pad_off()                  -> dict | None: return await _post("/pads/off")
+
 async def stems_mix(levels=None, mutes=None, solos=None) -> dict | None:
     # Partial update: o core preserva o que for omitido.
     p = {}

@@ -41,7 +41,33 @@
 
 /* loop region hidden until a region exists (positioned by engine) */
 .wave-loop { display: none; }
+.wave-loop.show { display: block; }
 .wave-loop.rmx-loop-off { opacity: 0.4; filter: saturate(0.35); }
+/* região sendo desenhada (pad armado, arrastando na waveform) */
+.wave-loop.selecting { border-style: dashed; background: color-mix(in oklab, var(--accent) 10%, transparent); }
+
+/* ── Pads de sample (módulo Pads, ex-Loop) ─────────────────────────
+   vazio = célula apagada · filled = gravado · armed = esperando a
+   seleção na waveform · playing = trecho tocando no lugar da faixa */
+.pad-grid .pad { position: relative; font-variant-numeric: tabular-nums; }
+.pad-grid .pad.filled {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+.pad-grid .pad.filled::after {
+  content: ""; position: absolute; right: 4px; top: 4px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+}
+.pad-grid .pad.armed {
+  color: var(--accent); border-color: var(--accent); border-style: dashed;
+  animation: pad-arm 1.1s ease-in-out infinite;
+}
+.pad-grid .pad.playing {
+  color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
+  animation: pad-play 0.9s ease-in-out infinite;
+}
+@keyframes pad-arm  { 50% { opacity: 0.45; } }
+@keyframes pad-play { 50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent); } }
 
 /* interaction-mode cursors on the waveform */
 .wave-frame { cursor: pointer; touch-action: none; }
