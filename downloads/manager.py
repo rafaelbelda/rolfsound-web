@@ -154,6 +154,20 @@ class DownloadManager:
                 if local_thumb:
                     local_thumb = sanitize_path(local_thumb)
 
+                # Toda faixa pertence a um álbum (o front lê title/year/genre via
+                # JOIN). Sem tags de álbum, a faixa é o próprio "single" — igual
+                # ao scan_and_reconcile/backfill. Assim a row que o Acervo insere
+                # AO VIVO já bate com a que apareceria num reload, em vez de ficar
+                # sem álbum até o próximo boot rodar o backfill.
+                existing = database.get_track(conn, track_id)
+                album_id = existing.get("album_id") if existing else None
+                if not album_id:
+                    album_id = database.create_single_album(
+                        conn,
+                        meta.get("title") or title,
+                        meta.get("artist") or meta.get("channel") or "",
+                    )
+
                 database.insert_track(conn, {
                     "id":             track_id,
                     "title":          meta.get("title") or title,
@@ -165,6 +179,7 @@ class DownloadManager:
                     "published_date": meta.get("published_date"),
                     "streams":        0,
                     "source":         "youtube",
+                    "album_id":       album_id,
                 })
                 database.update_download_progress(conn, track_id, 100, "complete")
                 conn.commit()

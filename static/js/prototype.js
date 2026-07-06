@@ -155,10 +155,17 @@
     if (reads[2]) reads[2].textContent = d.key;
   }
 
-  $$('.row').forEach((row) => {
+  function wireRow(row) {
     row.addEventListener('click', () => loadTransport(row));
     // double-click: play it and jump to the live Remixer
     row.addEventListener('dblclick', () => { loadTransport(row); showScreen('remixer'); });
+  }
+  $$('.row').forEach(wireRow);
+  // rows inseridas AO VIVO (download do Discovery concluído → acervo.js) não
+  // passaram por este load; liga o clique/duplo-clique nelas quando chegam.
+  document.addEventListener('rolf:row-added', (e) => {
+    const row = e.detail && e.detail.row;
+    if (row) wireRow(row);
   });
 
   /* ---------------- reactive accent + fullscreen visualizer ---------------- */

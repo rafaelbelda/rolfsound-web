@@ -58,8 +58,9 @@
       bg:      r.querySelector('.row-cover')?.style.background || '',
     };
   }
-  const ALL_ALBUMS  = new Set(rows.map((r) => rowMeta(r).albumId)).size;
-  const ALL_ARTISTS = new Set(rows.map((r) => rowMeta(r).artist)).size;
+  // let (não const): sobem quando uma faixa nova entra AO VIVO (addTrack).
+  let ALL_ALBUMS  = new Set(rows.map((r) => rowMeta(r).albumId)).size;
+  let ALL_ARTISTS = new Set(rows.map((r) => rowMeta(r).artist)).size;
 
   const state = {
     fmt: new Set(), st: new Set(), fav: false, q: '',
@@ -342,6 +343,50 @@
       scroll.classList.toggle('as-grid', b.dataset.view === 'grid');
     });
   });
+
+  /* ============================================================
+     API pública — inserir uma faixa AO VIVO no ledger
+     Usada quando um download do Discovery conclui: em vez de pedir
+     reload, o front busca a faixa no shape da UI (GET
+     /api/library/{id}/card) e chama isto. A row nasce igual às do
+     load (window.RolfRowHtml), entra no motor de filtro/ordenação
+     (o array `rows`) e reflui via render(). O evento 'rolf:row-added'
+     deixa outros módulos ligarem o comportamento por-row (o clique de
+     tocar mora no prototype.js).
+     ============================================================ */
+  function addTrack(t) {
+    if (!t || !t.id || !window.RolfRowHtml) return false;
+    // já está no ledger? (re-anúncio, ou faixa que já existia) — não duplica
+    if (rows.some((r) => r.dataset.id === t.id)) return false;
+
+    const tmp = document.createElement('div');
+    tmp.innerHTML = window.RolfRowHtml(t);
+    const row = tmp.firstElementChild;
+    if (!row) return false;
+
+    rows.push(row);
+    // totais do cofre para os modos Álbuns/Artistas ("X de Y")
+    ALL_ALBUMS  = new Set(rows.map((r) => rowMeta(r).albumId)).size;
+    ALL_ARTISTS = new Set(rows.map((r) => rowMeta(r).artist)).size;
+
+    // espelha no RolfsoundData para quem lê por id (playback/fila, stems, versões)
+    const data = window.RolfsoundData = window.RolfsoundData || {};
+    if (!Array.isArray(data.tracks)) data.tracks = [];
+    if (!data.tracks.some((x) => x && x.id === t.id)) data.tracks.push(t);
+
+    // contagem do cofre na topbar (render.js semeou; `rows` só tem rows do ledger)
+    const storeCount = document.querySelector('.tb-status .store .meta span');
+    if (storeCount) storeCount.textContent = rows.length + (rows.length === 1 ? ' faixa' : ' faixas');
+
+    // deixa o prototype.js (e afins) ligarem clique/duplo-clique na row nova
+    document.dispatchEvent(new CustomEvent('rolf:row-added', { detail: { row, track: t } }));
+
+    render();
+    return true;
+  }
+
+  window.RolfAcervo = window.RolfAcervo || {};
+  window.RolfAcervo.addTrack = addTrack;
 
   render();
 })();

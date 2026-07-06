@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from api.services.indexer import index_file
+from api.track_view import track_view
 
 from db import database
 
@@ -94,6 +95,32 @@ async def get_track_waveform(track_id: str):
         if not waveform:
             raise HTTPException(status_code=404, detail="Waveform not analyzed yet")
         return waveform
+    finally:
+        conn.close()
+
+
+@router.get("/library/{track_id}/card")
+async def get_track_card(track_id: str):
+    """Faixa única no MESMO formato do bootstrap (shape de static/js/data.js).
+    O front usa isto para inserir a row no Acervo AO VIVO — ex.: quando um
+    download do Discovery conclui, sem recarregar a página."""
+    conn = database.get_connection()
+    try:
+        row = database.get_track(conn, track_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Track not found")
+        # Papéis de stems só existem na variação Stem Ready; primary só quando a
+        # faixa representa a "pasta" do seu grupo de versões. Uma faixa recém
+        # baixada não tem nem um nem outro, mas resolvemos os dois pra que o
+        # endpoint sirva qualquer faixa corretamente.
+        src = row.get("stem_source_id")
+        stems = database.stems_map(conn).get(src, []) if src else []
+        primary = False
+        group_id = row.get("version_group_id")
+        if group_id:
+            g = database.get_version_group(conn, group_id)
+            primary = bool(g and g.get("primary_track_id") == track_id)
+        return track_view(row, stems, primary)
     finally:
         conn.close()
 

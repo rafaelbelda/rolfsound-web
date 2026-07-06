@@ -113,6 +113,10 @@
       '</div>';
   }
 
+  // acervo.js reusa este markup ao inserir uma faixa nova AO VIVO (download do
+  // Discovery concluído) — mesma row do load, sem recarregar a página.
+  window.RolfRowHtml = rowHtml;
+
   // Colapso: no Acervo só entra a versão principal de cada grupo (a "pasta").
   // As versões não-principais vivem no drawer "Explorar versões".
   const ledgerTracks = tracks.filter((t) => !t.group || t.primary);

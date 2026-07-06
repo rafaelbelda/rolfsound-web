@@ -150,6 +150,7 @@
     queued: 'Na fila', downloading: 'Baixando', complete: 'Concluído', failed: 'Falhou',
   };
   let pollT = null;
+  let primed = false;            // primeira leitura já feita (ver pollOnce)
   const announced = new Set();   // downloads já anunciados como concluídos
 
   async function startDownload(t, btn) {
@@ -186,17 +187,42 @@
     }).join('');
   }
 
+  // Faixa concluída entra no Acervo AO VIVO: busca o card no shape da UI e
+  // pede pro acervo.js inserir a row (sem reload). Se o Acervo não estiver
+  // montado ou algo falhar, cai no aviso antigo de recarregar.
+  async function addToVault(d) {
+    if (!(window.RolfAcervo && window.RolfAcervo.addTrack)) {
+      toast(d.title || d.track_id, 'No cofre — recarregue para ver no Acervo');
+      return;
+    }
+    try {
+      const res = await fetch('api/library/' + encodeURIComponent(d.track_id) + '/card');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      window.RolfAcervo.addTrack(await res.json());
+      toast(d.title || d.track_id, 'No cofre');
+    } catch (_) {
+      toast(d.title || d.track_id, 'No cofre — recarregue para ver no Acervo');
+    }
+  }
+
   async function pollOnce() {
     try {
       const res = await fetch('api/downloads');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const items = (await res.json()).downloads || [];
       renderDownloads(items);
+      // Primeira leitura (load): o que já está 'complete' veio do bootstrap e
+      // já está no Acervo — marca como anunciado pra não re-inserir/re-toastar.
+      // Só as conclusões que acontecem DURANTE a sessão entram ao vivo.
+      if (!primed) {
+        items.forEach((d) => { if (d.status === 'complete') announced.add(d.track_id); });
+        primed = true;
+      }
       items.forEach((d) => {
         if (d.status === 'complete' && !announced.has(d.track_id)) {
           announced.add(d.track_id);
           vaultIds.add(d.track_id);
-          toast(d.title || d.track_id, 'No cofre — recarregue para ver no Acervo');
+          addToVault(d);
         }
       });
       const active = items.some((d) => d.status === 'queued' || d.status === 'downloading');
@@ -214,6 +240,9 @@
     if (pollT) { clearInterval(pollT); pollT = null; }
   }
 
-  // downloads que já existiam (ex.: recarregou a página no meio)
-  pollOnce();
+  // Downloads que já existiam (ex.: recarregou a página no meio de um): via
+  // startPolling, se algum ainda está ativo o poll CONTINUA até concluir — aí
+  // a row entra no Acervo ao vivo também nesse caso. Sem nada ativo, o próprio
+  // pollOnce chama stopPolling na primeira volta.
+  startPolling();
 })();

@@ -32,8 +32,14 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
 
 ## 3. Acervo ao vivo
 
-- [ ] Inserir a row no Acervo quando um download do Discovery completa —
-      hoje precisa recarregar a página.
+- [x] Inserir a row no Acervo quando um download do Discovery completa —
+      sem recarregar a página. Ao concluir, `discovery.js` busca a faixa no
+      shape da UI (`GET /api/library/{id}/card`, mesmo mapeamento do bootstrap
+      via `api/track_view.py`) e chama `RolfAcervo.addTrack` — a row nasce igual
+      às do load (`RolfRowHtml`), entra no motor de filtro/ordenação e o evento
+      `rolf:row-added` liga o clique de tocar (`prototype.js`). O download já
+      cria um álbum "single" na conclusão, então a row ao vivo bate com a de um
+      reload. Reload no meio de um download retoma o poll até concluir.
 
 ## 4. Capturar / Config reais
 
