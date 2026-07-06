@@ -66,7 +66,17 @@
       "Bash(python -c ' *)",
       "Bash(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\playback.js\")",
       "Bash(python -m pytest tests/test_playback_service.py -q)",
-      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 8765,8766 -ErrorAction SilentlyContinue)"
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 8765,8766 -ErrorAction SilentlyContinue)",
+      "Bash(python \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\b8776a2e-cd2f-4096-8383-1a8fe67b7f56\\\\scratchpad\\\\repro_repeat.py\")",
+      "Bash(curl -s -m 5 http://127.0.0.1:8766/api/status)",
+      "Bash(curl -s -m 5 -X POST http://127.0.0.1:8766/api/queue/repeat -H \"Content-Type: application/json\" -d '{\"mode\":\"all\"}')",
+      "Bash(python -c \"import sys,json;print\\(json.load\\(sys.stdin\\).get\\('repeat_mode'\\)\\)\")",
+      "Bash(curl -s -m 5 -X POST http://127.0.0.1:8766/api/queue/repeat -H \"Content-Type: application/json\" -d '{\"mode\":\"off\"}')",
+      "Bash(curl -s -m 5 http://127.0.0.1:8766/static/css/dashboard-variants.css)",
+      "Bash(curl -s -m 5 -X POST http://127.0.0.1:8766/api/queue/repeat -H \"Content-Type: application/json\" -d '{\"mode\":\"one\"}')",
+      "Bash(git -C \"d:/lb . d/rolfsound/rolfsound-web\" status --short)",
+      "Bash(git -C \"d:/lb . d/rolfsound/rolfsound\" status --short)",
+      "Bash(git -C \"d:/lb . d/rolfsound/rolfsound\" rev-parse --show-toplevel)"
     ]
   }
 }

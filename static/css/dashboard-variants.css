@@ -109,6 +109,13 @@
 }
 .tp-btn:hover { color: var(--ink); }
 .tp-btn svg { width: 19px; height: 19px; }
+/* Estado ativo (Shuffle / Repeat) — paintModes() alterna .on / .repeat-one */
+.tp-btn.on { color: var(--accent); }
+.tp-btn.repeat-one { position: relative; }
+.tp-btn.repeat-one::after {
+  content: "1"; position: absolute; top: 4px; right: 6px;
+  font-size: 9px; font-weight: 700; line-height: 1; color: var(--accent);
+}
 .tp-play {
   width: 46px; height: 46px; color: var(--ink);
   border: 1px solid var(--hair); background: rgba(255,255,255,0.02);
