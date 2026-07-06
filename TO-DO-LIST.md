@@ -72,6 +72,26 @@ O que falta fazer, em ordem de valor. Arquitetura e como rodar: ver
       (schema base — sem migração); a web reempurra os pads salvos a cada
       play/avanço de fila, porque troca de faixa limpa os pads no core.
 
+### 5.1 Refinamentos do Remixer (pós Filtro/EQ/Pads)
+
+- [ ] **Beatgrid real** — o snap dos pads (e a régua da waveform) assume o
+      grid começando em 0 s; detectar o downbeat (offset do primeiro tempo,
+      dá pra extrair no mesmo funil do Essentia) ou permitir ajuste manual,
+      pra seleção cair em compassos de verdade.
+- [ ] **Marcadores dos 6 pads na waveform** — hoje o overlay mostra só o
+      pad ativo/último tocado; chips numerados com as 6 regiões (clicar no
+      chip = toggle do pad) fariam a tela ler como um sampler.
+- [ ] **Performance nos pads** — atalhos de teclado 1–6 e modo momentâneo
+      opcional (segurar = toca, soltar = volta), pro gesto de pad físico.
+- [ ] **Pads da variação Stem Ready** — a captura decodifica o arquivo
+      master; com a variação tocando, capturar o mix de stems ao vivo (com
+      mudo/solo/gain aplicados) seria o esperado.
+- [ ] **Ress do Filtro como controle real** — hoje é readout fixo (Q 0.707);
+      virar arrastável mapeando no `w=` do biquad.
+- [ ] **Medidor: clip/peak-hold** — segurar o pico por ~1 s e acender o
+      segmento de clip perto de 0 dBFS; se o poll de 120 ms incomodar,
+      migrar os níveis pro SSE que o core já expõe.
+
 ## 6. Superfície mobile
 
 - [ ] Implementar `Rolfsound iPhone.html` do handoff de design
