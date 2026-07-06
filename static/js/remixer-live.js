@@ -103,7 +103,7 @@
         pitch_semitones: pitchSemis,
         tempo_ratio: (targetBpm || origBpm()) / origBpm(),
       });
-    }, 150);
+    }, 60); /* o core agora responde em ~150 ms (ring pós-DSP) — debounce curto */
   }
 
   function wireKnob(name) {

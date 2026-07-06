@@ -76,7 +76,9 @@
       "Bash(curl -s -m 5 -X POST http://127.0.0.1:8766/api/queue/repeat -H \"Content-Type: application/json\" -d '{\"mode\":\"one\"}')",
       "Bash(git -C \"d:/lb . d/rolfsound/rolfsound-web\" status --short)",
       "Bash(git -C \"d:/lb . d/rolfsound/rolfsound\" status --short)",
-      "Bash(git -C \"d:/lb . d/rolfsound/rolfsound\" rev-parse --show-toplevel)"
+      "Bash(git -C \"d:/lb . d/rolfsound/rolfsound\" rev-parse --show-toplevel)",
+      "PowerShell(python -m pytest \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\tests\\\\test_playback_service.py\" -x -q 2>$null)",
+      "PowerShell(python \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\e342c51c-6627-4a3e-816c-75c489ff06d9\\\\scratchpad\\\\latency_check.py\")"
     ]
   }
 }
