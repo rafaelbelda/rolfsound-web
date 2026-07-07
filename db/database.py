@@ -56,6 +56,10 @@ def _create_tables(conn):
             genre         TEXT,
             total_tracks  INTEGER,
             cover         TEXT,
+            -- cor de acento escolhida no editor (#rrggbb). NULL/'' = derivar da
+            -- capa automaticamente (comportamento padrão). É do álbum: vale para
+            -- todas as suas faixas, igual à capa.
+            accent        TEXT,
             kind          TEXT NOT NULL DEFAULT 'album',
             created_at    INTEGER NOT NULL DEFAULT 0
         );
@@ -436,7 +440,7 @@ def find_or_create_album(conn, title, artist=None, year=None, genre=None) -> str
 
 
 def update_album(conn, album_id: str, data: dict) -> None:
-    allowed = {"title", "artist", "year", "genre", "total_tracks", "cover", "kind"}
+    allowed = {"title", "artist", "year", "genre", "total_tracks", "cover", "kind", "accent"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if "title" in updates:
         updates["title"] = (updates["title"] or "").strip() or "Álbum"

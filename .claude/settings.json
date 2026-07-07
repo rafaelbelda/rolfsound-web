@@ -156,7 +156,12 @@
       "Bash(node --check static/js/export-dialog.js)",
       "Bash(.venv/Scripts/python main.py)",
       "Skill(run)",
-      "Skill(run:*)"
+      "Skill(run:*)",
+      "Bash(git check-ignore *)",
+      "Bash(./.venv/Scripts/python -c \"import PIL; from PIL import ImageFont; print\\('PIL ok', PIL.__version__\\)\")",
+      "Bash(./.venv/Scripts/python -c \"import playwright; print\\('playwright', playwright.__version__\\)\")",
+      "Bash(./.venv/Scripts/python -c \"import selenium; print\\('selenium', selenium.__version__\\)\")",
+      "Bash(python -m py_compile db/database.py api/routes/albums.py api/routes/bootstrap.py api/track_view.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lucbo\\Documents\\rolfsound-pack\\rolfsound\\services",

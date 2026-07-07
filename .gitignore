@@ -14,6 +14,8 @@ db/*.db
 music/
 cache/
 config.json
+# Capas de álbum (baixadas do Discogs / escolhidas no editor) — dado do acervo
+static/covers/
 
 # Binário do extrator Essentia — tools/setup_essentia.py baixa por plataforma
 tools/essentia/

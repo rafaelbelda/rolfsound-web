@@ -169,7 +169,9 @@
     input.type = 'file'; input.accept = 'image/*'; input.hidden = true;
     scope.appendChild(input);
     let staged = null;
-    art.addEventListener('click', () => input.click());
+    // enquanto o conta-gotas está ativo, clicar na capa PEGA cor — não abre o
+    // seletor de arquivo (os dois moram na mesma .tpp-edit-art).
+    art.addEventListener('click', () => { if (art.dataset.eyedrop === '1') return; input.click(); });
     input.addEventListener('change', () => {
       const f = input.files && input.files[0];
       if (!f) return;
@@ -204,6 +206,129 @@
     });
   }
 
+  /* ---------- cor de acento (por álbum, escolhida no editor) ----------
+     O acento normalmente é derivado da capa que está tocando (prototype.js).
+     Aqui o usuário FIXA uma cor para o álbum — conta-gotas na própria capa ou
+     código HEX. Como a capa, é do álbum: vale para todas as suas faixas. Fica
+     staged até o Salvar (Cancelar descarta). A prévia usa RolfAccent.legible
+     para mostrar a cor REAL que a UI vai renderizar (crua se já legível sobre os
+     painéis escuros, erguida no mesmo matiz se o pixel for escuro demais). */
+  // extrai a URL de um `background` CSS (url() com aspas simples/duplas ou sem)
+  const urlFromBg = (bg) => { const m = /url\((['"]?)(.*?)\1\)/i.exec(bg || ''); return m ? m[2] : ''; };
+  const HEX_RE = /^#?[0-9a-f]{6}$/i;
+  const normHex = (v) => {
+    const s = String(v == null ? '' : v).trim().replace(/^#/, '');
+    return HEX_RE.test(s) ? ('#' + s.toLowerCase()) : '';
+  };
+  const toHex = (r, g, b) => '#' + [r, g, b].map((n) => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0')).join('');
+  const legiblePreview = (hex) => (window.RolfAccent ? window.RolfAccent.legible(hex) : hex);
+
+  function wireAccentPicker(scope, curAccent) {
+    const block = $('[data-accent-block]', scope);
+    if (!block) return { pending: () => null };
+    const art      = $('.tpp-edit-art', scope);
+    const swatch   = $('[data-accent-swatch]', block);
+    const hexIn    = $('[data-accent-hex]', block);
+    const pickBtn  = $('[data-accent-pick]', block);
+    const resetBtn = $('[data-accent-reset]', block);
+    const hint     = $('[data-accent-hint]', block);
+
+    const orig = normHex(curAccent);
+    let chosen = orig;      // '' = automático (deriva da capa)
+    let picking = false;
+
+    function paint() {
+      block.classList.toggle('is-auto', !chosen);
+      if (chosen) {
+        const shown = legiblePreview(chosen);
+        swatch.style.background = shown;
+        if (document.activeElement !== hexIn) hexIn.value = chosen;
+        hint.textContent = shown.toLowerCase() !== chosen.toLowerCase() ? 'ajustada p/ contraste' : '';
+      } else {
+        swatch.style.background = '';
+        if (document.activeElement !== hexIn) hexIn.value = '';
+        hint.textContent = '';
+      }
+    }
+    function setChosen(hex) { chosen = normHex(hex); paint(); }
+
+    hexIn.addEventListener('input', () => {
+      const v = normHex(hexIn.value);
+      if (v) { chosen = v; paint(); }                       // hex válido → aplica
+      else if (hexIn.value.trim() === '') { chosen = ''; paint(); }   // vazio → auto
+    });
+    resetBtn.addEventListener('click', () => { stopPick(); setChosen(''); hexIn.focus(); });
+
+    /* ---- conta-gotas na capa (canvas) ----
+       Desenha a capa num canvas no tamanho natural e lê o pixel sob o cursor.
+       As capas do backend são same-origin (leitura ok); capa remota sem CORS
+       "tainta" o canvas — aí o conta-gotas fica no-op e o HEX segue valendo. */
+    let img = null, cnv = null, cx = null, builtUrl = '';
+    function ensureCanvas() {
+      const url = urlFromBg(art && art.style.background);
+      if (!url || (cnv && url === builtUrl)) return;
+      builtUrl = url; cnv = null; cx = null;
+      img = new Image(); img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (url !== builtUrl) return;   // outra capa foi staged nesse meio tempo
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth || 300; c.height = img.naturalHeight || 300;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        try { ctx.drawImage(img, 0, 0); cnv = c; cx = ctx; } catch (_) { cnv = null; cx = null; }
+      };
+      img.src = url;
+    }
+    // cover-fit: a capa usa center/cover (recorta p/ preencher). Mapeamos o
+    // cursor (dentro da caixa) para o pixel da imagem realmente visível ali.
+    function colorAt(ev) {
+      if (!cx) return '';
+      const box = art.getBoundingClientRect();
+      const bw = box.width, bh = box.height, iw = cnv.width, ih = cnv.height;
+      const scale = Math.max(bw / iw, bh / ih);
+      const offX = (bw - iw * scale) / 2, offY = (bh - ih * scale) / 2;
+      let sx = (ev.clientX - box.left - offX) / scale;
+      let sy = (ev.clientY - box.top  - offY) / scale;
+      sx = Math.max(0, Math.min(iw - 1, sx)); sy = Math.max(0, Math.min(ih - 1, sy));
+      try { const p = cx.getImageData(sx | 0, sy | 0, 1, 1).data; return toHex(p[0], p[1], p[2]); }
+      catch (_) { return ''; }
+    }
+    function onMove(ev) {
+      const c = colorAt(ev);
+      if (!c) return;
+      swatch.style.background = legiblePreview(c);
+      hexIn.value = c; hint.textContent = 'clique p/ fixar';
+    }
+    function onPick(ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      const c = colorAt(ev);
+      stopPick();
+      if (c) setChosen(c);
+    }
+    function startPick() {
+      if (!art) return;
+      ensureCanvas();
+      picking = true;
+      art.dataset.eyedrop = '1';
+      block.classList.add('is-picking'); art.classList.add('is-eyedrop');
+      art.addEventListener('pointermove', onMove);
+      art.addEventListener('click', onPick, true);
+    }
+    function stopPick() {
+      if (!picking) return;
+      picking = false;
+      delete art.dataset.eyedrop;
+      block.classList.remove('is-picking'); art.classList.remove('is-eyedrop');
+      art.removeEventListener('pointermove', onMove);
+      art.removeEventListener('click', onPick, true);
+      paint();
+    }
+    pickBtn.addEventListener('click', () => { picking ? stopPick() : startPick(); });
+
+    paint();
+    // pending(): null = inalterado; '' = voltar ao auto; '#rrggbb' = fixar
+    return { pending: () => (chosen === orig ? null : chosen) };
+  }
+
   /* ---------- editor ---------- */
   function openEditor(row) {
     const m = meta(row);
@@ -228,6 +353,16 @@
             <div class="repl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M5 19h14"/></svg>Trocar capa</div>
           </div>
           ${albumCount > 1 ? `<div style="text-align:center;opacity:.55;font-size:11px;line-height:1.4">A capa é do álbum — muda nas ${albumCount} faixas</div>` : ''}
+          <div class="tpp-accent" data-accent-block>
+            <span class="tpp-accent-title">Cor de acento</span>
+            <div class="tpp-accent-ctl">
+              <span class="tpp-accent-swatch" data-accent-swatch aria-hidden="true"></span>
+              <input class="tpp-input mono tpp-accent-hex" data-accent-hex maxlength="7" placeholder="Auto" spellcheck="false" aria-label="Código HEX">
+              <button type="button" class="tpp-accent-btn" data-accent-pick title="Conta-gotas na capa" aria-label="Conta-gotas na capa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3a2.4 2.4 0 0 1 0 3.4l-1.6 1.6 1.2 1.2-1.4 1.4-1.2-1.2-6.2 6.2c-.2.2-.5.4-.8.4l-3 .9.9-3c.1-.3.2-.6.4-.8l6.2-6.2-1.2-1.2 1.4-1.4 1.2 1.2L15.6 3A2.4 2.4 0 0 1 19 3z"/></svg></button>
+              <button type="button" class="tpp-accent-btn" data-accent-reset title="Voltar ao automático" aria-label="Voltar ao automático"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 1 2.3 5.6"/><path d="M4 20v-4.5h4.5"/></svg></button>
+            </div>
+            <div class="tpp-accent-hint" data-accent-hint></div>
+          </div>
         </div>
         <div class="tpp-fields">
           <div class="tpp-field col2"><span class="tpp-label">Título da faixa</span><input class="tpp-input" data-f="title" value="${esc(m.title)}"></div>
@@ -242,6 +377,7 @@
       </div>`;
     wireClose();
     const cover = wireCoverPicker(inner);
+    const accent = wireAccentPicker(inner, (albumInfo(m.albumId) || {}).accent || '');
     const save = $('[data-edit-save]', inner);
     if (save) save.addEventListener('click', async () => {
       const get = (f) => $(`[data-f="${f}"]`, inner)?.value.trim() || '';
@@ -285,7 +421,7 @@
             year: (t.year != null && t.year !== '') ? String(t.year) : (prev.year || ''),
             genre: t.genre || prev.genre || '', total: t.album_total || prev.total || 0,
             count: prev.count || 0, kind: t.album_kind || prev.kind || 'album',
-            cover: prev.cover || m.bg || '',
+            cover: prev.cover || m.bg || '', accent: prev.accent || '',
           };
         }
         // capa staged sobe DEPOIS do PATCH: se a membership trocou o álbum,
@@ -298,6 +434,26 @@
           } catch (err) {
             console.error('cover upload failed:', err);
             document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Metadados salvos, mas a capa falhou', kicker: 'Erro' } }));
+          }
+        }
+        // cor de acento (do álbum): '' volta ao automático, '#..' fixa. Vai para
+        // o álbum ATUAL da faixa, igual à capa. applyAlbum reflete ao vivo.
+        const accentVal = accent.pending();
+        if (accentVal !== null) {
+          const targetAlbum = t.album_id || m.albumId;
+          if (targetAlbum) {
+            try {
+              const ares = await fetch(`api/albums/${encodeURIComponent(targetAlbum)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accent: accentVal }),
+              });
+              if (!ares.ok) throw new Error('HTTP ' + ares.status);
+              if (window.RolfAccent) window.RolfAccent.applyAlbum(targetAlbum, accentVal);
+            } catch (err) {
+              console.error('accent save failed:', err);
+              document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Metadados salvos, mas a cor falhou', kicker: 'Erro' } }));
+            }
           }
         }
         const ti = row.querySelector('.row-title'); if (ti) ti.textContent = v.title;
@@ -498,7 +654,7 @@
             id: albumId, title: al.title || v.title, artist: al.artist || v.artist,
             year: yStr, genre: al.genre || '', total: al.total_tracks || 0,
             count: prev.count || ids.length, kind: al.kind || prev.kind || 'album',
-            cover: prev.cover || bg || '',
+            cover: prev.cover || bg || '', accent: prev.accent || '',
           };
         }
         // herança: reflete nos datasets das faixas do álbum (sem reload)

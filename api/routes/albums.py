@@ -25,6 +25,9 @@ class AlbumMetadataUpdate(BaseModel):
     genre: str | None = None
     total_tracks: int | None = None      # "número de músicas" (null = derivar)
     cover: str | None = None
+    # cor de acento (#rrggbb) escolhida no editor; "" volta ao automático (deriva
+    # da capa). Só entra no UPDATE quando enviado (model_dump exclude_unset).
+    accent: str | None = None
     kind: str | None = None
 
 

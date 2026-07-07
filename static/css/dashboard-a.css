@@ -79,12 +79,16 @@ body {
 .isl-btn svg { width: 20px; height: 20px; flex: none; }
 .isl-btn span {
   font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
-  max-width: 0; overflow: hidden; white-space: nowrap;
-  opacity: 0; transition: max-width 0.28s var(--ease), opacity 0.2s var(--ease);
+  /* Fixed-width slot: the active label swaps in place instead of resizing
+     the island. Every section's active button is the same width, so the
+     nav no longer grows/shrinks (and shifts) as you move between sections.
+     66px comfortably fits the widest label ("Discovery" ≈ 63px). */
+  width: 0; overflow: hidden; white-space: nowrap; text-align: center;
+  opacity: 0; transition: width 0.28s var(--ease), opacity 0.2s var(--ease);
 }
 .isl-btn:hover { color: var(--ink); background: rgba(255,255,255,0.04); }
 .isl-btn.active { color: var(--accent); background: var(--accent-soft); }
-.isl-btn.active span { max-width: 90px; opacity: 1; }
+.isl-btn.active span { width: 66px; opacity: 1; }
 .isl-sep { width: 1px; height: 22px; background: var(--hair); margin: 0 4px; flex: none; }
 
 /* device status capsule (subtle) */

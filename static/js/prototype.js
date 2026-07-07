@@ -98,7 +98,13 @@
   // o estado real vindo do core.
   function showTrack(d) {
     setDuration(+d.dur || 0);
-    applyAccent(d.bg);
+    // o acento pode ser fixo do álbum (editor) — resolvemos o album_id pela row
+    // da faixa, então todo caminho de play (clique, reconciliação do core, fila)
+    // respeita a cor salva sem precisar carregá-la em cada objeto `d`.
+    const albumId = d.albumId
+      || $$('.screen[data-screen="acervo"] .row').find((r) => r.dataset.id === d.id)?.dataset.albumId
+      || '';
+    applyAccent(d.bg, albumId);
     lastTrack = d;
     if (tp.cover) tp.cover.style.background = d.bg;
     if (tp.title) tp.title.textContent = d.title;
@@ -297,6 +303,18 @@
     return toHex(...best);
   }
 
+  // Cor escolhida à mão no editor: respeitamos EXATAMENTE o tom pego (WYSIWYG)
+  // quando ele já lê bem sobre os painéis escuros; só quando o pixel é escuro/
+  // apagado demais (falha o piso de contraste) subimos a luz mantendo o mesmo
+  // matiz, via a mesma máquina do acento automático. Assim o usuário vê o que
+  // pegou, mas a UI nunca fica ilegível.
+  function legibleAccent(hex) {
+    const [r, g, b] = hexToRgb(hex);   // sempre um trio (cai no acento-marca se inválido)
+    if (contrast(relLuminance(r, g, b), PANEL_L) >= 4.0) return toHex(r, g, b);
+    const [, C, h] = rgbToOklch(r, g, b);
+    return normalizeAccent(h, C);
+  }
+
   const accentCache = new Map();
   let accentToken = 0;
   const sampleCv = document.createElement('canvas');
@@ -324,8 +342,17 @@
     img.src = url;
   }
 
-  // flood the whole UI with the accent pulled from the now-playing cover art.
-  function applyAccent(bg) {
+  // flood the whole UI with the accent pulled from the now-playing cover art —
+  // a menos que o álbum da faixa tenha uma cor fixada no editor: aí ela manda
+  // (passada pelo piso de legibilidade), sem amostrar a capa.
+  function applyAccent(bg, albumId) {
+    const saved = albumId && window.RolfAlbums && window.RolfAlbums[albumId]
+      && window.RolfAlbums[albumId].accent;
+    if (saved) {
+      const [r, g, b] = hexToRgb(legibleAccent(saved));
+      setAccentFromRgb(r, g, b);
+      return;
+    }
     const url = urlFromBg(bg);
     if (url) {
       sampleCoverColor(url, (hex) => {
@@ -345,6 +372,24 @@
     }
     setAccentFromRgb(r, g, b);
   }
+
+  // Editor fixou/limpou a cor de um álbum: guarda no catálogo em memória e, se a
+  // faixa tocando agora é desse álbum, troca o acento ao vivo (hex vazio = volta
+  // a derivar da capa).
+  function applyAlbumAccent(albumId, hex) {
+    if (!albumId) return;
+    if (window.RolfAlbums && window.RolfAlbums[albumId]) {
+      window.RolfAlbums[albumId].accent = hex || '';
+    }
+    const active = $('.screen[data-screen="acervo"] .row.active');
+    if (active && (active.dataset.albumId || '') === albumId) {
+      applyAccent(active.querySelector('.row-cover')?.style.background || '', albumId);
+    }
+  }
+
+  // superfície mínima p/ o editor (track-panels.js): prever a cor REAL que vai
+  // renderizar (legible) e refletir a escolha ao vivo (applyAlbum).
+  window.RolfAccent = { legible: legibleAccent, applyAlbum: applyAlbumAccent, DEFAULT: DEFAULT_ACCENT };
 
   const viz = $('[data-viz]');
   let vizActive = false;

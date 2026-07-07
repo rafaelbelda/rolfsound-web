@@ -54,6 +54,8 @@ def _albums_payload(conn, rows: list) -> dict:
             "count":  a.get("track_count") or 0,     # faixas de fato no acervo
             "kind":   a.get("kind") or "album",
             "cover":  cover_css(cover),
+            # cor de acento fixada no editor ("" = derivar da capa ao tocar)
+            "accent": a.get("accent") or "",
         }
     return out
 

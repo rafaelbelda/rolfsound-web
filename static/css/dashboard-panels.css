@@ -63,6 +63,39 @@
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; color: var(--accent);
 }
 
+/* ---------- cor de acento (por álbum) ---------- */
+.tpp-accent { display: flex; flex-direction: column; gap: 7px; }
+.tpp-accent-title { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); }
+.tpp-accent-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tpp-accent-swatch {
+  width: 30px; height: 30px; flex: none; border-radius: 8px;
+  border: 1px solid var(--hair); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+}
+/* estado "automático": swatch com um risco diagonal (= sem cor fixada) */
+.tpp-accent.is-auto .tpp-accent-swatch {
+  background:
+    linear-gradient(135deg, transparent calc(50% - 1px), var(--ink-faint) 50%, transparent calc(50% + 1px)),
+    rgba(255,255,255,0.04);
+}
+.tpp-accent-hex {
+  flex: 1; min-width: 62px; height: 30px; padding: 0 9px;
+  font-size: 12px; text-transform: uppercase;
+}
+.tpp-accent-btn {
+  width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--hair); border-radius: 8px; background: none; color: var(--ink-dim); cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.tpp-accent-btn svg { width: 15px; height: 15px; }
+.tpp-accent-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
+.tpp-accent.is-picking [data-accent-pick] {
+  color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, transparent); background: var(--accent-soft);
+}
+.tpp-accent-hint { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em; color: var(--ink-faint); min-height: 10px; }
+/* conta-gotas ativo: mira na capa e esconde o overlay "Trocar capa" */
+.tpp-edit-art.is-eyedrop { cursor: crosshair; box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent), inset 0 0 40px rgba(0,0,0,0.4); }
+.tpp-edit-art.is-eyedrop .repl { opacity: 0 !important; pointer-events: none; }
+
 .tpp-fields { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; align-content: start; }
 .tpp-field { display: flex; flex-direction: column; gap: 6px; }
 .tpp-field.col2 { grid-column: 1 / -1; }
