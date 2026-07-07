@@ -56,7 +56,9 @@ def track_view(r: dict, stems: list | None = None, primary: bool = False) -> dic
         "fav":    bool(r.get("fav")),
         "tags":   r.get("tags") or [],
         "dur":    r.get("duration") or 0,
-        "cover":  cover_css(r.get("thumbnail")),
+        # capa é do álbum (a.cover, via JOIN); thumbnail é a arte embutida do
+        # arquivo, usada como fallback quando o álbum não tem capa própria
+        "cover":  cover_css(r.get("album_cover") or r.get("thumbnail")),
         # papéis de stems ('vocals'|'drums'|'bass'|'other') — só a VARIAÇÃO
         # Stem Ready os carrega (badge de 4 pontos + lanes no Remixer);
         # a original fica limpa

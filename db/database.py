@@ -213,7 +213,8 @@ _TRACK_SELECT = """
            a.year         AS year,
            a.genre        AS genre,
            a.total_tracks AS album_total,
-           a.kind         AS album_kind
+           a.kind         AS album_kind,
+           a.cover        AS album_cover
     FROM tracks t
     LEFT JOIN albums a ON a.id = t.album_id
 """
@@ -333,6 +334,7 @@ def scan_and_reconcile(conn, music_dir):
                 break
         # Arquivo solto sem tags entra como single (o próprio arquivo é o álbum).
         album_id = create_single_album(conn, f.stem, "")
+        seed_album_cover(conn, album_id, thumb)
         conn.execute("""
             INSERT OR IGNORE INTO tracks
                 (id, title, artist, duration, thumbnail, file_path,
@@ -408,9 +410,11 @@ def create_album(conn, title, artist=None, year=None, genre=None,
 
 
 def create_single_album(conn, track_title="", artist=None) -> str:
-    """Single: cada faixa avulsa é o próprio álbum, rotulado 'Single'. Sempre
-    cria um novo (o single é único da faixa)."""
-    return create_album(conn, "Single", artist, total_tracks=1, kind="single")
+    """Single: cada faixa avulsa é o próprio álbum, com o título da faixa
+    (fallback 'Single'). Sempre cria um novo — o single é único da faixa e
+    NUNCA é deduplicado por título (senão faixas homônimas dividiriam capa)."""
+    title = (track_title or "").strip() or "Single"
+    return create_album(conn, title, artist, total_tracks=1, kind="single")
 
 
 def find_or_create_album(conn, title, artist=None, year=None, genre=None) -> str:
@@ -441,6 +445,18 @@ def update_album(conn, album_id: str, data: dict) -> None:
     fields = ", ".join(f'"{k}" = ?' for k in updates)
     values = list(updates.values()) + [album_id]
     conn.execute(f"UPDATE albums SET {fields} WHERE id = ?", values)
+
+
+def seed_album_cover(conn, album_id: str, cover: str | None) -> None:
+    """Semeia a capa do álbum a partir da arte de uma faixa (import/Discogs).
+    SÓ preenche se o álbum ainda não tem capa — capa explícita (escolhida no
+    editor via POST /albums/{id}/cover) nunca é sobrescrita por reimport."""
+    if not album_id or not cover:
+        return
+    conn.execute(
+        "UPDATE albums SET cover = ? WHERE id = ? AND (cover IS NULL OR cover = '')",
+        (cover, album_id),
+    )
 
 
 def set_track_album(conn, track_id: str, album_id: str) -> None:
@@ -602,7 +618,7 @@ def get_group_members(conn, group_id: str) -> list[dict]:
     ).fetchone()
     primary = row["primary_track_id"] if row else None
     rows = conn.execute(
-        "SELECT * FROM tracks WHERE version_group_id = ? ORDER BY date_added ASC",
+        _TRACK_SELECT + " WHERE t.version_group_id = ? ORDER BY t.date_added ASC",
         (group_id,)
     ).fetchall()
     members = [dict(r) for r in rows]

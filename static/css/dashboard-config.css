@@ -132,24 +132,6 @@
 .cfg-seg button.active { color: var(--ink); background: rgba(255,255,255,0.07); }
 .cfg-seg button.accent.active { color: var(--accent); background: var(--accent-soft); }
 
-/* accent swatches */
-.cfg-swatches { display: flex; gap: 8px; }
-.cfg-swatch {
-  width: 26px; height: 26px; border-radius: 8px; cursor: pointer;
-  border: 1px solid var(--hair-soft); position: relative;
-  transition: transform 0.14s var(--ease);
-}
-.cfg-swatch:hover { transform: translateY(-1px); }
-.cfg-swatch.on { border-color: var(--ink); }
-.cfg-swatch.on::after {
-  content: ""; position: absolute; inset: 0; margin: auto; width: 7px; height: 7px;
-  border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
-}
-.cfg-swatch.album {
-  display: grid; place-items: center;
-  background: repeating-conic-gradient(#c8693c 0deg 90deg, #3c9a8f 90deg 180deg, #6b6bd6 180deg 270deg, #c2557a 270deg 360deg);
-}
-
 /* danger row link */
 .cfg-link {
   background: none; border: none; cursor: pointer; padding: 0;

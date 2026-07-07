@@ -167,6 +167,9 @@ class DownloadManager:
                         meta.get("title") or title,
                         meta.get("artist") or meta.get("channel") or "",
                     )
+                # Capa mora no álbum: thumbnail do vídeo semeia albums.cover
+                # (só se o álbum ainda não tem capa própria).
+                database.seed_album_cover(conn, album_id, local_thumb or remote_thumb)
 
                 database.insert_track(conn, {
                     "id":             track_id,

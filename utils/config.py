@@ -40,6 +40,11 @@ _DEFAULTS = {
     # Detecção de BPM/tom ao importar (toggle "Detecção de BPM e tom" no
     # Config) — roda o extrator Essentia em api/services/audio_analysis.
     "bpm_key_analysis_enabled":  True,
+    # Aparência (Config → Aparência) — carregada/persistida por
+    # static/js/config.js, aplicada no boot via window.RolfAppearance.
+    # (A cor de acento não é configurável: sempre reativa à capa tocando.)
+    "ui_viz_density":            "medium",  # dense | medium | wide (campo de pontos)
+    "ui_reduce_motion":          False,
     # Caminho do binário essentia_streaming_extractor_music — preenchido por
     # tools/setup_essentia.py. Vazio = análise desligada até rodar o setup.
     "essentia_extractor_path":   "",

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rolfsound V2 — Protótipo</title>
+  <title>Rolfsound - Dashboard</title>
   <link rel="stylesheet" href="static/css/dashboard.css" />
   <link rel="stylesheet" href="static/css/dashboard-variants.css" />
   <link rel="stylesheet" href="static/css/dashboard-a.css" />
@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="static/css/remixer-live.css" />
   <link rel="stylesheet" href="static/css/remixer-stems.css" />
   <link rel="stylesheet" href="static/css/versions.css" />
+  <link rel="stylesheet" href="static/css/dashboard-export.css" />
   <link rel="stylesheet" href="static/css/dashboard-discovery.css" />
 </head>
 <body>
@@ -673,7 +674,7 @@
               </div>
               <div class="cfg-row">
                 <div class="cfg-row-text"><span class="cfg-row-label">Manter mix de stems ao trocar de faixa</span><span class="cfg-row-sub">Mudo, solo e faders sobrevivem à próxima faixa · padrão: resetar</span></div>
-                <div class="cfg-row-ctrl"><span class="sw" data-sw data-stems-keep></span></div>
+                <div class="cfg-row-ctrl"><span class="sw" data-sw data-cfg-key="stems_keep_mix"></span></div>
               </div>
             </div>
 
@@ -696,7 +697,7 @@
               </div>
               <div class="cfg-row">
                 <div class="cfg-row-text"><span class="cfg-row-label">Detecção de BPM e tom</span><span class="cfg-row-sub">Analisa ao importar para o cofre</span></div>
-                <div class="cfg-row-ctrl"><span class="sw on" data-sw data-bpm-analysis></span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw data-cfg-key="bpm_key_analysis_enabled"></span></div>
               </div>
             </div>
 
@@ -704,30 +705,18 @@
             <div class="cfg-group">
               <div class="cfg-group-head"><div class="sec-label">Aparência</div><span class="cfg-group-note">Caixa de luz reativa</span></div>
               <div class="cfg-row">
-                <div class="cfg-row-text"><span class="cfg-row-label">Cor de acento</span><span class="cfg-row-sub">Reage à capa da faixa tocando, ou fixa</span></div>
-                <div class="cfg-row-ctrl">
-                  <div class="cfg-swatches" data-cfg-accent>
-                    <span class="cfg-swatch album on" data-accent="album" title="Capa do álbum"></span>
-                    <span class="cfg-swatch" data-accent="#c8693c" style="background:#c8693c" title="Ember"></span>
-                    <span class="cfg-swatch" data-accent="#3c9a8f" style="background:#3c9a8f" title="Teal"></span>
-                    <span class="cfg-swatch" data-accent="#6b6bd6" style="background:#6b6bd6" title="Indigo"></span>
-                    <span class="cfg-swatch" data-accent="#c2557a" style="background:#c2557a" title="Magenta"></span>
-                  </div>
-                </div>
-              </div>
-              <div class="cfg-row">
                 <div class="cfg-row-text"><span class="cfg-row-label">Densidade do visualizador</span><span class="cfg-row-sub">Espaçamento do campo de pontos</span></div>
                 <div class="cfg-row-ctrl">
-                  <div class="cfg-seg" data-cfg-seg>
-                    <button>Denso</button>
-                    <button class="active">Médio</button>
-                    <button>Amplo</button>
+                  <div class="cfg-seg" data-cfg-seg data-cfg-key="ui_viz_density">
+                    <button data-val="dense">Denso</button>
+                    <button class="active" data-val="medium">Médio</button>
+                    <button data-val="wide">Amplo</button>
                   </div>
                 </div>
               </div>
               <div class="cfg-row">
                 <div class="cfg-row-text"><span class="cfg-row-label">Movimento reduzido</span><span class="cfg-row-sub">Desativa pulsos e animações</span></div>
-                <div class="cfg-row-ctrl"><span class="sw" data-sw></span></div>
+                <div class="cfg-row-ctrl"><span class="sw" data-sw data-cfg-key="ui_reduce_motion"></span></div>
               </div>
             </div>
 
@@ -860,6 +849,9 @@
   <script src="static/js/dash.js"></script>
   <script src="static/js/dash-contextmenu.js"></script>
   <script src="static/js/prototype.js"></script>
+  <!-- config.js depois do prototype.js: os handlers visuais togglam
+       primeiro; aqui só lemos o estado e persistimos em /api/settings -->
+  <script src="static/js/config.js"></script>
   <script src="static/js/acervo.js"></script>
   <script src="static/js/playlists.js"></script>
   <script src="static/js/track-panels.js"></script>
@@ -870,6 +862,7 @@
   <script src="static/js/remixer-live.js"></script>
   <script src="static/js/stems.js"></script>
   <script src="static/js/versions.js"></script>
+  <script src="static/js/export-dialog.js"></script>
   <script src="static/js/search-engine.js"></script>
   <script src="static/js/discovery.js"></script>
   <!-- playback.js por último: liga os botões aos endpoints do core e

@@ -572,15 +572,22 @@ async def index_file(track_id: str, file_path: str) -> dict:
     conn = database.get_connection()
     try:
         database.update_track_metadata(conn, track_id, update)
-        # O ano identificado é do álbum: preenche só se ainda estiver vazio
-        # (não sobrescreve um ano que o usuário já pôs no álbum).
-        if identified_year:
+        # Ano e capa identificados são do álbum: preenchem só se ainda vazios
+        # (nunca sobrescrevem o que o usuário já pôs no álbum). E o single
+        # acompanha o título identificado da faixa (invariante: single = a
+        # própria música).
+        if identified_year or update.get("thumbnail") or update.get("title"):
             track = database.get_track(conn, track_id)
             album_id = track.get("album_id") if track else None
-            if album_id:
-                album = database.get_album(conn, album_id)
-                if album and not album.get("year"):
+            album = database.get_album(conn, album_id) if album_id else None
+            if album:
+                if identified_year and not album.get("year"):
                     database.update_album(conn, album_id, {"year": identified_year})
+                database.seed_album_cover(conn, album_id, update.get("thumbnail"))
+                new_title = (update.get("title") or "").strip()
+                if (new_title and album.get("kind") == "single"
+                        and album.get("title") != new_title):
+                    database.update_album(conn, album_id, {"title": new_title})
         conn.commit()
     finally:
         conn.close()

@@ -391,6 +391,9 @@ async def upload_track(file: UploadFile = File(...)):
         else:
             album_id = database.create_single_album(
                 conn, tags["title"] or stem, tags["artist"] or "")
+        # A capa mora no álbum: a arte embutida do arquivo semeia albums.cover
+        # (primeiro arquivo com arte vence; capa escolhida à mão nunca é sobrescrita).
+        database.seed_album_cover(conn, album_id, thumb)
         database.insert_track(conn, {
             "id":             track_id,
             "title":          tags["title"] or stem,

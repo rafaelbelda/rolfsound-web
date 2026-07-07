@@ -531,26 +531,6 @@
     if (action === 'dossier' && row) openDossierFor(row);
   });
 
-  /* ============================================================
-     CONFIG — "Detecção de BPM e tom" (analisa ao importar)
-     O visual (.on) é do handler genérico de [data-sw] no prototype.js;
-     aqui só carregamos o valor salvo e persistimos a mudança.
-     ============================================================ */
-  function wireBpmAnalysisToggle() {
-    const sw = $('[data-bpm-analysis]');
-    if (!sw) return;
-    fetch('api/settings')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cfg) => { if (cfg) sw.classList.toggle('on', cfg.bpm_key_analysis_enabled !== false); })
-      .catch(() => {});
-    sw.addEventListener('click', () => {
-      const enabled = sw.classList.contains('on');   // prototype.js já togglou
-      fetch('api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: { bpm_key_analysis_enabled: enabled } }),
-      }).catch((e) => console.error('bpm analysis toggle save failed:', e));
-    });
-  }
-  wireBpmAnalysisToggle();
+  /* O toggle "Detecção de BPM e tom" do Config é carregado/persistido
+     pelo config.js genérico (data-cfg-key="bpm_key_analysis_enabled"). */
 })();

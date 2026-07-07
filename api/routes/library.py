@@ -5,6 +5,8 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
+from api.services import exporter
 from api.services.indexer import index_file
 from api.track_view import track_view
 
@@ -64,8 +66,12 @@ async def list_library():
 
 
 @router.get("/library/{track_id}/download")
-async def download_track(track_id: str):
-    """Serve the audio file as a download attachment."""
+def download_track(track_id: str, format: str = "original", cover: bool = True):
+    """Exporta o áudio como "NN Título.ext" com os metadados do Acervo
+    gravados no arquivo; format=flac|mp3|wav converte via PyAV (popup
+    "Exportar faixa"). Def síncrono: o trabalho roda no threadpool."""
+    if format not in exporter.EXPORT_FORMATS:
+        raise HTTPException(status_code=400, detail=f"format deve ser um de {exporter.EXPORT_FORMATS}")
     conn = database.get_connection()
     try:
         track = database.get_track(conn, track_id)
@@ -74,7 +80,19 @@ async def download_track(track_id: str):
         filepath = track.get("file_path")
         if not filepath or not os.path.exists(filepath):
             raise HTTPException(status_code=404, detail="File not found on disk")
-        filename = Path(filepath).name
+        filename = exporter.export_filename(track, format)
+        try:
+            tagged = exporter.export_copy(track, format, cover=cover)
+        except Exception:
+            raise HTTPException(status_code=500, detail=f"Conversão para {format} falhou")
+        if tagged:
+            return FileResponse(
+                path=tagged,
+                filename=filename,
+                media_type="application/octet-stream",
+                background=BackgroundTask(os.remove, tagged),
+            )
+        # sem como gravar tags neste formato — serve o original com o nome certo
         return FileResponse(
             path=filepath,
             filename=filename,
@@ -158,11 +176,19 @@ async def update_track_route(track_id: str, req: TrackMetadataUpdate):
                 album_id = track.get("album_id")   # já é single: mantém
             else:
                 album_id = database.create_single_album(
-                    conn, track.get("title") or "", artist)
+                    conn, data.get("title") or track.get("title") or "", artist)
             if album_id and album_id != track.get("album_id"):
                 database.set_track_album(conn, track_id, album_id)
 
         database.update_track_metadata(conn, track_id, data)
+        # Invariante: single tem o título da própria música — renomear a faixa
+        # renomeia o single junto (a membership acima pode ter trocado o álbum,
+        # então relê a faixa para decidir sobre o álbum ATUAL).
+        new_title = (data.get("title") or "").strip()
+        if new_title and new_title != (track.get("title") or ""):
+            fresh = database.get_track(conn, track_id) or {}
+            if fresh.get("album_kind") == "single" and fresh.get("album_id"):
+                database.update_album(conn, fresh["album_id"], {"title": new_title})
         conn.commit()
         return {"ok": True, "track": database.get_track(conn, track_id)}
     finally:
@@ -298,7 +324,7 @@ async def delete_track(track_id: str):
 
         # Delete local thumbnail if it's a local path (not a URL).
         # "/thumbs/x.jpg" is the served alias for a sidecar in music_directory.
-        thumb = track.get("thumbnail", "")
+        thumb = track.get("thumbnail") or ""   # a coluna existe com NULL — o default do .get não pega
         if thumb.startswith("/thumbs/"):
             from utils.config import get as cfg_get
             thumb = os.path.join(cfg_get("music_directory", "./music"), thumb[len("/thumbs/"):])

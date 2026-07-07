@@ -159,6 +159,51 @@
     if (row) row.click();
   }
 
+  /* ---------- capa do álbum (Trocar capa nos dois editores) ---------- */
+  // A capa mora no ÁLBUM (albums.cover) — trocar reflete em todas as faixas
+  // dele. O arquivo fica staged até o Salvar; Cancelar descarta sem subir nada.
+  function wireCoverPicker(scope) {
+    const art = $('.tpp-edit-art', scope);
+    if (!art) return { pending: () => null, upload: async () => null };
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.hidden = true;
+    scope.appendChild(input);
+    let staged = null;
+    art.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      staged = f;
+      art.style.background = `url("${URL.createObjectURL(f)}") center/cover no-repeat, #141416`;
+    });
+    return {
+      pending: () => staged,
+      async upload(albumId) {
+        if (!staged || !albumId) return null;
+        const fd = new FormData();
+        fd.append('file', staged);
+        const res = await fetch(`api/albums/${encodeURIComponent(albumId)}/cover`, { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();   // { ok, cover, cover_css, track_ids }
+      },
+    };
+  }
+
+  // Reflete a capa nova nas rows do Acervo e no catálogo em memória, sem reload.
+  // (Entradas já na fila mantêm a arte antiga até serem re-enfileiradas.)
+  function applyAlbumCover(albumId, coverCss) {
+    if (!albumId || !coverCss) return;
+    if (window.RolfAlbums && window.RolfAlbums[albumId]) {
+      window.RolfAlbums[albumId].cover = coverCss;
+    }
+    acervoRows().forEach((r) => {
+      if ((r.dataset.albumId || '') !== albumId) return;
+      const c = r.querySelector('.row-cover');
+      if (c) c.style.background = coverCss;
+      if ('bg' in r.dataset) r.dataset.bg = coverCss;
+    });
+  }
+
   /* ---------- editor ---------- */
   function openEditor(row) {
     const m = meta(row);
@@ -166,6 +211,10 @@
     // é reenviada se ESTE campo mudar, senão editar artista/bpm não moveria a
     // faixa de álbum sem querer.
     const origAlbum = m.albumKind === 'single' ? '' : m.album;
+    // capa é do álbum: com mais de uma faixa no álbum, avisa que troca todas
+    const albumCount = m.albumId
+      ? acervoRows().filter((r) => (r.dataset.albumId || '') === m.albumId).length
+      : 1;
     inner.innerHTML =
       `<div class="tpp-head">
         <div><div class="tpp-kicker">Editar informações</div><div class="tpp-h-title">${esc(m.title)}</div></div>
@@ -178,6 +227,7 @@
           <div class="tpp-edit-art" style='background:${m.bg}'>
             <div class="repl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M5 19h14"/></svg>Trocar capa</div>
           </div>
+          ${albumCount > 1 ? `<div style="text-align:center;opacity:.55;font-size:11px;line-height:1.4">A capa é do álbum — muda nas ${albumCount} faixas</div>` : ''}
         </div>
         <div class="tpp-fields">
           <div class="tpp-field col2"><span class="tpp-label">Título da faixa</span><input class="tpp-input" data-f="title" value="${esc(m.title)}"></div>
@@ -191,6 +241,7 @@
         <div class="tpp-editor-note" style="opacity:.55;font-size:12px;margin-top:4px">Ano e gênero agora são do álbum — edite em "Editar álbum".</div>
       </div>`;
     wireClose();
+    const cover = wireCoverPicker(inner);
     const save = $('[data-edit-save]', inner);
     if (save) save.addEventListener('click', async () => {
       const get = (f) => $(`[data-f="${f}"]`, inner)?.value.trim() || '';
@@ -236,6 +287,18 @@
             count: prev.count || 0, kind: t.album_kind || prev.kind || 'album',
             cover: prev.cover || m.bg || '',
           };
+        }
+        // capa staged sobe DEPOIS do PATCH: se a membership trocou o álbum,
+        // ela vai para o álbum ATUAL da faixa (t.album_id do servidor)
+        if (cover.pending()) {
+          const targetAlbum = t.album_id || m.albumId;
+          try {
+            const cres = await cover.upload(targetAlbum);
+            if (cres && cres.cover_css) applyAlbumCover(targetAlbum, cres.cover_css);
+          } catch (err) {
+            console.error('cover upload failed:', err);
+            document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Metadados salvos, mas a capa falhou', kicker: 'Erro' } }));
+          }
         }
         const ti = row.querySelector('.row-title'); if (ti) ti.textContent = v.title;
         const a = row.querySelector('.row-artist'); if (a) a.textContent = v.artist;
@@ -392,7 +455,11 @@
         <button class="tpp-btn accent" data-album-save><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>Salvar</button>
       </div>
       <div class="tpp-editor">
-        <div class="tpp-edit-cover"><div class="tpp-edit-art" style='background:${bgQuote(bg)}'></div></div>
+        <div class="tpp-edit-cover">
+          <div class="tpp-edit-art" style='background:${bgQuote(bg)}'>
+            <div class="repl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M5 19h14"/></svg>Trocar capa</div>
+          </div>
+        </div>
         <div class="tpp-fields">
           <div class="tpp-field col2"><span class="tpp-label">Nome do álbum</span><input class="tpp-input" data-f="title" value="${esc(title)}"></div>
           <div class="tpp-field"><span class="tpp-label">Artista</span><input class="tpp-input" data-f="artist" value="${esc(artist)}"></div>
@@ -403,6 +470,7 @@
       </div>`;
     wireClose();
     attachAutocomplete($('[data-f="artist"]', inner), uniqueArtists);
+    const cover = wireCoverPicker(inner);
     const save = $('[data-album-save]', inner);
     if (save) save.addEventListener('click', async () => {
       const get = (f) => $(`[data-f="${f}"]`, inner)?.value.trim() || '';
@@ -443,6 +511,16 @@
           r.dataset.albumTotal = al.total_tracks || '';
           r.dataset.albumKind = al.kind || 'album';
         });
+        // capa staged: sobe depois do PATCH e reflete nas rows ao vivo
+        if (cover.pending()) {
+          try {
+            const cres = await cover.upload(albumId);
+            if (cres && cres.cover_css) applyAlbumCover(albumId, cres.cover_css);
+          } catch (err) {
+            console.error('cover upload failed:', err);
+            document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: 'Álbum salvo, mas a capa falhou', kicker: 'Erro' } }));
+          }
+        }
         document.dispatchEvent(new CustomEvent('rolf:toast', { detail: { text: al.title || v.title, kicker: 'Álbum salvo' } }));
         openAlbumById(albumId);
       } catch (e) {
@@ -500,7 +578,6 @@
     if (!row) return;
     if (action === 'edit')       openEditor(row);
     if (action === 'album')      openAlbum(row);
-    if (action === 'album-edit') openAlbumEditor(row.dataset.albumId);
     if (action === 'artist')     openArtist(row);
   });
 

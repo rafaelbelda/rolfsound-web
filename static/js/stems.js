@@ -741,28 +741,9 @@
     else assignFiles(files);
   }, true);
 
-  /* ============================================================
-     CONFIG — "Manter mix de stems ao trocar de faixa"
-     O visual (.on) é do handler genérico de [data-sw] no prototype.js;
-     aqui só carregamos o valor salvo e persistimos a mudança
-     (POST /api/settings → config.json da web + repasse ao core).
-     ============================================================ */
-  function wireKeepMixToggle() {
-    const sw = $('[data-stems-keep]');
-    if (!sw) return;
-    fetch('api/settings')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cfg) => { if (cfg) sw.classList.toggle('on', !!cfg.stems_keep_mix); })
-      .catch(() => {});
-    sw.addEventListener('click', () => {
-      const enabled = sw.classList.contains('on');   // prototype.js já togglou
-      fetch('api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings: { stems_keep_mix: enabled } }),
-      }).catch((e) => console.error('stems keep_mix save failed:', e));
-    });
-  }
+  /* O toggle "Manter mix de stems" do Config é carregado/persistido
+     pelo config.js genérico (data-cfg-key="stems_keep_mix"); o
+     settings.py repassa a mudança ao core. */
 
   /* ============================================================
      WIRING
@@ -792,7 +773,6 @@
       });
     }
     buildManageTool();
-    wireKeepMixToggle();
     updateButton();
 
     // faixa carregada/trocada no Remixer (prototype.js → showTrack):

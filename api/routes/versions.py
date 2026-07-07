@@ -66,7 +66,7 @@ def _version_dict(t: dict, primary_id: str | None) -> dict:
         "bpm":        t.get("bpm") or 0,
         "key":        t.get("key") or "",
         "dur":        t.get("duration") or 0,
-        "cover":      cover_css(t.get("thumbnail")),
+        "cover":      cover_css(t.get("album_cover") or t.get("thumbnail")),
         "is_primary": t.get("id") == primary_id,
         # variação Stem Ready — versions.js acende o mini badge de 4 pontos
         "stem_ready": bool(t.get("stem_source_id")),

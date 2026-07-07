@@ -170,7 +170,6 @@
 
   /* ---------------- reactive accent + fullscreen visualizer ---------------- */
   let lastTrack = null;
-  let accentMode = 'album';   // 'album' = react to cover art; or a pinned hex
 
   function hexToRgb(hex) {
     const m = /#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i.exec(hex || '');
@@ -327,11 +326,9 @@
 
   // flood the whole UI with the accent pulled from the now-playing cover art.
   function applyAccent(bg) {
-    if (accentMode !== 'album') return;   // a fixed accent is pinned
     const url = urlFromBg(bg);
     if (url) {
       sampleCoverColor(url, (hex) => {
-        if (accentMode !== 'album') return;   // may have been pinned while the image loaded
         const [r, g, b] = hexToRgb(hex);
         setAccentFromRgb(r, g, b);
       });
@@ -347,13 +344,6 @@
       r = +m[1]; g = +m[2]; b = +m[3];
     }
     setAccentFromRgb(r, g, b);
-  }
-
-  function setAccentColor(hex) {
-    const [r, g, b] = hexToRgb(hex);
-    const root = document.documentElement.style;
-    root.setProperty('--accent', hex);
-    root.setProperty('--accent-soft', `rgba(${r},${g},${b},0.16)`);
   }
 
   const viz = $('[data-viz]');
@@ -629,6 +619,7 @@
       case 'fav':     if (row) { const on = toggleFav(row); toast(trackData(row).title, on ? 'Favoritada' : 'Removida dos favoritos'); } break;
       case 'rename':  if (row) startRename(row); break;
       case 'remove':  if (row) removeRow(row); break;
+      case 'export':  break;  // handled by export-dialog.js
       case 'edit': case 'album': case 'artist': break;  // handled by track-panels.js
       case 'import': case 'dossier': break;  // handled by importer.js
       case 'playlist': break;  // handled by playlists.js
@@ -826,42 +817,33 @@
     $$('.cap-trk').forEach((x) => x.classList.remove('live')); t.classList.add('live');
   }));
 
-  /* ---------------- configurações / conta ---------------- */
-  // switches
+  /* ---------------- configurações / conta ----------------
+     Aparência: os APLICADORES vivem aqui e ficam expostos em
+     window.RolfAppearance — o config.js os chama no boot para
+     reaplicar a escolha salva em /api/settings. A cor de acento não
+     tem aplicador: é SEMPRE derivada da capa tocando (applyAccent). */
+  function applyVizDensity(token) {
+    const gap = { dense: 18, medium: 24, wide: 32 }[token] || 24;
+    const vd = $('.viz-dots'); if (vd) vd.dataset.gap = gap;
+  }
+  function applyReduceMotion(on) {
+    document.body.classList.toggle('reduce-motion', !!on);
+  }
+  window.RolfAppearance = {
+    density: applyVizDensity,
+    reduceMotion: applyReduceMotion,
+  };
+
+  // switches (persistência: config.js, via data-cfg-key)
   $$('.cfg [data-sw]').forEach((sw) => sw.addEventListener('click', () => {
     sw.classList.toggle('on');
-    // "movimento reduzido" mirrors the label
-    const label = sw.closest('.cfg-row')?.querySelector('.cfg-row-label')?.textContent || '';
-    if (/movimento reduzido/i.test(label)) {
-      document.body.classList.toggle('reduce-motion', sw.classList.contains('on'));
-    }
+    if (sw.dataset.cfgKey === 'ui_reduce_motion') applyReduceMotion(sw.classList.contains('on'));
   }));
   // segmented single-select
   $$('.cfg [data-cfg-seg]').forEach((g) => g.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     $$('button', g).forEach((x) => x.classList.remove('active')); b.classList.add('active');
-    // density seg → respace the fullscreen dot field
-    const label = g.closest('.cfg-row')?.querySelector('.cfg-row-label')?.textContent || '';
-    if (/densidade/i.test(label)) {
-      const gap = { 'Denso': 18, 'Médio': 24, 'Amplo': 32 }[b.textContent.trim()] || 24;
-      const vd = $('.viz-dots'); if (vd) vd.dataset.gap = gap;
-    }
-  }));
-  // accent mode swatches
-  $$('[data-cfg-accent] .cfg-swatch').forEach((sw) => sw.addEventListener('click', () => {
-    $$('[data-cfg-accent] .cfg-swatch').forEach((x) => x.classList.remove('on'));
-    sw.classList.add('on');
-    const val = sw.dataset.accent;
-    if (val === 'album') {
-      accentMode = 'album';
-      if (lastTrack) applyAccent(lastTrack.bg);   // re-derive from now-playing
-      else { const c = tp.cover && tp.cover.style.background; if (c) { accentMode = 'album'; applyAccent(c); } }
-      toast('Acento reativo à capa', 'Álbum');
-    } else {
-      accentMode = val;
-      setAccentColor(val);
-      toast('Acento fixo', val.toUpperCase());
-    }
+    if (g.dataset.cfgKey === 'ui_viz_density') applyVizDensity(b.dataset.val);
   }));
   // account links
   $$('.cfg .cfg-link').forEach((b) => b.addEventListener('click', () => {
