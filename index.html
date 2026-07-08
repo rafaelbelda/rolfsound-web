@@ -29,8 +29,8 @@
 
     <!-- ============ PERSISTENT TOP STRIP ============ -->
     <div class="topbar">
-      <div class="tb-brand">
-        <span class="word">Rolf<span class="ac">sound.</span></span>
+      <div class="tb-nowmatrix" title="BPM · Tom da faixa atual" aria-label="BPM e tom da faixa atual">
+        <canvas class="tb-nowmatrix-cv" data-gap="4" data-r="1.1"></canvas>
       </div>
 
       <nav class="island" aria-label="Navegação">
@@ -137,6 +137,7 @@
               <button class="acv-menu-item" data-sort="key">Tom</button>
               <button class="acv-menu-item" data-sort="title">Título</button>
               <button class="acv-menu-item" data-sort="dur">Duração</button>
+              <button class="acv-menu-item" data-sort="plays">Plays</button>
               <div class="acv-menu-sep"></div>
               <button class="acv-menu-item" data-sort="dir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13M3 12h9M3 17h5M18 8v9M18 17l3-3M18 17l-3-3"/></svg>Inverter ordem</button>
             </div>
@@ -146,7 +147,7 @@
         <div class="work ledger">
           <div class="ledger-scroll scroll">
             <div class="tbl-head">
-              <span>Adicionada</span><span></span><span>Faixa</span><span>BPM</span><span>Tom</span><span>Estado · Tags</span><span>Origem</span><span class="r">Dur</span>
+              <span>Adicionada</span><span></span><span>Faixa</span><span>BPM</span><span>Tom</span><span>Estado · Tags</span><span>Origem</span><span class="r">Plays</span><span class="r">Dur</span>
             </div>
             <!-- rows renderizadas por render.js a partir de RolfsoundData.tracks -->
           </div>
@@ -737,6 +738,9 @@
               </div>
             </div>
 
+            <div class="cfg-brand">
+              <span class="word">Rolf<span class="ac">sound.</span></span>
+            </div>
             <div class="cfg-about">
               <span>Rolfsound Console V2</span><span class="d"></span><span>Build 2.4.1</span><span class="d"></span><span>Termos</span><span class="d"></span><span>Privacidade</span>
             </div>
@@ -857,6 +861,7 @@
   <script src="static/js/track-panels.js"></script>
   <script src="static/js/importer.js"></script>
   <script src="static/js/prototype-motion.js"></script>
+  <script src="static/js/topbar-now.js"></script>
   <script src="static/js/seekbar.js"></script>
   <script src="static/js/tp-scrub-line.js"></script>
   <script src="static/js/remixer-live.js"></script>

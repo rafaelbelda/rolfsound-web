@@ -245,4 +245,5 @@
 .ledger-scroll.as-grid .row-key,
 .ledger-scroll.as-grid .row-tags,
 .ledger-scroll.as-grid .fmt,
+.ledger-scroll.as-grid .row-plays,
 .ledger-scroll.as-grid .row-dur { display: none; }

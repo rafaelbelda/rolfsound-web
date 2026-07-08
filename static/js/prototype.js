@@ -108,9 +108,8 @@
     lastTrack = d;
     if (tp.cover) tp.cover.style.background = d.bg;
     if (tp.title) tp.title.textContent = d.title;
-    if (tp.sub) tp.sub.innerHTML = d.artist
-      ? `${d.artist}${d.bpm ? ` <span style="width:3px;height:3px;border-radius:50%;background:var(--ink-faint)"></span> ${d.bpm} BPM` : ''}${d.key ? ` <span class="tag" style="margin-left:2px">${d.key}</span>` : ''}`
-      : '';
+    // BPM/tom saíram daqui — agora vivem na telinha de pontinhos da topbar (topbar-now.js)
+    if (tp.sub) tp.sub.textContent = d.artist || '';
     // move the active marker + eq into the matching acervo row
     $$('.row').forEach((r) => {
       r.classList.remove('active');

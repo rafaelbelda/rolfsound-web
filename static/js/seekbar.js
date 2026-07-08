@@ -41,6 +41,35 @@
     return (t && t.textContent.trim()) || 'rolfsound';
   }
 
+  /* ---- picos reais da faixa TOCANDO (mesmo endpoint do Remixer) ----
+     Chegam via rolf:status → track_id; enquanto a extração em background
+     não terminou (404), o draw cai no envelope "tide" sintético de sempre
+     e re-buscamos em intervalos — nunca fica em branco. */
+  var wave = { id: '', peaks: null, timer: null, tries: 0 };
+
+  function fetchWave(id) {
+    fetch('/api/library/' + encodeURIComponent(id) + '/waveform')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (wave.id !== id) return;    // a faixa já trocou
+        var peaks = data && Array.isArray(data.peaks) && data.peaks.length ? data.peaks : null;
+        if (peaks) { wave.peaks = peaks; return; }
+        if (wave.tries < 12 && !wave.timer) {
+          wave.tries++;
+          wave.timer = setTimeout(function () { wave.timer = null; fetchWave(id); }, 5000);
+        }
+      })
+      .catch(function () {});
+  }
+
+  document.addEventListener('rolf:status', function (e) {
+    var id = (e.detail && e.detail.track_id) || '';
+    if (!id || id === wave.id) return;
+    wave.id = id; wave.peaks = null; wave.tries = 0;
+    if (wave.timer) { clearTimeout(wave.timer); wave.timer = null; }
+    fetchWave(id);
+  });
+
   // route a seek to where playback actually lives: o CORE (via bridge)
   function doSeek(frac) {
     frac = clamp01(frac);
@@ -67,7 +96,7 @@
     var lastSig = trackSig();
     var hoverFrac = -1;          // -1 = not hovering
     var scrubbing = false;
-    var lastDrawnPos = -1, lastDrawnHover = -2;
+    var lastDrawnPos = -1, lastDrawnHover = -2, lastDrawnPeaks = null;
 
     var BAR = 2, GAP = 2;        // bar + gap in CSS px
     var SIGMA = 0.075;          // width of the crest (cascade falloff)
@@ -107,8 +136,9 @@
 
     function draw(force) {
       var pos = clamp01(Player.pos);
-      if (!force && Math.abs(pos - lastDrawnPos) < 0.0006 && hoverFrac === lastDrawnHover) return;
-      lastDrawnPos = pos; lastDrawnHover = hoverFrac;
+      if (!force && Math.abs(pos - lastDrawnPos) < 0.0006
+          && hoverFrac === lastDrawnHover && wave.peaks === lastDrawnPeaks) return;
+      lastDrawnPos = pos; lastDrawnHover = hoverFrac; lastDrawnPeaks = wave.peaks;
 
       var rgb = hexRgb(accent());
       var ar = rgb[0], ag = rgb[1], ab = rgb[2];
@@ -125,9 +155,17 @@
         prevHi = Math.max(pos, hoverFrac);
       }
 
+      var pk = wave.peaks;   // onda real quando analisada; senão, o tide
+
       for (var i = 0; i < n; i++) {
         var f = (i + 0.5) / n;
-        var bh = tide(f, pos, t) * (H * 0.58);
+        var bh;
+        if (pk) {
+          var amp = pk[Math.min(pk.length - 1, Math.floor(f * pk.length))] || 0.02;
+          bh = Math.max(1.5, amp * (H * 0.92));
+        } else {
+          bh = tide(f, pos, t) * (H * 0.58);
+        }
         var x = i * step;
         var played = f <= pos;
         var inPrev = f > prevLo && f <= prevHi;
@@ -228,7 +266,9 @@
       if (sig !== lastSig) { lastSig = sig; seed = hash(sig); lastDrawnPos = -1; }
       var pos = clamp01(Player.pos);
       head.style.left = (pos * 100).toFixed(2) + '%';
-      draw(playing());      // force a redraw while playing so the tide flows
+      // com onda real a forma é estática (o guard do draw repinta quando a
+      // posição anda); só o tide sintético precisa de redraw contínuo
+      draw(playing() && !wave.peaks);
       requestAnimationFrame(tick);
     }
 

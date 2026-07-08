@@ -56,6 +56,8 @@ def track_view(r: dict, stems: list | None = None, primary: bool = False) -> dic
         "fav":    bool(r.get("fav")),
         "tags":   r.get("tags") or [],
         "dur":    r.get("duration") or 0,
+        # plays válidos (streams): só conta quando 60%+ da faixa foi ouvida
+        "plays":  r.get("streams") or 0,
         # capa é do álbum (a.cover, via JOIN); thumbnail é a arte embutida do
         # arquivo, usada como fallback quando o álbum não tem capa própria
         "cover":  cover_css(r.get("album_cover") or r.get("thumbnail")),

@@ -27,6 +27,7 @@
      fav:    false,
      tags:   ['ambient'],
      dur:    228,                  // segundos
+     plays:  4,                    // plays válidos (60%+ da faixa ouvida)
      cover:  'linear-gradient(150deg,#c8693c,#5a2f1a 56%,#141416)', // background CSS
      group:  '',                   // id do grupo de versões ('' = solta)
      vlabel: '',                   // rótulo da versão ('Instrumental', …)

@@ -35,18 +35,10 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 30px;
 }
-.tb-brand {
-  display: flex; align-items: baseline; gap: 10px;
-}
-.tb-brand .word {
-  font-family: var(--font-brand);
-  font-size: 24px; font-weight: 700; color: var(--ink); letter-spacing: 0;
-}
-.tb-brand .word .ac { color: var(--accent); }
-.tb-brand .ver {
-  font-family: var(--font-mono); font-size: 8px;
-  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint);
-}
+/* BPM + tom da faixa atual em dot-matrix (topbar-now.js) —
+   só os pontos acesos, sem moldura, no lugar da antiga logo */
+.tb-nowmatrix { display: flex; align-items: center; }
+.tb-nowmatrix canvas { display: block; }
 
 /* the Dynamic Island */
 .island {
@@ -124,7 +116,7 @@ body {
 .appshell .top-title { font-size: 32px; }
 .appshell .ledger-scroll { padding-left: 36px; padding-right: 36px; }
 .appshell .tbl-head, .appshell .row {
-  grid-template-columns: 64px 52px 1fr 96px 70px 168px 132px 70px;
+  grid-template-columns: 64px 52px 1fr 96px 70px 168px 132px 52px 70px;
 }
 /* float the mini-player transport over the page */
 /* float the mini-player dock over the page; the glass surface

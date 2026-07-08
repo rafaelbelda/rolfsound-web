@@ -68,7 +68,7 @@
   };
   const collapsed = new Set();
 
-  const SORT_LABEL = { added: 'Adicionada', bpm: 'BPM', key: 'Tom', title: 'Título', dur: 'Duração' };
+  const SORT_LABEL = { added: 'Adicionada', bpm: 'BPM', key: 'Tom', title: 'Título', dur: 'Duração', plays: 'Plays' };
   const FMT_LABEL = { vinil: 'Vinil', cd: 'CD', digital: 'Digital' };
   const FMT_SVG = {
     vinil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>',
@@ -174,7 +174,7 @@
   function cmp(a, b) {
     const k = state.sortKey, da = a.dataset, db = b.dataset;
     let r;
-    if (k === 'bpm' || k === 'dur' || k === 'added') r = (+da[k]) - (+db[k]);
+    if (k === 'bpm' || k === 'dur' || k === 'added' || k === 'plays') r = (+da[k]) - (+db[k]);
     else r = (da[k] || '').localeCompare(db[k] || '');
     if (r === 0) r = (+db.added || 0) - (+da.added || 0);
     return r * state.dir;

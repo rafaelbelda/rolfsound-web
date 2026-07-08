@@ -227,12 +227,19 @@ async def upload_stem(track_id: str, role: str, file: UploadFile = File(...)):
             codec=facts.get("codec") or facts.get("ext"),
             added_at=int(time.time()),
         )
+        # arquivo novo ⇒ picos antigos (substituição) não valem mais
+        database.delete_stem_waveform(conn, track_id, role)
         conn.commit()
         stem = database.get_stem(conn, track_id, role)
         # 2ª camada completa ⇒ a variação Stem Ready nasce sozinha.
         variant = sync_stem_variant(conn, track_id)
     finally:
         conn.close()
+
+    # onda real da camada, extraída em background (a lane usa o placeholder
+    # sintético até os picos chegarem — mesmo padrão do master)
+    from api.services.indexer import enqueue_waveform_analysis
+    enqueue_waveform_analysis(track_id, str(dest), role=role)
 
     warning = None
     master_dur = track.get("duration")
@@ -271,6 +278,20 @@ async def delete_stem(track_id: str, role: str):
             logger.warning(f"stems: não removeu {path}: {e}")
 
     return {"ok": True, "deleted": role, "variant": variant}
+
+
+@router.get("/library/{track_id}/stems/waveforms")
+async def get_stem_waveforms(track_id: str):
+    """{role: picos 0..1} das camadas já analisadas — as lanes do Remixer
+    desenham a onda real de cada stem. Papéis ainda não analisados ficam de
+    fora e o front mantém o placeholder sintético para eles."""
+    conn = database.get_connection()
+    try:
+        track_id, _track_row = _redirect_variant(conn, track_id)
+        waveforms = database.get_stem_waveforms(conn, track_id)
+    finally:
+        conn.close()
+    return {"ok": True, "track_id": track_id, "waveforms": waveforms}
 
 
 @router.get("/library/{track_id}/stems/{role}/download")

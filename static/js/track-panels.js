@@ -34,6 +34,7 @@
       key:    row.dataset.key || row.querySelector('.row-key')?.textContent || '',
       bg:     row.querySelector('.row-cover')?.style.background || '',
       dur:    row.querySelector('.row-dur')?.textContent || '',
+      plays:  parseInt(row.dataset.plays, 10) || 0,
     };
   }
   function effArtist(row) { return meta(row).artist; }
@@ -371,6 +372,7 @@
           <div class="tpp-field"><span class="tpp-label">Nº da faixa${m.albumTotal ? ' (de ' + m.albumTotal + ')' : ''}</span><input class="tpp-input mono" data-f="track_no" value="${m.trackNo || ''}" placeholder="—"></div>
           <div class="tpp-field"><span class="tpp-label">BPM</span><input class="tpp-input mono" data-f="bpm" value="${esc(m.bpm)}"></div>
           <div class="tpp-field"><span class="tpp-label">Tom</span><input class="tpp-input mono" data-f="key" value="${esc(m.key)}"></div>
+          <div class="tpp-field"><span class="tpp-label">Plays</span><input class="tpp-input mono" value="${m.plays}" disabled title="Conta quando 60%+ da faixa é ouvida"></div>
           <div class="tpp-field col2"><span class="tpp-label">Tags</span><input class="tpp-input" data-f="tags" value="${esc(m.tags)}" placeholder="separadas por espaço"></div>
         </div>
         <div class="tpp-editor-note" style="opacity:.55;font-size:12px;margin-top:4px">Ano e gênero agora são do álbum — edite em "Editar álbum".</div>

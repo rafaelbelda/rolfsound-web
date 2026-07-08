@@ -111,6 +111,13 @@ async def get_track_waveform(track_id: str):
     try:
         waveform = database.get_waveform(conn, track_id)
         if not waveform:
+            # variação Stem Ready toca o mesmo arquivo da original — os picos
+            # são os dela (a variação nem entra no backfill de extração)
+            track = database.get_track(conn, track_id)
+            src = track.get("stem_source_id") if track else None
+            if src:
+                waveform = database.get_waveform(conn, src)
+        if not waveform:
             raise HTTPException(status_code=404, detail="Waveform not analyzed yet")
         return waveform
     finally:

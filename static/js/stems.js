@@ -117,6 +117,7 @@
       buildLanes(frame);
       frame.classList.add('stems-on');
       if (rmx) rmx.classList.add('stems-mode');
+      fetchStemWave();
       paintAll(true);
     } else {
       frame.classList.remove('stems-on');
@@ -279,6 +280,36 @@
     });
   }
 
+  /* ---------- onda real por camada ----------
+     Picos 0..1 extraídos do sidecar no upload (stem_waveforms). Enquanto a
+     extração em background não termina, paintLane cai no caráter sintético
+     por papel — nunca fica em branco (mesmo padrão do master no dash.js).
+     paintAll roda a ~9fps com as lanes ligadas, então os picos entram na
+     tela sozinhos quando chegam. */
+  const stemWave = { id: '', peaks: {}, timer: null, tries: 0 };
+
+  function fetchStemWave() {
+    const src = trackId ? sourceOf(trackId) : '';
+    if (!src) return;
+    if (stemWave.id !== src) {
+      stemWave.id = src; stemWave.peaks = {}; stemWave.tries = 0;
+      if (stemWave.timer) { clearTimeout(stemWave.timer); stemWave.timer = null; }
+    }
+    fetch('api/library/' + encodeURIComponent(src) + '/stems/waveforms')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || stemWave.id !== src) return;
+        stemWave.peaks = data.waveforms || {};
+        // camada presente ainda sem picos ⇒ extração em andamento; re-busca
+        const pending = rolesFor(trackId).some((role) => !stemWave.peaks[role]);
+        if (pending && lanesOn && !stemWave.timer && stemWave.tries < 12) {
+          stemWave.tries++;
+          stemWave.timer = setTimeout(() => { stemWave.timer = null; fetchStemWave(); }, 5000);
+        }
+      })
+      .catch(() => {});
+  }
+
   /* ---------- pintura das camadas ---------- */
   function hash(str) {
     let h = 2166136261 >>> 0;
@@ -331,10 +362,19 @@
     const n = Math.max(1, Math.floor(w / step));
     const mid = h / 2;
 
+    // onda real da camada quando os picos já chegaram; senão, o caráter
+    // sintético por papel (placeholder até a extração terminar)
+    const real = (stemWave.id === sourceOf(trackId)) ? stemWave.peaks[roleId] : null;
+
     for (let i = 0; i < n; i++) {
       const t = i / n;
-      const env = 0.25 + 0.75 * Math.sin(Math.min(Math.PI, t * Math.PI * 1.05));
-      const a = Math.max(0.04, Math.min(1, ampRole(roleId, i, t, seed) * env)) * gain;
+      let a;
+      if (real && real.length) {
+        a = (real[Math.min(real.length - 1, Math.floor(t * real.length))] || 0.02) * gain;
+      } else {
+        const env = 0.25 + 0.75 * Math.sin(Math.min(Math.PI, t * Math.PI * 1.05));
+        a = Math.max(0.04, Math.min(1, ampRole(roleId, i, t, seed) * env)) * gain;
+      }
       const bh = Math.max(1.5, a * h * 0.86);
       ctx.fillStyle = (t < played)
         ? `rgba(${cr},${cg},${cb},0.92)`
@@ -639,9 +679,14 @@
       if (added) set.add(role); else set.delete(role);
       v.stems = ROLES.map((r) => r.id).filter((rid) => set.has(rid));
     }
+    // arquivo novo/removido ⇒ os picos em cache dessa camada não valem mais
+    if (stemWave.id === sourceId) {
+      delete stemWave.peaks[role];
+      stemWave.tries = 0;
+    }
     if (trackId && sourceOf(trackId) === sourceId) {
       updateButton();
-      if (isVariant(trackId)) setLanes(true);   // reconstrói as lanes
+      if (isVariant(trackId)) setLanes(true);   // reconstrói as lanes (+ re-busca a onda)
     }
   }
 

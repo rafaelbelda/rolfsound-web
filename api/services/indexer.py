@@ -454,26 +454,28 @@ _waveform_queue: "asyncio.Queue | None" = None
 _waveform_worker: "asyncio.Task | None" = None
 
 
-def enqueue_waveform_analysis(track_id: str, file_path: str) -> None:
-    """Agenda a extração dos picos da forma de onda — nunca bloqueia o chamador."""
+def enqueue_waveform_analysis(track_id: str, file_path: str, role: str | None = None) -> None:
+    """Agenda a extração dos picos da forma de onda — nunca bloqueia o chamador.
+    role=None ⇒ master (track_waveforms); com role ⇒ camada (stem_waveforms)."""
     import asyncio
     global _waveform_queue, _waveform_worker
     if _waveform_queue is None:
         _waveform_queue = asyncio.Queue()
     if _waveform_worker is None or _waveform_worker.done():
         _waveform_worker = asyncio.create_task(_waveform_worker_loop())
-    _waveform_queue.put_nowait((track_id, file_path))
+    _waveform_queue.put_nowait((track_id, role, file_path))
 
 
 def enqueue_missing_waveform_backfill() -> int:
-    """Chamado do lifespan (api/app.py): faixas importadas antes desse recurso
-    existir não têm picos ainda — enfileira todas de uma vez (a fila já
-    processa uma por vez, então isso não afoga o boot nem a CPU)."""
+    """Chamado do lifespan (api/app.py): faixas (e stems) importados antes
+    desse recurso existir não têm picos ainda — enfileira tudo de uma vez (a
+    fila já processa um por vez, então isso não afoga o boot nem a CPU)."""
     import os
     from db import database
     conn = database.get_connection()
     try:
         missing = database.list_tracks_missing_waveform(conn)
+        missing_stems = database.list_stems_missing_waveform(conn)
     finally:
         conn.close()
     n = 0
@@ -481,6 +483,11 @@ def enqueue_missing_waveform_backfill() -> int:
         file_path = row.get("file_path")
         if file_path and os.path.exists(file_path):
             enqueue_waveform_analysis(row["id"], file_path)
+            n += 1
+    for row in missing_stems:
+        file_path = row.get("file_path")
+        if file_path and os.path.exists(file_path):
+            enqueue_waveform_analysis(row["track_id"], file_path, role=row["role"])
             n += 1
     return n
 
@@ -491,17 +498,21 @@ async def _waveform_worker_loop() -> None:
     from api.services.audio_analysis.waveform import extract_peaks
 
     while True:
-        track_id, file_path = await _waveform_queue.get()
+        track_id, role, file_path = await _waveform_queue.get()
         try:
             peaks = await extract_peaks(file_path)
             conn = database.get_connection()
             try:
-                database.upsert_waveform(conn, track_id, peaks, int(time.time()))
+                if role:
+                    database.upsert_stem_waveform(conn, track_id, role, peaks, int(time.time()))
+                else:
+                    database.upsert_waveform(conn, track_id, peaks, int(time.time()))
                 conn.commit()
             finally:
                 conn.close()
         except Exception:
-            logger.exception(f"waveform extraction failed for {track_id}")
+            logger.exception(f"waveform extraction failed for {track_id}"
+                             + (f" (stem {role})" if role else ""))
         finally:
             _waveform_queue.task_done()
 

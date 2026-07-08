@@ -192,6 +192,19 @@ def _create_tables(conn):
             added_at  INTEGER NOT NULL DEFAULT 0
         );
 
+        -- Envelope de amplitude POR STEM (mesmos picos 0..1 de track_waveforms,
+        -- um por camada), extraído no upload do sidecar — as lanes do Remixer
+        -- desenham a onda real de cada papel. track_id = ORIGINAL dona dos
+        -- sidecars (mesma chave de track_stems).
+        CREATE TABLE IF NOT EXISTS stem_waveforms (
+            track_id  TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+            role      TEXT NOT NULL CHECK (role IN ('vocals','drums','bass','other')),
+            peaks     TEXT NOT NULL,
+            buckets   INTEGER NOT NULL,
+            added_at  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (track_id, role)
+        );
+
         -- Pads de sample do Remixer: 6 slots por faixa com trechos (in/out em
         -- segundos da fonte). O áudio NÃO é persistido — o core recaptura do
         -- arquivo da faixa quando a web reempurra os pads no play.
@@ -384,6 +397,7 @@ def delete_track(conn, track_id):
     conn.execute("DELETE FROM downloads WHERE track_id = ?", (track_id,))
     conn.execute("DELETE FROM track_stems WHERE track_id = ?", (track_id,))
     conn.execute("DELETE FROM track_waveforms WHERE track_id = ?", (track_id,))
+    conn.execute("DELETE FROM stem_waveforms WHERE track_id = ?", (track_id,))
     # Álbum que ficou sem faixas não faz sentido (singles, sobretudo).
     if old_album:
         delete_album_if_empty(conn, old_album)
@@ -673,6 +687,7 @@ def delete_stem(conn, track_id, role):
     conn.execute(
         "DELETE FROM track_stems WHERE track_id = ? AND role = ?", (track_id, role)
     )
+    delete_stem_waveform(conn, track_id, role)
 
 
 def stems_map(conn) -> dict:
@@ -739,11 +754,55 @@ def get_waveform(conn, track_id: str) -> dict | None:
 
 def list_tracks_missing_waveform(conn) -> list[dict]:
     """Faixas com arquivo no disco e sem picos calculados ainda — usado pelo
-    backfill de boot (faixas importadas antes desse recurso existir)."""
+    backfill de boot (faixas importadas antes desse recurso existir).
+    Variações Stem Ready ficam de fora: compartilham o file_path da original,
+    então o GET /waveform delas cai nos picos da fonte."""
     rows = conn.execute("""
         SELECT t.id, t.file_path FROM tracks t
         LEFT JOIN track_waveforms w ON w.track_id = t.id
         WHERE w.track_id IS NULL AND t.file_path IS NOT NULL
+          AND t.stem_source_id IS NULL
+    """).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Waveform por stem (uma onda real por camada, para as lanes do Remixer) ───
+
+def upsert_stem_waveform(conn, track_id: str, role: str, peaks: list[float], added_at: int) -> None:
+    import json
+    conn.execute("""
+        INSERT INTO stem_waveforms (track_id, role, peaks, buckets, added_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(track_id, role) DO UPDATE SET
+            peaks    = excluded.peaks,
+            buckets  = excluded.buckets,
+            added_at = excluded.added_at
+    """, (track_id, role, json.dumps(peaks), len(peaks), added_at))
+
+
+def get_stem_waveforms(conn, track_id: str) -> dict:
+    """{role: [picos 0..1]} das camadas já analisadas da faixa."""
+    import json
+    rows = conn.execute(
+        "SELECT role, peaks FROM stem_waveforms WHERE track_id = ?", (track_id,)
+    ).fetchall()
+    return {r["role"]: json.loads(r["peaks"]) for r in rows}
+
+
+def delete_stem_waveform(conn, track_id: str, role: str) -> None:
+    conn.execute(
+        "DELETE FROM stem_waveforms WHERE track_id = ? AND role = ?", (track_id, role)
+    )
+
+
+def list_stems_missing_waveform(conn) -> list[dict]:
+    """Stems catalogados sem picos ainda — backfill de boot (sidecars enviados
+    antes desse recurso existir)."""
+    rows = conn.execute("""
+        SELECT s.track_id, s.role, s.file_path FROM track_stems s
+        LEFT JOIN stem_waveforms w
+               ON w.track_id = s.track_id AND w.role = s.role
+        WHERE w.track_id IS NULL
     """).fetchall()
     return [dict(r) for r in rows]
 
@@ -1107,6 +1166,20 @@ def get_track_stats(conn, track_id: str) -> dict:
         "skip_count":  skip_count,
         "skip_rate":   round(skip_count / play_count, 2) if play_count else 0.0,
     }
+
+
+def set_last_history_duration(conn, track_id: str, seconds: int) -> None:
+    """Grava o tempo OUVIDO (segundos reais, dos ticks do core) na entrada
+    mais recente do histórico da faixa — fechamento da sessão de escuta."""
+    row = conn.execute(
+        "SELECT id FROM history WHERE track_id = ? ORDER BY played_at DESC LIMIT 1",
+        (track_id,)
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE history SET duration_played = ? WHERE id = ?",
+            (seconds, row["id"])
+        )
 
 
 def mark_last_history_skipped(conn, track_id: str) -> None:

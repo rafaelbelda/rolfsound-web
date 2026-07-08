@@ -101,6 +101,7 @@
       (t.track_no ? ' data-track-no="' + (+t.track_no) + '"' : '') +
       (t.year ? ' data-year="' + esc(t.year) + '"' : '') +
       (t.genre ? ' data-genre="' + esc(t.genre) + '"' : '') +
+      ' data-plays="' + (+t.plays || 0) + '"' +
       ' data-dur="' + (+t.dur || 0) + '">' +
       '<div class="row-coord">' + dateLabel(t.added) + '</div>' +
       '<span class="row-cover cover" style="background:' + (t.cover || '') + '"></span>' +
@@ -109,6 +110,7 @@
       '<div class="row-key">' + esc(t.key) + '</div>' +
       '<div class="row-tags">' + favStar + (STATE_TAG[t.state] || '') + stemsBadgeHtml(t.stems) + versionsBadgeHtml(vcount) + tags + '</div>' +
       '<div class="fmt">' + (FMT_SVG[t.fmt] || '') + (FMT_LABEL[t.fmt] || '') + '</div>' +
+      '<div class="row-plays">' + (+t.plays || '') + '</div>' +
       '<div class="row-dur">' + mmss(t.dur) + '</div>' +
       '</div>';
   }

@@ -161,7 +161,20 @@
       "Bash(./.venv/Scripts/python -c \"import PIL; from PIL import ImageFont; print\\('PIL ok', PIL.__version__\\)\")",
       "Bash(./.venv/Scripts/python -c \"import playwright; print\\('playwright', playwright.__version__\\)\")",
       "Bash(./.venv/Scripts/python -c \"import selenium; print\\('selenium', selenium.__version__\\)\")",
-      "Bash(python -m py_compile db/database.py api/routes/albums.py api/routes/bootstrap.py api/track_view.py)"
+      "Bash(python -m py_compile db/database.py api/routes/albums.py api/routes/bootstrap.py api/track_view.py)",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\topbar-now.js\")",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\prototype.js\")",
+      "PowerShell(Test-NetConnection -ComputerName 127.0.0.1 -Port 8766 -InformationLevel Quiet -WarningAction SilentlyContinue)",
+      "PowerShell($r = Invoke-WebRequest -Uri \"http://127.0.0.1:8766/\" -UseBasicParsing; if \\($r.Content -match 'tb-nowmatrix'\\) { \"index: tb-nowmatrix OK\" } else { \"index: NAO achou tb-nowmatrix\" }; $s = Invoke-WebRequest -Uri \"http://127.0.0.1:8766/static/js/topbar-now.js\" -UseBasicParsing; \"topbar-now.js: HTTP $\\($s.StatusCode\\), $\\($s.Content.Length\\) bytes\")",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\remixer-live.js\")",
+      "PowerShell(try { \\(Invoke-WebRequest -Uri 'http://127.0.0.1:8766' -UseBasicParsing -TimeoutSec 3\\).StatusCode } catch { \"down: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(python -c \"import websockets; print\\('websockets ok'\\)\" 2>$null; python -c \"import playwright; print\\('playwright ok'\\)\" 2>$null; node --version 2>$null; if \\(Test-Path \"$env:ProgramFiles\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\"\\) { 'chrome ok' })",
+      "PowerShell(cd \"$env:LOCALAPPDATA\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\6ece1406-a86f-4280-80ef-77256bc0487f\\\\scratchpad\"; python cdp_gap.py gap.png)",
+      "PowerShell(cd \"$env:LOCALAPPDATA\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\6ece1406-a86f-4280-80ef-77256bc0487f\\\\scratchpad\"; python cdp_gap.py gap.png; Get-Content gap.png.chrome.log -TotalCount 5)",
+      "PowerShell(cd \"$env:LOCALAPPDATA\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\6ece1406-a86f-4280-80ef-77256bc0487f\\\\scratchpad\"; python cdp_gap.py gap-after.png)",
+      "PowerShell(python -m py_compile api/app.py db/database.py api/track_view.py)",
+      "PowerShell(if \\($?\\) { \"OK\" })",
+      "PowerShell(git diff -- static/css/dashboard-variants.css static/js/track-panels.js static/js/acervo.js; \\(Get-Content 'static/js/topbar-now.js' -TotalCount 30\\) -join \"`n\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lucbo\\Documents\\rolfsound-pack\\rolfsound\\services",

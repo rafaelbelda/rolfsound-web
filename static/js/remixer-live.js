@@ -103,6 +103,12 @@
       const sub = tempoMod.querySelector('.mod-foot .mod-sub');
       if (sub) sub.innerHTML = `<b>${fmtPct(tb / ob)}</b> · de ${ob}`;
     }
+
+    // avisa a telinha da topbar (topbar-now.js) — BPM/tom efetivos ao vivo;
+    // roda tanto no gesto local do knob quanto no sync vindo do core
+    document.dispatchEvent(new CustomEvent('rolf:remix', {
+      detail: { ratio: tb / ob, semis: pitchSemis },
+    }));
   }
 
   // espelha o visual de um knob sem re-emitir 'rolfknob' (evita eco)

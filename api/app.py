@@ -173,8 +173,13 @@ async def _save_queue_state() -> None:
 def _register_event_handlers(poller):
     from db import database as db
 
-    # Track the last played track_id and when it started, for skip detection.
-    _last_play: dict = {"track_id": None, "started_at": 0.0, "duration": 0}
+    # Sessão de escuta da faixa atual. listened = segundos OUVIDOS de fato
+    # (acumulados dos playback_ticks ~1 Hz do core — pausa não emite tick);
+    # counted = o play já foi creditado em streams nesta sessão.
+    _last_play: dict = {
+        "track_id": None, "started_at": 0.0, "duration": 0,
+        "listened": 0.0, "counted": False,
+    }
 
     def on_track_changed(data):
         track_id = data.get("track_id")
@@ -189,15 +194,19 @@ def _register_event_handlers(poller):
             logger.debug(f"pads push on track_changed failed: {e}")
         conn = db.get_connection()
         try:
-            # Skip detection: if previous track changed before 30% of duration, mark as skipped.
+            # Fecha a sessão anterior: skip se ouviu <30% da duração, e grava
+            # o tempo ouvido na entrada do histórico (base p/ estatísticas).
             prev_id = _last_play.get("track_id")
             if prev_id and prev_id != track_id:
-                elapsed = time.time() - _last_play.get("started_at", time.time())
+                listened = _last_play.get("listened", 0.0)
                 duration = _last_play.get("duration", 0)
-                if duration > 0 and elapsed < duration * 0.30:
+                if duration > 0 and listened < duration * 0.30:
                     db.mark_last_history_skipped(conn, prev_id)
+                if listened > 0:
+                    db.set_last_history_duration(conn, prev_id, int(listened))
 
-            db.increment_streams(conn, track_id)
+            # streams NÃO incrementa aqui — o play só conta aos 60% ouvidos
+            # (ver on_playback_tick). O histórico continua marcando o início.
             db.add_history(conn, track_id, int(time.time()))
             conn.commit()
 
@@ -206,8 +215,34 @@ def _register_event_handlers(poller):
             _last_play["track_id"]  = track_id
             _last_play["started_at"] = time.time()
             _last_play["duration"]  = (track_row or {}).get("duration", 0) or 0
+            _last_play["listened"]  = 0.0
+            _last_play["counted"]   = False
         finally:
             conn.close()
+
+    def on_playback_tick(data):
+        track_id = _last_play.get("track_id")
+        if not track_id:
+            return
+        # Cada tick ≈ 1 s de áudio audível (o core só emite enquanto toca).
+        _last_play["listened"] = _last_play.get("listened", 0.0) + 1.0
+
+        # Faixa sem duração no banco (gravações antigas): o tick traz a real.
+        if not _last_play.get("duration"):
+            _last_play["duration"] = data.get("duration") or 0
+
+        duration = _last_play.get("duration", 0)
+        if _last_play.get("counted") or duration <= 0:
+            return
+        if _last_play["listened"] >= duration * 0.60:
+            _last_play["counted"] = True
+            conn = db.get_connection()
+            try:
+                db.increment_streams(conn, track_id)
+                conn.commit()
+                logger.info(f"Play contabilizado (60% ouvidos): {track_id}")
+            finally:
+                conn.close()
 
     def on_track_finished(data):
         filepath = data.get("filepath", "")
@@ -243,6 +278,7 @@ def _register_event_handlers(poller):
 
     poller.on("track_changed", on_track_changed)
     poller.on("track_finished", on_track_finished)
+    poller.on("playback_tick", on_playback_tick)
 
 
 def _enrich_status(raw: dict) -> dict:
