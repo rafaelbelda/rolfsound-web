@@ -122,6 +122,14 @@
     return escapeHtml(text.slice(0, i)) + '<em>' + escapeHtml(text.slice(i, i + q.length)) + '</em>' + escapeHtml(text.slice(i + q.length));
   }
   function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+  function escAttr(s) { return String(s).replace(/[&<">]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '"': '&quot;', '>': '&gt;' }[c])); }
+  function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+  // ordem na roda de Camelot (número, depois A/B); tons desconhecidos ao fim
+  function camelotSortVal(k) {
+    const c = camelot(k);
+    if (!c) return [99, 'z'];
+    return [parseInt(c, 10), c.slice(-1)];
+  }
 
   function render() {
     const list = $('.bsc-list'); if (!list) return;
@@ -223,23 +231,59 @@
     }));
   }
 
-  function wireKey() {
-    const chips = findChips('Tom · harmônico'); if (!chips) return;
+  /* ---------- Tags: chips derivados das tags reais do cofre ---------- */
+  function buildTagChips() {
+    const chips = $('[data-tag-chips]'); if (!chips) return;
+    const head = facetByTitle('Tags');
+    const counts = new Map();
+    DATA.forEach((t) => t.tags.forEach((tg) => counts.set(tg, (counts.get(tg) || 0) + 1)));
+    // mais usadas primeiro, desempate alfabético
+    const tags = [...counts.keys()].sort((a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
+    // largou uma seleção cujo valor sumiu do cofre
+    [...F.tags].forEach((t) => { if (!counts.has(t)) F.tags.delete(t); });
+
+    const hide = tags.length === 0;
+    if (head) head.hidden = hide;
+    chips.hidden = hide;
+    chips.innerHTML = tags.map((tg) =>
+      `<span class="chip${F.tags.has(tg) ? ' on' : ''}" data-val="${escAttr(tg)}">${escapeHtml(capitalize(tg))}</span>`).join('');
+    $$('.chip', chips).forEach((c) => c.addEventListener('click', () => {
+      const v = c.dataset.val;
+      c.classList.toggle('on');
+      if (c.classList.contains('on')) F.tags.add(v); else F.tags.delete(v);
+      render();
+    }));
+  }
+
+  /* ---------- Tom: chips dos tons presentes, ordenados por Camelot ---------- */
+  function buildKeyChips() {
+    const chips = $('[data-key-chips]'); if (!chips) return;
+    const head = facetByTitle('Tom · harmônico');
+    const keys = [...new Set(DATA.map((t) => t.key).filter(Boolean))]
+      .sort((a, b) => { const ca = camelotSortVal(a), cb = camelotSortVal(b); return (ca[0] - cb[0]) || ca[1].localeCompare(cb[1]) || a.localeCompare(b); });
+    if (F.key && !keys.includes(F.key)) F.key = null;   // tom filtrado sumiu
+
+    const hide = keys.length === 0;
+    if (head) head.hidden = hide;
+    chips.hidden = hide;
+    chips.innerHTML = keys.map((k) => `<span class="chip" data-val="${escAttr(k)}">${escapeHtml(k)}</span>`).join('');
+
     const all = $$('.chip', chips);
     function refreshCompat() {
       all.forEach((c) => {
-        const k = c.textContent.trim();
+        const k = c.dataset.val;
         const isSel = F.key === k;
         c.classList.toggle('on', isSel);
         c.classList.toggle('compat', !isSel && F.key && compatible(F.key, k));
       });
     }
     all.forEach((c) => c.addEventListener('click', () => {
-      const k = c.textContent.trim();
+      const k = c.dataset.val;
       F.key = (F.key === k) ? null : k;     // click active key again → clear
       refreshCompat();
       render();
     }));
+    refreshCompat();
     chips._refreshCompat = refreshCompat;
   }
 
@@ -348,15 +392,36 @@
     wireQuery();
     wireDate();
     wireMulti('Formato', F.formats, (label) => label.toLowerCase());
-    wireMulti('Tags', F.tags, (label) => label.toLowerCase());
-    wireKey();
-    wireMulti('Origem · estado', F.states, (label) => ({ 'Master': 'master', 'Edit': 'edit', 'Rip cru': 'rip', 'Favoritas': 'fav' }[label] || label.toLowerCase()));
+    buildTagChips();
+    buildKeyChips();
+    wireMulti('Origem · estado', F.states, (label) => ({ 'Master': 'master', 'Rip cru': 'rip', 'Favoritas': 'fav' }[label] || label.toLowerCase()));
     wireBpm();
     wireSort();
     wireClear();
 
     render();
   }
+
+  /* ============================================================
+     LIVE — reler o cofre sem recarregar a página
+     buildDataset() só via no init deixava a Busca cega a importações,
+     downloads do Discovery e edições de tags/fav/BPM até o reload.
+     Relemos as rows atuais do Acervo ao abrir a tela (rolf:screen) e
+     nos eventos que mudam o cofre (row nova / metadados salvos), e
+     regeneramos os chips de Tags/Tom (facetas derivadas do dataset).
+     ============================================================ */
+  function refresh() {
+    buildDataset();
+    NOW = DATA.length ? (Math.max(...DATA.map((t) => t.added)) || Date.now()) : Date.now();
+    buildTagChips();
+    buildKeyChips();
+    const crumb = $('.bsc .top-crumb');
+    if (crumb) crumb.innerHTML = `Biblioteca <span class="c-dot"></span> Busca <span class="c-dot"></span> ${DATA.length} faixas indexadas`;
+    render();
+  }
+  document.addEventListener('rolf:row-added', refresh);
+  document.addEventListener('rolf:track-saved', refresh);
+  document.addEventListener('rolf:screen', (e) => { if (e.detail && e.detail.name === 'busca') refresh(); });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

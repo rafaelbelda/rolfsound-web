@@ -45,6 +45,15 @@ _DEFAULTS = {
     # (A cor de acento não é configurável: sempre reativa à capa tocando.)
     "ui_viz_density":            "medium",  # dense | medium | wide (campo de pontos)
     "ui_reduce_motion":          False,
+    # Introdução no primeiro boot: a UI mostra as boas-vindas enquanto isto
+    # for False; static/js/onboarding.js grava True ao dispensar (sobrevive ao
+    # reload do importer). "Ver tutorial de novo" no Config volta a False.
+    "onboarding_done":           False,
+    # Coach marks contextuais (fase 2): uma flag por tela, gravada True na 1ª
+    # visita por static/js/coachmarks.js. "Rever dicas" no Config zera as três.
+    "coach_remixer_seen":        False,
+    "coach_busca_seen":          False,
+    "coach_fila_seen":           False,
     # Caminho do binário essentia_streaming_extractor_music — preenchido por
     # tools/setup_essentia.py. Vazio = análise desligada até rodar o setup.
     "essentia_extractor_path":   "",

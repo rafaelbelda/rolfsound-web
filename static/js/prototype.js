@@ -42,6 +42,9 @@
     const repaint = () => { window.RolfPaint && window.RolfPaint(); };
     requestAnimationFrame(() => requestAnimationFrame(repaint));
     setTimeout(repaint, 220);
+    // quem depende de estado ao vivo relê ao abrir a tela (ex.: a Busca
+    // reconstrói o dataset a partir das rows atuais do Acervo).
+    document.dispatchEvent(new CustomEvent('rolf:screen', { detail: { name } }));
   }
 
   $$('.island .isl-btn').forEach((b) => {

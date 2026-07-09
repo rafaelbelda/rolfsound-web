@@ -1,0 +1,118 @@
+/* ============================================================
+   ROLFSOUND V2 — Boot splash: disco de vinil girando + wordmark.
+   Cobre o load real (some quando o app fica pronto, ver
+   static/js/boot-splash.js). CSS puro, sem asset. Segue os tokens
+   (--bg / --accent / --font-brand). z-index 900 = acima das
+   boas-vindas (800), pra revelá-las ao sumir.
+   ============================================================ */
+
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  background: radial-gradient(125% 125% at 50% 38%, #0c0c10 0%, var(--bg) 62%);
+  opacity: 1;
+  transition: opacity 0.6s var(--ease);
+  /* rede de segurança: se o JS não rodar, some sozinho aos 9s */
+  animation: bs-safety 0s linear 9s forwards;
+}
+.boot-splash.hide { opacity: 0; }
+@keyframes bs-safety { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+
+/* palco: disco + reflexo estático sobrepostos */
+.bs-stage {
+  position: relative;
+  width: 208px;
+  height: 208px;
+  animation: bs-in 0.7s var(--ease) both;
+}
+
+/* o disco (gira) */
+.bs-disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    /* vinheta escurecendo a borda */
+    radial-gradient(circle at 50% 50%, transparent 58%, rgba(0, 0, 0, 0.45) 88%, rgba(0, 0, 0, 0.7) 100%),
+    /* shimmer que gira junto */
+    conic-gradient(from 0deg, rgba(255, 255, 255, 0.05), transparent 25%, rgba(255, 255, 255, 0.03) 50%, transparent 75%, rgba(255, 255, 255, 0.05)),
+    /* sulcos */
+    repeating-radial-gradient(circle at 50% 50%, #101013 0px, #101013 1.2px, #18181c 1.2px, #18181c 2.6px),
+    #0f0f12;
+  box-shadow: 0 26px 64px -18px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: bs-spin 1.8s linear infinite;
+}
+/* label central em accent */
+.bs-disc::before {
+  content: '';
+  position: absolute;
+  inset: 33%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 34%, color-mix(in oklab, var(--accent) 82%, white 18%), var(--accent) 68%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.28), inset 0 0 0 6px rgba(0, 0, 0, 0.12);
+}
+/* furo do pino */
+.bs-disc::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+/* reflexo estático (luz fixa) — não gira, o sulco passa por baixo */
+.bs-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    linear-gradient(125deg, transparent 42%, rgba(255, 255, 255, 0.07) 50%, transparent 58%),
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.06), transparent 46%);
+}
+
+@keyframes bs-spin { to { transform: rotate(360deg); } }
+@keyframes bs-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+
+/* wordmark */
+.bs-word {
+  font-family: var(--font-brand);
+  font-size: 32px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  animation: bs-rise 0.8s var(--ease) 0.32s both;
+}
+.bs-word .ac { color: var(--accent); }
+
+/* legenda */
+.bs-cap {
+  margin-top: -18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  animation: bs-fade 1s var(--ease) 0.7s both;
+}
+
+@keyframes bs-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes bs-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bs-disc { animation: none; }
+  .bs-stage, .bs-word, .bs-cap { animation: bs-fade 0.4s var(--ease) both; }
+  .boot-splash { transition: opacity 0.3s var(--ease); }
+}

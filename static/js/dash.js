@@ -1,8 +1,11 @@
 /* ============================================================
    ROLFSOUND V2 — Dashboard static visuals
    Paints the registration mesh and the dot-matrix visualizers
-   (the hero motif) into every frame. Design frames are static,
-   so the FFT is faked with a stable waveform envelope.
+   (the hero motif) into every frame. O campo de pontos desenha
+   o espectro REAL quando o motion passa `bands` (FFT do core em
+   /api/levels?bands=N, via levels-feed.js); sem core, cai no
+   envelope sintético com seed. O espectrograma do Capturar
+   segue sintético — é mockup junto com a tela (TO-DO item 4).
    ============================================================ */
 (function () {
   'use strict';
@@ -35,14 +38,17 @@
   /* ---- dot-matrix visualizer: a grid of dots, lit toward an
          envelope curve, brightest in the accent colour. Reactive:
          the second arg may be a number (phase, legacy) or a state
-         object { t, beat, level } so the field pulses on each beat
-         and swells with the track level — mirrors the iPhone mesh. ---- */
+         object { t, beat, level, bands } so the field pulses on
+         each beat and swells with the track level. Com `bands`
+         (espectro real do core, graves → agudos), a curva vira a
+         FFT de verdade; sem elas, o envelope sintético de sempre. ---- */
   function paintMatrix(cv, state) {
-    let phase, beat = 0, level = 1;
+    let phase, beat = 0, level = 1, bands = null;
     if (typeof state === 'object' && state) {
       phase = state.t || 0;
       beat = state.beat || 0;
       level = (state.level == null) ? 1 : state.level;
+      if (state.bands && state.bands.length) bands = state.bands;
     } else {
       phase = state || 0;
     }
@@ -62,17 +68,27 @@
     const ox = (w - (cols - 1) * gap) / 2;
     const oy = (h - (rows - 1) * gap) / 2;
 
-    // traveling-wave pseudo-spectrum, scaled by level + punched by each beat.
+    // spectrum curve: real FFT bands when the core provides them, else the
+    // seeded traveling-wave pseudo-spectrum — both scaled by level + beat.
     const seed = (cv.dataset.seed ? +cv.dataset.seed : 7);
     function env(i) {
       const t = i / cols;
+      const floor = 0.06 + 0.04 * level;
+      if (bands) {
+        // graves à esquerda, agudos à direita, interpolação linear entre
+        // bandas; γ<1 levanta os agudos (peso perceptual) e o beat dá punch
+        const pos = (i / Math.max(1, cols - 1)) * (bands.length - 1);
+        const k = Math.floor(pos);
+        const v = bands[k] + (bands[Math.min(bands.length - 1, k + 1)] - bands[k]) * (pos - k);
+        const spec = Math.pow(Math.min(1, v * 1.3), 0.55);
+        return Math.max(floor, Math.min(1, spec + beat * 0.18 * spec));
+      }
       const arch = Math.sin(t * Math.PI);                              // arch across width
       const b = 0.5 + 0.5 * Math.sin(t * 22 + seed + phase * 4.0);     // fast ripples
       const c = 0.5 + 0.5 * Math.sin(t * 7.3 + seed * 1.7 + phase * 1.7);
       const spec = arch * (0.45 + 0.4 * b * c);
       // level swells the whole field; beat adds a transient bounce (stronger at the crest)
       const reactive = spec * level + beat * level * 0.42 * arch;
-      const floor = 0.06 + 0.04 * level;
       return Math.max(floor, Math.min(1, reactive));
     }
 

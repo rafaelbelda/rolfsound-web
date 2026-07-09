@@ -21,8 +21,17 @@
   empty.innerHTML =
     '<span class="ae-glyph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4M8 11h6"/></svg></span>' +
     '<div class="ae-title">Nenhuma faixa</div>' +
-    '<div class="ae-sub">Ajuste os filtros</div>';
+    '<div class="ae-sub">Ajuste os filtros</div>' +
+    '<button class="ae-cta" data-acv-import hidden>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10M8 10l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Importar faixas</button>';
   scroll.appendChild(empty);
+  // CTA aparece só com o cofre vazio (ver renderTracks) e reusa o mesmo
+  // ponto de entrada do botão "Importar" do cabeçalho.
+  const emptyCta = empty.querySelector('[data-acv-import]');
+  if (emptyCta) emptyCta.addEventListener('click', () => {
+    const importBtn = document.querySelector('[data-import-open]');
+    if (importBtn) importBtn.click();
+  });
 
   // album/artist grids (siblings of the ledger, toggled via [data-mode] on scope)
   const albumsGrid  = scope.querySelector('[data-acv-albums-grid]');
@@ -244,7 +253,8 @@
 
     // copy: vault truly empty vs. filters hiding everything
     empty.querySelector('.ae-title').textContent = rows.length ? 'Nenhuma faixa' : 'Cofre vazio';
-    empty.querySelector('.ae-sub').textContent = rows.length ? 'Ajuste os filtros' : 'Capture ou importe faixas para começar';
+    empty.querySelector('.ae-sub').textContent = rows.length ? 'Ajuste os filtros' : 'Importe suas faixas ou solte arquivos aqui';
+    if (emptyCta) emptyCta.hidden = rows.length > 0; // esconde quando é só filtro escondendo tudo
     scroll.appendChild(empty);
     scroll.classList.toggle('is-empty', visible.length === 0);
 

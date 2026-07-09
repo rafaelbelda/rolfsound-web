@@ -25,9 +25,13 @@
   let last = performance.now();
   let tMatrix = 0, tSpectro = 0, tWave = 0, tSave = 0, tViz = 0;
 
-  // reactive-mesh envelope (ported from the iPhone grid.js)
+  // reactive-mesh envelope — nível/bandas REAIS do core via levels-feed.js
+  // quando online; offline cai no sintético de sempre (ease + relógio de BPM)
   let level = 0;          // smoothed overall gain 0..1
   let beatIdx = -1, beatT = 0;
+  let lvlAvg = 0;         // média móvel do nível (base do detector de beat)
+  let lastFeedAt = 0;     // timestamp do último poll consumido
+  let bandsSm = null;     // bandas suavizadas por frame (poll é ~8 Hz)
 
   const $ = (s) => document.querySelector(s);
 
@@ -65,21 +69,48 @@
     const play = playing();
     const draw = window.RolfDraw;
 
-    // ---- reactive envelope: level swells while playing, beat punches on the grid ----
-    const target = play ? 0.85 : 0;
-    level += (target - level) * Math.min(1, dt * 3.2);
+    // ---- reactive envelope: level swells while playing, beat punches on the grid.
+    //      Com o core online (levels-feed.js) o nível é o pico L/R REAL da saída;
+    //      offline, o ease sintético de sempre. ----
+    const feed = window.RolfLevels;
+    const live = play && feed && feed.online;
+    const raw = live ? Math.min(1, Math.max(feed.l, feed.r) * 1.15)
+                     : (play ? 0.85 : 0);
+    // ataque rápido (acende no transiente), release lento (respira)
+    level += (raw - level) * Math.min(1, dt * (raw > level ? 10 : 2.6));
     if (!play && level < 0.001) level = 0;
-    // BPM comes from the now-playing row; drives the beat clock
+    // beat: online, detector de transiente (salto do nível sobre a média
+    // móvel, avaliado uma vez por amostra do poll); offline, relógio de
+    // parede no BPM da row ativa — como era.
     const activeRow = document.querySelector('.row.active');
     const bpm = activeRow ? (+activeRow.dataset.bpm || 118) : 118;
-    if (play) {
+    if (live) {
+      if (feed.at !== lastFeedAt) {
+        lastFeedAt = feed.at;
+        if (raw > 0.12 && raw > lvlAvg * 1.28 && now - beatT > 180) beatT = now;
+        lvlAvg += (raw - lvlAvg) * 0.18;   // constante ~600 ms @ poll de 120 ms
+      }
+    } else if (play) {
       const beatLen = 60 / bpm;
       const idx = Math.floor((now / 1000) / beatLen);
       if (idx !== beatIdx) { beatIdx = idx; beatT = now; }
     }
     const sinceBeat = (now - beatT) / 1000;
     const beat = play ? Math.exp(-sinceBeat * 7) : 0;
-    const vizState = { t: now / 1000, beat: beat, level: level };
+
+    // bandas do espectro: suavizadas por frame pro campo fluir a 30 fps
+    let bands = null;
+    if (live && feed.bands && feed.bands.length) {
+      if (!bandsSm || bandsSm.length !== feed.bands.length) bandsSm = feed.bands.slice();
+      for (let i = 0; i < bandsSm.length; i++) {
+        const t = feed.bands[i];
+        bandsSm[i] += (t - bandsSm[i]) * Math.min(1, dt * (t > bandsSm[i] ? 12 : 3.2));
+      }
+      bands = bandsSm;
+    } else {
+      bandsSm = null;
+    }
+    const vizState = { t: now / 1000, beat: beat, level: level, bands: bands };
 
     // advance global playback while playing.
     // Com playback.js ativo (engineDriven), a posição vem do CORE por
@@ -141,6 +172,13 @@
     }
 
     requestAnimationFrame(frame);
+  }
+
+  // consumidor do poller de níveis: o transporte (mini-vis) está sempre
+  // visível, então o predicado é só "tocando e com motion ligado";
+  // 24 bandas servem o mini-vis e o viz fullscreen (mesmo pintor).
+  if (window.RolfLevels) {
+    window.RolfLevels.register('viz', () => playing() && !reduce(), { bands: 24 });
   }
 
   // initial transport progress reflects restored position

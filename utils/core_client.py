@@ -159,7 +159,9 @@ async def fx_set(filter_mode=None, filter_cutoff_hz=None,
 
 async def fx_reset()                 -> dict | None: return await _post("/fx/reset")
 async def set_mute(muted: bool)      -> dict | None: return await _post("/mute", {"muted": muted})
-async def get_levels()               -> dict | None: return await _get("/levels")
+async def get_levels(bands: int = 0) -> dict | None:
+    # bands>0: o core anexa o espectro em N bandas (FFT sob demanda).
+    return await _get("/levels", {"bands": bands} if bands else None)
 
 async def pad_set(index: int, start_s: float, end_s: float) -> dict | None:
     return await _post("/pads/set", {"index": index, "start_s": start_s, "end_s": end_s})

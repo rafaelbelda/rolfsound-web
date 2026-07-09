@@ -22,8 +22,24 @@
   <link rel="stylesheet" href="static/css/versions.css" />
   <link rel="stylesheet" href="static/css/dashboard-export.css" />
   <link rel="stylesheet" href="static/css/dashboard-discovery.css" />
+  <link rel="stylesheet" href="static/css/onboarding.css" />
+  <link rel="stylesheet" href="static/css/boot-splash.css" />
+  <link rel="stylesheet" href="static/css/coachmarks.css" />
 </head>
 <body>
+  <!-- boot splash: disco de vinil girando + wordmark; some quando o app
+       fica pronto (static/js/boot-splash.js). Primeiro no body pra pintar
+       antes de tudo e cobrir o load. -->
+  <div class="boot-splash" role="status" aria-label="Carregando o Rolfsound">
+    <div class="bs-stage">
+      <div class="bs-disc"></div>
+      <div class="bs-shine"></div>
+    </div>
+    <div class="bs-word">Rolf<span class="ac">sound.</span></div>
+    <div class="bs-cap">Carregando o cofre</div>
+  </div>
+  <script src="static/js/boot-splash.js"></script>
+
   <div class="appshell">
     <canvas class="mesh-bg"></canvas>
 
@@ -109,11 +125,9 @@
               <span class="chip chip-all on" data-filter="all">Todas</span>
               <span class="acv-sep"></span>
               <span class="chip" data-filter="fmt" data-val="vinil"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>Vinil</span>
-              <span class="chip" data-filter="fmt" data-val="cd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3a9 9 0 0 1 6.4 2.6"/></svg>CD</span>
               <span class="chip" data-filter="fmt" data-val="digital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 16V8l5-2v8"/><circle cx="5" cy="16" r="2"/><path d="M14 14V6l5-2v8"/><circle cx="14" cy="14" r="2"/></svg>Digital</span>
               <span class="acv-sep"></span>
               <span class="chip" data-filter="state" data-val="master">Master</span>
-              <span class="chip" data-filter="state" data-val="edit">Edit</span>
               <span class="chip" data-filter="state" data-val="rip">Rip cru</span>
               <span class="acv-sep"></span>
               <span class="chip chip-fav" data-filter="fav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l2.3 4.7 5.2.8-3.8 3.6.9 5.1L12 16.8 7.2 18.8l.9-5.1L4.3 9.5l5.2-.8z"/></svg>Favoritas</span>
@@ -262,7 +276,7 @@
                 </div>
               </div>
 
-              <div class="mod">
+              <div class="mod" data-coach="fx">
                 <div class="mod-head"><span class="mod-title">Filtro</span><button class="mod-toggle on">LP</button></div>
                 <div class="mod-knobwrap">
                   <div class="knob vfader" data-frac="1" style="--frac:1"><span class="vfader-fill"></span><span class="vfader-handle"></span></div>
@@ -271,7 +285,7 @@
                 <div class="mod-foot"><span class="mod-sub">Ress <b>0.4</b></span></div>
               </div>
 
-              <div class="mod">
+              <div class="mod" data-coach="fx">
                 <div class="mod-head"><span class="mod-title">EQ</span><button class="mod-toggle">Flat</button></div>
                 <div class="eq-bank">
                   <div class="eq-band">
@@ -375,7 +389,6 @@
                 <div class="facet-head"><span class="facet-title">Formato</span></div>
                 <div class="chips" data-facet="multi">
                   <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/></svg>Vinil</span>
-                  <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.2"/><path d="M12 3a9 9 0 0 1 6.4 2.6"/></svg>CD</span>
                   <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 16V8l5-2v8"/><circle cx="5" cy="16" r="2"/><path d="M14 14V6l5-2v8"/><circle cx="14" cy="14" r="2"/></svg>Digital</span>
                 </div>
               </div>
@@ -389,30 +402,17 @@
                 </div>
                 <div class="range-ticks"><span>60</span><span>90</span><span>120</span><span>150</span><span>180</span></div>
                 <div class="facet-head"><span class="facet-title">Tags</span></div>
-                <div class="chips" data-facet="multi">
-                  <span class="chip">Ambient</span>
-                  <span class="chip">Techno</span>
-                  <span class="chip">House</span>
-                  <span class="chip">Downtempo</span>
-                </div>
+                <!-- chips derivados das tags reais do cofre (search-engine.js) -->
+                <div class="chips" data-facet="multi" data-tag-chips></div>
               </div>
 
               <div class="facet wide">
                 <div class="facet-head"><span class="facet-title">Tom · harmônico</span><span class="facet-val">Todos os tons</span></div>
-                <div class="chips" data-facet="key">
-                  <span class="chip">A min</span>
-                  <span class="chip">E min</span>
-                  <span class="chip">D min</span>
-                  <span class="chip">C maj</span>
-                  <span class="chip">G min</span>
-                  <span class="chip">B min</span>
-                  <span class="chip">F maj</span>
-                  <span class="chip">A maj</span>
-                </div>
+                <!-- chips derivados dos tons presentes no cofre (search-engine.js) -->
+                <div class="chips" data-facet="key" data-key-chips></div>
                 <div class="facet-head"><span class="facet-title">Origem · estado</span></div>
                 <div class="chips" data-facet="multi">
                   <span class="chip">Master</span>
-                  <span class="chip">Edit</span>
                   <span class="chip">Rip cru</span>
                   <span class="chip">Favoritas</span>
                 </div>
@@ -721,6 +721,19 @@
               </div>
             </div>
 
+            <!-- Introdução -->
+            <div class="cfg-group">
+              <div class="cfg-group-head"><div class="sec-label">Introdução</div><span class="cfg-group-note">Tutorial do primeiro boot</span></div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Tutorial de boas-vindas</span><span class="cfg-row-sub">Rever a introdução mostrada no primeiro boot</span></div>
+                <div class="cfg-row-ctrl"><button class="cfg-link" data-onboard-replay>Ver de novo</button></div>
+              </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Dicas das telas</span><span class="cfg-row-sub">Rever os coach marks do Remixer, Busca e Fila na próxima visita</span></div>
+                <div class="cfg-row-ctrl"><button class="cfg-link" data-coach-replay>Rever dicas</button></div>
+              </div>
+            </div>
+
             <!-- Conta / sessão -->
             <div class="cfg-group">
               <div class="cfg-group-head"><div class="sec-label">Conta</div></div>
@@ -860,6 +873,9 @@
   <script src="static/js/playlists.js"></script>
   <script src="static/js/track-panels.js"></script>
   <script src="static/js/importer.js"></script>
+  <!-- levels-feed.js antes dos consumidores: poller único de /api/levels
+       (motion dirige os visualizadores; remixer-live, o medidor) -->
+  <script src="static/js/levels-feed.js"></script>
   <script src="static/js/prototype-motion.js"></script>
   <script src="static/js/topbar-now.js"></script>
   <script src="static/js/seekbar.js"></script>
@@ -870,6 +886,10 @@
   <script src="static/js/export-dialog.js"></script>
   <script src="static/js/search-engine.js"></script>
   <script src="static/js/discovery.js"></script>
+  <!-- onboarding.js: boas-vindas do primeiro boot (estado em api/settings) -->
+  <script src="static/js/onboarding.js"></script>
+  <!-- coachmarks.js: dicas contextuais na 1ª visita de cada tela -->
+  <script src="static/js/coachmarks.js"></script>
   <!-- playback.js por último: liga os botões aos endpoints do core e
        assume o transporte (clona botões p/ derrubar handlers locais) -->
   <script src="static/js/playback.js"></script>

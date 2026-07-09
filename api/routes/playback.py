@@ -196,10 +196,12 @@ async def mute(req: MuteRequest):
     return result
 
 
-# Medidor de saída (picos L/R do callback) — poll quente da tela Remixer.
+# Medidor de saída (picos L/R do callback) — poll quente do medidor do
+# Remixer e dos visualizadores. ?bands=N anexa o espectro em N bandas log
+# (FFT sob demanda no core; ver levels-feed.js, o poller único da UI).
 @router.get("/levels")
-async def levels():
-    result = await core_client.get_levels()
+async def levels(bands: int = 0):
+    result = await core_client.get_levels(bands)
     if result is None:
         raise HTTPException(status_code=503, detail="Core unavailable")
     return result

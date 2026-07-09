@@ -174,7 +174,21 @@
       "PowerShell(cd \"$env:LOCALAPPDATA\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\6ece1406-a86f-4280-80ef-77256bc0487f\\\\scratchpad\"; python cdp_gap.py gap-after.png)",
       "PowerShell(python -m py_compile api/app.py db/database.py api/track_view.py)",
       "PowerShell(if \\($?\\) { \"OK\" })",
-      "PowerShell(git diff -- static/css/dashboard-variants.css static/js/track-panels.js static/js/acervo.js; \\(Get-Content 'static/js/topbar-now.js' -TotalCount 30\\) -join \"`n\")"
+      "PowerShell(git diff -- static/css/dashboard-variants.css static/js/track-panels.js static/js/acervo.js; \\(Get-Content 'static/js/topbar-now.js' -TotalCount 30\\) -join \"`n\")",
+      "PowerShell(python -m py_compile \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\services\\\\playback_service.py\" \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\engine.py\" \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\services\\\\api_service.py\" \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\utils\\\\core_client.py\" \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\api\\\\routes\\\\playback.py\")",
+      "PowerShell(if \\($?\\) { \"PY OK\" })",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\levels-feed.js\")",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\prototype-motion.js\")",
+      "PowerShell(node --check \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\static\\\\js\\\\dash.js\")",
+      "PowerShell(\"JS OK\")",
+      "PowerShell(python \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\24160801-d5bd-484b-9f93-955b9445df82\\\\scratchpad\\\\test_spectrum.py\")",
+      "PowerShell(try { \\(Invoke-WebRequest -UseBasicParsing \"http://127.0.0.1:8765/levels?bands=8\" -TimeoutSec 3\\).Content } catch { \"core: $_\" }; try { \\(Invoke-WebRequest -UseBasicParsing \"http://127.0.0.1:8766/api/levels?bands=8\" -TimeoutSec 3\\).Content } catch { \"web: $_\" })",
+      "PowerShell(try { \\(Invoke-WebRequest -UseBasicParsing \"http://127.0.0.1:8765/status\" -TimeoutSec 3\\).Content } catch { \"status: $_\" })",
+      "PowerShell(Invoke-WebRequest -UseBasicParsing -Method POST \"http://127.0.0.1:8765/pause\" -TimeoutSec 3 | Out-Null; Start-Sleep -Milliseconds 500; $samples = @\\(\\); 1..4 | ForEach-Object { $samples += \\(Invoke-WebRequest -UseBasicParsing \"http://127.0.0.1:8765/levels?bands=12\" -TimeoutSec 3\\).Content; Start-Sleep -Milliseconds 200 }; Invoke-WebRequest -UseBasicParsing -Method POST \"http://127.0.0.1:8765/pause\" -TimeoutSec 3 | Out-Null; $samples)",
+      "PowerShell($s = \\(Invoke-WebRequest -UseBasicParsing \"http://127.0.0.1:8765/status\" -TimeoutSec 3\\).Content | ConvertFrom-Json; \"paused=$\\($s.playback.paused\\) pos=$\\([math]::Round\\($s.playback.position_s,1\\)\\)s\")",
+      "Bash(node --check static/js/boot-splash.js)",
+      "Bash(node --check static/js/onboarding.js)",
+      "Bash(node --check static/js/search-engine.js)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lucbo\\Documents\\rolfsound-pack\\rolfsound\\services",

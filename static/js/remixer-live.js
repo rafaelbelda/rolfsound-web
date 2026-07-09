@@ -12,8 +12,9 @@
      · Filtro (LP/HP + cutoff log) e EQ (3 bandas) → POST /api/fx
        (fx_engine do core — estágio pós-remix do pump, ~150 ms)
      · Mute → POST /api/mute (flag no core; o fader mantém a posição)
-     · medidor de Saída anima com GET /api/levels (picos L/R reais
-       do callback), poll ~120 ms só com a tela Remixer visível
+     · medidor de Saída anima com os picos L/R reais do callback,
+       via levels-feed.js (poller único de /api/levels), só com a
+       tela Remixer visível
      · sincroniza knobs/faders quando outro cliente muda remix/fx
        (estado chega em 'rolf:status' → status.remix / status.fx)
 
@@ -596,34 +597,27 @@
     });
   }
 
-  /* ---------- medidor: picos L/R reais (GET /api/levels) ----------
-     Poll de ~120 ms + decay por frame, SÓ com a tela Remixer visível —
-     fora dela nada roda (nem RAF, nem rede). */
+  /* ---------- medidor: picos L/R reais via levels-feed.js ----------
+     A fonte é o poller ÚNICO de /api/levels (compartilhado com os
+     visualizadores); aqui só registramos o predicado de visibilidade
+     e pintamos com decay por frame — fora da tela nada roda. */
   function wireMeter() {
     const mod = modByTitle('Saída');
     const cols = mod ? $$('.meter-col', mod) : [];
     if (cols.length < 2) return;
-    const level = { l: 0, r: 0 };   // último poll
     const shown = { l: 0, r: 0 };   // com decay (suaviza entre polls)
-    let polling = false;
     let rafOn = false;
 
     const remixerVisible = () =>
       !document.hidden && !!$('.screen[data-screen="remixer"].active');
 
-    async function poll() {
-      if (!remixerVisible()) { polling = false; return; }
-      try {
-        const res = await fetch('/api/levels');
-        if (res.ok) { const j = await res.json(); level.l = +j.l || 0; level.r = +j.r || 0; }
-      } catch (_) { /* core offline — medidor decai a zero */ level.l = level.r = 0; }
-      setTimeout(poll, 120);
-    }
+    if (window.RolfLevels) window.RolfLevels.register('remixer-meter', remixerVisible);
 
     function paint() {
       if (!remixerVisible()) { rafOn = false; return; }
-      shown.l = Math.max(level.l, shown.l * 0.86);
-      shown.r = Math.max(level.r, shown.r * 0.86);
+      const feed = window.RolfLevels || { l: 0, r: 0 };
+      shown.l = Math.max(feed.l, shown.l * 0.86);
+      shown.r = Math.max(feed.r, shown.r * 0.86);
       [shown.l, shown.r].forEach((x, c) => {
         // colunas em column-reverse: children[0] é o segmento de BAIXO
         // (.peak, sempre aceso por CSS); animamos os 7 seguintes.
@@ -637,7 +631,6 @@
 
     function ensure() {
       if (!remixerVisible()) return;
-      if (!polling) { polling = true; poll(); }
       if (!rafOn) { rafOn = true; requestAnimationFrame(paint); }
     }
     setInterval(ensure, 800);      // barato: religa quando a tela volta

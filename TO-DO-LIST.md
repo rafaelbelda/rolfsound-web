@@ -147,31 +147,42 @@ está listado abaixo.
 
 ## 6. Busca / Acervo — dataset e facetas
 
-- [ ] **Busca não vê o cofre ao vivo** — `search-engine.js` lê as rows do
-      Acervo UMA vez no load (`buildDataset` só roda no init). Importar
-      arquivo, concluir download do Discovery ou editar tags/fav/BPM não
-      reflete na Busca até recarregar. Reconstruir no `rolf:row-added` e
-      após edições (ou reler ao abrir a tela).
-- [ ] **Chips de Tags chumbados** — Ambient/Techno/House/Downtempo estão
-      fixos no HTML (`index.html:390-395`); derivar das tags reais do
-      cofre (agora são coluna no banco).
-- [ ] **Chips de Tom fixos em 8 tons** — gerar a partir dos tons presentes
-      no cofre (o motor Camelot já cobre todos).
-- [ ] **Facetas "CD" e "Edit" nunca casam** — `track_view.py` só deriva
-      `fmt` vinil|digital (source == 'recording') e `state` master|rip
-      (status == 'identified'); 'cd' e 'edit' não existem no schema. Os
-      mesmos chips estão no filtro rápido do Acervo — hoje filtram para
-      lista vazia sempre. Ou criar os campos reais (formato de origem /
-      estado de edição), ou remover os chips.
+- [x] **Busca vê o cofre ao vivo** — `search-engine.js` relê as rows do
+      Acervo (`refresh()`) no novo evento `rolf:screen` (disparado por
+      `showScreen` em prototype.js ao abrir qualquer tela) e nos eventos
+      `rolf:row-added`/`rolf:track-saved`, então importar arquivo, concluir
+      download do Discovery ou salvar metadados/fav reflete sem reload. O
+      refresh também regenera os chips de Tags/Tom e a contagem do crumb.
+- [x] **Chips de Tags derivados do cofre** — o HTML só tem o container
+      `[data-tag-chips]`; `buildTagChips()` monta os chips da união das
+      tags reais das rows (mais usadas primeiro), some com a faceta quando
+      não há tags e larga seleções cujo valor sumiu.
+- [x] **Chips de Tom derivados do cofre** — `[data-key-chips]` +
+      `buildKeyChips()`: só os tons presentes, ordenados pela roda de
+      Camelot; a compatibilidade harmônica segue valendo entre os chips.
+- [x] **Facetas "CD" e "Edit" removidas** — não há fonte de CD (Capturar é
+      mockup) nem estado "edit" no schema (`track_view.py` só dá fmt
+      vinil|digital e state master|rip), e "Salvar versão" ainda é toast
+      (5.1). Os chips que filtravam para lista vazia foram removidos das
+      duas telas (filtro rápido do Acervo e facetas da Busca). Quando o
+      rip/CD e os edits renderizados existirem, os chips voltam com campo
+      real por trás.
 
 ## 7. Visualizadores — FFT fake
 
-- [ ] O campo de pontos (mini-vis do transporte + viz fullscreen) e o
-      espectrograma do Capturar são envelope sintético com seed —
-      `dash.js` declara no topo: "the FFT is faked with a stable waveform
-      envelope". O core já expõe picos L/R (`/api/levels`, com SSE
-      disponível) — no mínimo dirigir o pulso/swell com nível real;
-      espectro de verdade pede o core expor bandas de FFT.
+- [x] **Campo de pontos real (mini-vis do transporte + viz fullscreen)** —
+      o core calcula FFT sob demanda (`GET /api/levels?bands=N`: o callback
+      copia a saída num anel de ~43 ms, e as N bandas log 30 Hz–16 kHz são
+      calculadas no thread da API — o callback nunca paga FFT). Na web,
+      `levels-feed.js` é o poller único de `/api/levels` (o medidor do
+      Remixer migrou pra ele) e só roda com consumidor ativo + tocando.
+      O motion dirige nível (swell com ataque/release), beat (detector de
+      transiente sobre o nível real; core offline volta ao relógio de BPM)
+      e `paintMatrix` desenha as bandas reais interpoladas nas colunas —
+      sem core, tudo cai no envelope sintético de sempre.
+- [ ] Espectrograma do Capturar segue sintético — é mockup junto com a
+      tela toda; ligar no SSE `/api/monitor/stream` quando o item 4
+      (Capturar real) for atacado.
 
 ## 8. Backend pronto, sem UI
 
@@ -196,3 +207,48 @@ está listado abaixo.
 - [ ] `<title>` da página ainda é "Rolfsound V2 — Protótipo".
 - [ ] Código morto: `STUB_COPY` em `prototype.js:28` (o toast "Em breve"
       nunca dispara — todas as telas existem).
+
+## 11. Onboarding — introdução no primeiro boot
+
+- [x] **V1: boas-vindas + primeira faixa** — `static/js/onboarding.js`
+      (+ `static/css/onboarding.css`) mostra um cartão de boas-vindas UMA
+      vez no primeiro boot: apresenta o app (Acervo/Busca/Remixer) e leva à
+      ação real — "Importar minha primeira faixa" dispara o mesmo
+      `[data-import-open]` do cabeçalho do Acervo. Estado no SERVIDOR
+      (`onboarding_done` via `api/settings`; default em
+      [utils/config.py](utils/config.py)), não em localStorage: o importer dá
+      `location.reload()` ao concluir e só o servidor sobrevive a isso.
+      Dispensar (qualquer botão, X, Esc ou clique fora do cartão) grava
+      `onboarding_done=true`. Reabrir: Config → **Introdução** → "Ver de
+      novo" (`[data-onboard-replay]` → `RolfOnboarding.replay()`). O
+      Discovery ficou de fora do tutorial de propósito — é só admin/dev.
+- [x] **Empty-state do Acervo acionável** — com o cofre vazio o `.acv-empty`
+      ([acervo.js](static/js/acervo.js)) agora traz um botão "Importar faixas"
+      (mesmo ponto de entrada) e some quando é só filtro escondendo tudo.
+      Serve de rede de segurança depois que as boas-vindas são dispensadas.
+- [x] **Boot splash (todo boot)** — `static/js/boot-splash.js`
+      (+ `static/css/boot-splash.css`) mostra um disco de vinil girando + a
+      wordmark cobrindo o load real: some quando o app fica pronto
+      (`window.load`), com mínimo de 1,1 s em tela, teto de 6 s no JS e uma
+      rede de segurança em CSS aos 9 s. Injetado como 1º elemento do `<body>`
+      pra pintar antes de tudo. Ao sair emite `rolf:splash-done` /
+      `window.__rolfSplashDone` — as boas-vindas (V1) esperam esse sinal pra
+      surgir só depois da revelação. Respeita "Movimento reduzido"; CSS puro,
+      sem asset.
+- [x] **V2: coach marks contextuais** — `static/js/coachmarks.js`
+      (+ `static/css/coachmarks.css`) mostra uma dica na 1ª visita de cada
+      tela (NÃO no boot). Gatilho: `MutationObserver` na classe `.active` das
+      `.screen` (Remixer, Busca) — pega nav por clique, duplo-clique ou menu
+      de contexto, já que `showScreen` não emite evento; a Fila dispara no 1º
+      open do dock que já tiver itens. Spotlight recorta o elemento REAL via
+      `box-shadow` gigante e desliza entre os passos. Anchors: união de
+      `.rmx-deck .mod.primary` (pitch/tempo), `[data-coach="fx"]` (Filtro+EQ),
+      `.pad-grid`, `[data-stems-btn]`; `.bsc-query`/`.bsc-filters`;
+      `[data-queue-list]`/`[data-queue-save]`. Flag por tela em `api/settings`
+      (`coach_remixer_seen`/`coach_busca_seen`/`coach_fila_seen`, defaults em
+      [config.py](utils/config.py)); Esc e setas navegam. Nunca coincide com o
+      splash (900) nem as boas-vindas (800). Reabrir: Config → Introdução →
+      "Rever dicas" (`[data-coach-replay]` → `RolfCoach.reset()`).
+- [ ] **V3: checklist "Primeiros passos"** — canto discreto que se marca
+      sozinho (trouxe música ▸ tocou faixa ▸ abriu Remixer ▸ salvou versão);
+      some ao completar ou dispensar, flag em `api/settings`.
