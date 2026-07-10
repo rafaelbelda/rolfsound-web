@@ -130,6 +130,21 @@
       if (now - tSave > 600) { tSave = now; localStorage.setItem('rolf_pos', Player.pos.toFixed(4)); }
     }
 
+    // remixer: playhead + progresso colorido da waveform seguem Player.pos.
+    // É FEEDBACK FUNCIONAL (não animação decorativa), então roda mesmo com
+    // "Reduzir movimento" ligado — senão o playhead congela e a onda fica
+    // cinza como se o remixer tivesse travado. Só os visualizadores/pulsos
+    // decorativos abaixo ficam sob o guard de reduce().
+    if (scr === 'remixer' && draw) {
+      const ph = $('.wave-playhead');
+      if (ph) ph.style.left = (Player.pos * 100).toFixed(2) + '%';
+      if (now - tWave > 110) {
+        tWave = now;
+        const cv = $('.wave-canvas');
+        if (cv) { cv.dataset.played = Player.pos.toFixed(3); draw.wave(cv); }
+      }
+    }
+
     if (!reduce() && draw) {
       // fullscreen visualizer — full-bleed reactive dot field
       const vizEl = document.querySelector('[data-viz]:not([hidden])');
@@ -156,17 +171,6 @@
             if (cv) draw.spectro(cv, now / 1000 * 0.22);
           }
           meters(now);
-        }
-      }
-
-      // remixer: playhead creeps, coloured waveform follows
-      if (scr === 'remixer') {
-        const ph = $('.wave-playhead');
-        if (ph) ph.style.left = (Player.pos * 100).toFixed(2) + '%';
-        if (now - tWave > 110) {
-          tWave = now;
-          const cv = $('.wave-canvas');
-          if (cv) { cv.dataset.played = Player.pos.toFixed(3); draw.wave(cv); }
         }
       }
     }

@@ -121,16 +121,6 @@
     });
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
-  function collageCells(list) {
-    const cells = [];
-    for (let i = 0; i < 4; i++) {
-      const bg = list[i] ? (list[i].querySelector('.row-cover')?.style.background || '') : 'linear-gradient(150deg,#1a1a1e,#0c0c0f)';
-      // single-quoted: .style.background re-serializes url() with double
-      // quotes, which would otherwise close this attribute early.
-      cells.push("<span style='background:" + bg + "'></span>");
-    }
-    return cells.join('');
-  }
   function wireCards(grid, groups, action) {
     grid.querySelectorAll('.acv-card').forEach((card) => {
       const g = groups.find((x) => x.key === card.dataset.key);
@@ -148,8 +138,10 @@
     albumsWrap.classList.toggle('is-empty', groups.length === 0);
     albumsGrid.innerHTML = groups.map((g) => {
       const n = g.rows.length;
+      // um álbum tem capa única — sem collage 2×2 (isso é de playlist)
+      const bg = g.rows[0]?.querySelector('.row-cover')?.style.background || 'linear-gradient(150deg,#1a1a1e,#0c0c0f)';
       return '<div class="acv-card" data-key="' + esc(g.key) + '">' +
-        '<div class="acv-card-art"><div class="collage">' + collageCells(g.rows) + '</div>' +
+        "<div class=\"acv-card-art\" style='background:" + bg + "'>" +
         '<div class="acv-card-play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></div></div>' +
         '<div class="acv-card-name">' + esc(g.name) + '</div>' +
         '<div class="acv-card-meta">' + esc(g.artist) + ' · ' + esc(g.year) + ' · ' + n + (n === 1 ? ' faixa' : ' faixas') + '</div>' +
