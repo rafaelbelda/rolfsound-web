@@ -1,10 +1,10 @@
-INFO     | utils.config | Config loaded from C:\Users\lucbo\Documents\rolfsound-pack\rolfsound-web\config.json
+INFO     | utils.config | Config loaded from D:\lb . d\rolfsound\rolfsound-web\config.json
 INFO     | main | Starting rolfsound-control on port 8766
 DEBUG    | asyncio | Using proactor: IocpProactor
-INFO:     Started server process [27840]
+INFO:     Started server process [21480]
 INFO:     Waiting for application startup.
 INFO     | api.app | rolfsound-control starting up
-INFO     | utils.config | Config loaded from C:\Users\lucbo\Documents\rolfsound-pack\rolfsound-web\config.json
+INFO     | utils.config | Config loaded from D:\lb . d\rolfsound\rolfsound-web\config.json
 INFO     | db.database | Database initialized at ./db/library.db
 INFO     | downloads.manager | DownloadManager started
 INFO     | utils.event_poller | EventPoller started
@@ -14,3 +14,5 @@ INFO     | utils.monitor_accumulator | MonitorAccumulator started (poll=20ms)
 INFO     | library.scheduled_queue | Scheduled queue daemon started
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8766 (Press CTRL+C to quit)
+INFO     | api.app | Play contabilizado (60% ouvidos): 00 DNA
+INFO     | api.app | Play contabilizado (60% ouvidos): cQtFTqh1mwM

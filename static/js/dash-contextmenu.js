@@ -73,17 +73,9 @@
       `<div class="ctx-sub">${artist.replace(/·/g, '·')} · ${bpm} BPM · ${key}</div></div>`;
     menu.appendChild(head);
 
-    menu.appendChild(item({ icon: ICON.play, label: 'Tocar agora', cls: 'accent', kbd: '⏎', action: 'play' }));
     menu.appendChild(item({ icon: ICON.queue, label: 'Adicionar à fila', action: 'queue' }));
     menu.appendChild(item({ icon: ICON.playlist, label: 'Adicionar à playlist', chev: true, action: 'playlist' }));
     menu.appendChild(sep());
-    menu.appendChild(label('Estúdio'));
-    menu.appendChild(item({ icon: ICON.remix, label: 'Abrir no Remixer', kbd: 'R', action: 'remix' }));
-    menu.appendChild(item({
-      icon: ICON.stems,
-      label: (row.dataset.stems || '').trim() ? 'Gerenciar stems' : 'Adicionar stems',
-      action: 'stems',
-    }));
     menu.appendChild(item({ icon: ICON.upload, label: 'Exportar faixa', action: 'export' }));
     menu.appendChild(sep());
     menu.appendChild(label('Navegar'));

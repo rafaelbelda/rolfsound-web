@@ -38,6 +38,7 @@
   function init(root) {
     var bubble = root.querySelector('.tp-bar-bubble');
     var dragging = false;
+    var live = false;   // gesto roteado pelo scrub WS (TP-7) — o eco pinta a barra
 
     function fracFromEvent(e) {
       var r = root.getBoundingClientRect();
@@ -51,14 +52,19 @@
     root.addEventListener('pointermove', function (e) {
       var f = fracFromEvent(e);
       placeBubble(f);
-      if (dragging) commit(f);
+      if (!dragging) return;
+      if (live) window.RolfScrub.targetFrac(f);
+      else commit(f);
     });
     root.addEventListener('pointerdown', function (e) {
       dragging = true;
       root.classList.add('is-drag');
       root.setPointerCapture(e.pointerId);
       var f = fracFromEvent(e);
-      commit(f);
+      // Scrub estilo fita quando o core tem o cache pronto; senão o
+      // caminho clássico (visual otimista + seek debounced).
+      live = !!(window.RolfScrub && window.RolfScrub.beginFrac(f));
+      if (!live) commit(f);
       placeBubble(f);
       e.preventDefault();
     });
@@ -67,6 +73,7 @@
       dragging = false;
       root.classList.remove('is-drag');
       try { root.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (live) { live = false; window.RolfScrub.end(); }
     }
     root.addEventListener('pointerup', end);
     root.addEventListener('pointercancel', end);

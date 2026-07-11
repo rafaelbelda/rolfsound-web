@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rolfsound - Dashboard</title>
+  <title>Rolfsound</title>
   <link rel="stylesheet" href="static/css/dashboard.css" />
   <link rel="stylesheet" href="static/css/dashboard-variants.css" />
   <link rel="stylesheet" href="static/css/dashboard-a.css" />
@@ -677,6 +677,10 @@
                 <div class="cfg-row-text"><span class="cfg-row-label">Manter mix de stems ao trocar de faixa</span><span class="cfg-row-sub">Mudo, solo e faders sobrevivem à próxima faixa · padrão: resetar</span></div>
                 <div class="cfg-row-ctrl"><span class="sw" data-sw data-cfg-key="stems_keep_mix"></span></div>
               </div>
+              <div class="cfg-row">
+                <div class="cfg-row-text"><span class="cfg-row-label">Modo fita</span><span class="cfg-row-sub">Arrastar a barra toca o áudio na velocidade do gesto, como fita ou vinil · segure R para reverse</span></div>
+                <div class="cfg-row-ctrl"><span class="sw on" data-sw data-cfg-key="scrub_tape_mode"></span></div>
+              </div>
             </div>
 
             <!-- Biblioteca -->
@@ -878,6 +882,7 @@
   <script src="static/js/levels-feed.js"></script>
   <script src="static/js/prototype-motion.js"></script>
   <script src="static/js/topbar-now.js"></script>
+  <script src="static/js/scrub-client.js"></script>
   <script src="static/js/seekbar.js"></script>
   <script src="static/js/tp-scrub-line.js"></script>
   <script src="static/js/remixer-live.js"></script>

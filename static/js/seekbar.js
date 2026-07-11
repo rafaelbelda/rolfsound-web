@@ -212,15 +212,22 @@
     root.addEventListener('pointerleave', function () {
       if (!scrubbing) { hoverFrac = -1; draw(true); }
     });
+    var live = false;   // gesto roteado pelo scrub WS (TP-7) — o eco pinta o head
+
     root.addEventListener('pointerdown', function (e) {
       scrubbing = true;
       root.classList.add('is-scrubbing');
       root.setPointerCapture(e.pointerId);
       var f = fracFromEvent(e);
       hoverFrac = f;
-      head.style.left = (f * 100).toFixed(2) + '%';
       placeBubble(f);
-      doSeek(f);
+      // Scrub estilo fita quando o core tem o cache pronto; senão o
+      // caminho clássico (seek otimista debounced).
+      live = !!(window.RolfScrub && window.RolfScrub.beginFrac(f));
+      if (!live) {
+        head.style.left = (f * 100).toFixed(2) + '%';
+        doSeek(f);
+      }
       draw(true);
       e.preventDefault();
     });
@@ -228,9 +235,13 @@
       if (!scrubbing) return;
       var f = fracFromEvent(e);
       hoverFrac = f;
-      head.style.left = (f * 100).toFixed(2) + '%';
       placeBubble(f);
-      doSeek(f);
+      if (live) {
+        window.RolfScrub.targetFrac(f);   // o head segue o eco real (tick)
+      } else {
+        head.style.left = (f * 100).toFixed(2) + '%';
+        doSeek(f);
+      }
       draw(true);
     });
     function endScrub(e) {
@@ -238,6 +249,7 @@
       scrubbing = false;
       root.classList.remove('is-scrubbing');
       try { root.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (live) { live = false; window.RolfScrub.end(); }
       hoverFrac = fracFromEvent(e);
       placeBubble(hoverFrac);
       draw(true);

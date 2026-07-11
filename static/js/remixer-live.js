@@ -416,6 +416,7 @@
     if (!frame) return;
     let scrubbing = false;
     let selecting = false;
+    let live = false;   // gesto roteado pelo scrub WS (fita) — o eco pinta o playhead
     let selA = 0;
     const fracOf = (e) => {
       const r = frame.getBoundingClientRect();
@@ -438,12 +439,17 @@
       }
       scrubbing = true;
       frame.setPointerCapture(e.pointerId);
-      seek(e);
+      // Scrub de fita quando o core tem o cache pronto; senão o seek
+      // clássico. Ao vivo, o playhead segue o eco real via Player.pos.
+      live = !!(window.RolfScrub && window.RolfScrub.beginFrac(fracOf(e)));
+      if (!live) seek(e);
       e.preventDefault();
     });
     frame.addEventListener('pointermove', (e) => {
       if (selecting) { paintPadOverlay({ a: selA, b: fracOf(e) }); return; }
-      if (scrubbing) seek(e);
+      if (!scrubbing) return;
+      if (live) window.RolfScrub.targetFrac(fracOf(e));
+      else seek(e);
     });
     const end = (e) => {
       if (selecting) {
@@ -463,6 +469,7 @@
       if (!scrubbing) return;
       scrubbing = false;
       try { frame.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (live) { live = false; window.RolfScrub.end(); }
     };
     frame.addEventListener('pointerup', end);
     frame.addEventListener('pointercancel', end);

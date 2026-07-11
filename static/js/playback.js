@@ -478,6 +478,20 @@
       }, 140);
     },
 
+    // registra um seek que JÁ aconteceu fora do bridge (scrub WS): move a
+    // âncora local e arma o guard sem postar /api/seek. anchor:false
+    // congela o dead-reckoning — a barra segue só os ecos do core (o
+    // playhead varispeed do scrub não anda em tempo de relógio).
+    noteExternalSeek(position, opts) {
+      position = Math.max(0, +position || 0);
+      if (S.duration) position = Math.min(position, S.duration);
+      S.sliderPos = position;
+      const anchored = !opts || opts.anchor !== false;
+      S.sliderAnchorMs = (anchored && S.playState === 'playing') ? Date.now() : 0;
+      S.guardUntilMs = Date.now() + 1200;
+      lastSecond = -1;                     // força re-render do tempo
+    },
+
     setVolume(frac) {
       frac = clamp01(frac);
       S.volume = frac;
