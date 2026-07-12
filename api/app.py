@@ -97,6 +97,7 @@ async def lifespan(app: FastAPI):
 
     # O core guarda o flag só em runtime — reenvia a preferência na subida.
     await core_client.stems_keep_mix(bool(cfg.get("stems_keep_mix", False)))
+    await core_client.scrub_tape_mode(cfg.get("scrub_tape_mode", True) is not False)
 
     # ── Restore persisted queue state ─────────────────────────────────
     await _restore_queue_state()

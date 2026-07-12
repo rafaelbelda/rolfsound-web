@@ -183,6 +183,10 @@ async def stems_mix(levels=None, mutes=None, solos=None) -> dict | None:
 async def stems_keep_mix(enabled: bool) -> dict | None:
     return await _post("/stems/keep_mix", {"enabled": enabled})
 
+async def scrub_tape_mode(enabled: bool) -> dict | None:
+    # "Modo fita" — gateia o tape-stop/start do pause no core.
+    return await _post("/scrub/tape_mode", {"enabled": enabled})
+
 async def record_start()             -> dict | None: return await _post("/recorder/start")
 async def record_stop()              -> dict | None: return await _post("/recorder/stop")
 

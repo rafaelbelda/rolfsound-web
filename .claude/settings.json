@@ -223,7 +223,12 @@
       "Bash(./venv/Scripts/python.exe -m py_compile services/playback_service.py)",
       "Bash(date \"+%H:%M:%S\"; stat -c \"%y\" \"/d/lb . d/rolfsound/rolfsound/services/playback_service.py\")",
       "Read(//d/lb . d/rolfsound/rolfsound/**)",
-      "PowerShell(Stop-Process -Id 27796 -Force -Confirm:$false)"
+      "PowerShell(Stop-Process -Id 27796 -Force -Confirm:$false)",
+      "Bash(./venv/Scripts/python.exe -m py_compile services/scrub_engine.py services/playback_service.py)",
+      "PowerShell($cl = \\(Get-CimInstance Win32_Process -Filter \"ProcessId = 25140\"\\).CommandLine; Write-Output \"rodando: $cl\"; Stop-Process -Id 25140 -Force -Confirm:$false; Start-Sleep -Seconds 1; Start-Process -FilePath \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\venv\\\\Scripts\\\\python.exe\" -ArgumentList \"main.py\" -WorkingDirectory \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\" -WindowStyle Hidden)",
+      "PowerShell(Stop-Process -Id 26876,67560 -Force -Confirm:$false)",
+      "PowerShell(Start-Process -FilePath \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\\\\venv\\\\Scripts\\\\python.exe\" -ArgumentList \"main.py\" -WorkingDirectory \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound\" -WindowStyle Hidden)",
+      "PowerShell(Start-Process -FilePath \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\\\\venv\\\\Scripts\\\\python.exe\" -ArgumentList \"main.py\" -WorkingDirectory \"d:\\\\lb . d\\\\rolfsound\\\\rolfsound-web\" -WindowStyle Hidden)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lucbo\\Documents\\rolfsound-pack\\rolfsound\\services",
