@@ -34,6 +34,8 @@
   var ws = null;
   var wsOpen = false;
   var gesture = false;         // gesto local ativo (pointer ou reverse)
+  var settling = false;        // pós-release: o spinback ainda soa e ecoa
+  var settleTimer = null;      // rede de segurança se o 'ended' não vier
   var lastTargetSec = null;    // fallback: seek clássico se o WS morrer
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -57,6 +59,7 @@
     ws.onopen = function () { wsOpen = true; };
     ws.onclose = function () {
       wsOpen = false; ws = null;
+      endSettling();
       // Gesto órfão: garante que o seek aconteça mesmo com o WS morto.
       if (gesture) { gesture = false; fallbackSeek(); emit('end', null); }
     };
@@ -65,10 +68,13 @@
       var d;
       try { d = JSON.parse(ev.data); } catch (e) { return; }
       if (!d || typeof d !== 'object') return;
-      if (d.type === 'pos' && gesture) {
+      if (d.type === 'pos' && (gesture || settling)) {
+        // durante o gesto E o spinback pós-release: a barra segue o
+        // playhead REAL (âncora congelada — quem anda é o eco)
         report(d.pos, false);
         emit('pos', d);
       } else if (d.type === 'ended') {
+        endSettling();
         report(d.pos, true);
         emit('end', d);
       } else if (d.type === 'begun' && d.ok === false && gesture) {
@@ -107,6 +113,16 @@
     }));
   }
 
+  function endSettling() {
+    settling = false;
+    if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+  }
+  function beginSettling() {
+    settling = true;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(endSettling, 9000);   // 'ended' nunca veio
+  }
+
   /* ---------------- API pública ---------------- */
   var RolfScrub = {
     get available() { return !!usable(); },
@@ -115,6 +131,7 @@
     beginSec: function (sec) {
       if (!usable()) return false;
       connect();
+      endSettling();               // re-grab cancela o assentamento anterior
       gesture = true;
       lastTargetSec = clamp(sec || 0, 0, dur() || Infinity);
       if (!send({ type: 'begin', pos: lastTargetSec })) {
@@ -148,6 +165,7 @@
     rate: function (r) {
       if (!usable()) return false;
       connect();
+      endSettling();               // re-grab cancela o assentamento anterior
       gesture = true;
       lastTargetSec = null;
       if (!send({ type: 'rate', rate: +r || 0 })) {
@@ -162,7 +180,12 @@
     end: function () {
       if (!gesture) return;
       gesture = false;
-      if (!send({ type: 'end' })) fallbackSeek();
+      if (send({ type: 'end' })) {
+        // o spinback ainda soa: a barra segue os ecos até o 'ended' real
+        beginSettling();
+      } else {
+        fallbackSeek();
+      }
     },
   };
   window.RolfScrub = RolfScrub;
@@ -189,21 +212,80 @@
     if (sw) enabled = sw.classList.contains('on');
   });
 
-  /* ---------------- segurar R = reverse (TP-7) ---------------- */
-  var revHeld = false;
+  /* ---------------- reverse segurado (botão ⏪ e tecla R) ----------------
+     Como rewind de tape deck: segurar acelera por estágios (◀1× →
+     ◀◀2× → ◀◀◀4×); soltar faz o spinback do momentum. A ilha de
+     status (RolfIsland) mostra a velocidade ao vivo enquanto dura. */
+  var REV_SPEEDS = [1, 2, 4];
+  var REV_STEP_MS = 900;
+  var rev = { held: false, step: 0, timer: null, btn: null };
+
+  function revNotify() {
+    if (!window.RolfIsland) return;
+    var tris = '';
+    for (var i = 0; i <= rev.step; i++) tris += '◀';
+    // só desenhos e números: ◀◀ 2
+    window.RolfIsland.notify({
+      id: 'reverse', sticky: true,
+      segs: [
+        { text: tris, tone: 'accent' },
+        { text: String(REV_SPEEDS[rev.step]), tone: 'ink' },
+      ],
+    });
+  }
+
+  function revStart(btn) {
+    if (rev.held || !usable()) return false;
+    if (!RolfScrub.rate(-REV_SPEEDS[0])) return false;
+    rev.held = true;
+    rev.step = 0;
+    rev.btn = btn || null;
+    if (rev.btn) rev.btn.classList.add('on');
+    revNotify();
+    rev.timer = setInterval(function () {
+      if (!rev.held || rev.step >= REV_SPEEDS.length - 1) return;
+      rev.step++;
+      RolfScrub.rate(-REV_SPEEDS[rev.step]);
+      revNotify();
+    }, REV_STEP_MS);
+    return true;
+  }
+
+  function revStop() {
+    if (!rev.held) return;
+    rev.held = false;
+    if (rev.timer) { clearInterval(rev.timer); rev.timer = null; }
+    if (rev.btn) { rev.btn.classList.remove('on'); rev.btn = null; }
+    if (window.RolfIsland) window.RolfIsland.clear('reverse');
+    RolfScrub.end();       // solta com momentum: spinback de volta a 1×
+  }
+
+  function bindReverseButtons() {
+    document.querySelectorAll('[data-tp-reverse]').forEach(function (btn) {
+      if (btn._revInit) return;
+      btn._revInit = true;
+      btn.addEventListener('pointerdown', function (e) {
+        if (revStart(btn)) {
+          try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+          e.preventDefault();
+        }
+      });
+      btn.addEventListener('pointerup', revStop);
+      btn.addEventListener('pointercancel', revStop);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindReverseButtons);
+  else bindReverseButtons();
+
   function typing(el) {
     return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
   }
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'r' && e.key !== 'R') return;
-    if (e.repeat || revHeld || typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (!usable()) return;
-    revHeld = RolfScrub.rate(-1);
+    if (e.repeat || rev.held || typing(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+    revStart(null);
   });
   document.addEventListener('keyup', function (e) {
-    if ((e.key === 'r' || e.key === 'R') && revHeld) {
-      revHeld = false;
-      RolfScrub.end();
-    }
+    if (e.key === 'r' || e.key === 'R') revStop();
   });
 })();

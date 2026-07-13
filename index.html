@@ -45,7 +45,7 @@
 
     <!-- ============ PERSISTENT TOP STRIP ============ -->
     <div class="topbar">
-      <div class="tb-nowmatrix" title="BPM · Tom da faixa atual" aria-label="BPM e tom da faixa atual">
+      <div class="tb-nowmatrix tb-island" title="BPM · Tom da faixa atual" aria-label="Display de status" aria-live="polite">
         <canvas class="tb-nowmatrix-cv" data-gap="4" data-r="1.1"></canvas>
       </div>
 
@@ -801,6 +801,7 @@
         <div class="tp-center">
           <div class="tp-ctrls">
             <button class="tp-btn" aria-label="Shuffle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3.2l9.6 10H20"/><path d="M17 4l3 3-3 3"/><path d="M4 17h3.2l2.6-2.7"/><path d="M14.2 9.7 16.8 7"/><path d="M17 14l3 3-3 3"/></svg></button>
+            <button class="tp-btn" data-tp-reverse aria-label="Reverse" title="Segurar: reverse (acelera) · soltar: spinback"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 6 3 12l8.5 6zM21 6l-8.5 6 8.5 6z"/></svg></button>
             <button class="tp-btn" aria-label="Anterior"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2.2v12H7zM18.5 6 9.5 12l9 6z"/></svg></button>
             <button class="tp-btn tp-play" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.4 18.6 12 8 18.6z"/></svg></button>
             <button class="tp-btn" aria-label="Próxima"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M14.8 6H17v12h-2.2zM5.5 6l9 6-9 6z"/></svg></button>

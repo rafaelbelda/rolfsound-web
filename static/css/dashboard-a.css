@@ -40,6 +40,35 @@ body {
 .tb-nowmatrix { display: flex; align-items: center; }
 .tb-nowmatrix canvas { display: block; }
 
+/* Ilha de status: em repouso é SÓ os pontos (idêntico ao de sempre);
+   com um aviso ativo a cápsula se materializa em volta — mesma
+   silhueta da nav island (raio 24, altura ~60px), não uma pílula. */
+.tb-island {
+  padding: 15px 18px;
+  border-radius: 24px;
+  border: 1px solid transparent;
+  transition: background 0.3s var(--ease), border-color 0.3s var(--ease),
+              box-shadow 0.3s var(--ease);
+}
+.tb-island.is-live {
+  border-color: color-mix(in oklab, var(--accent) 34%, rgba(255,255,255,0.14));
+  background: color-mix(in oklab, var(--accent) 22%, rgba(26,26,30,0.64));
+  -webkit-backdrop-filter: blur(32px) saturate(1.9) brightness(1.18);
+  backdrop-filter: blur(32px) saturate(1.9) brightness(1.18);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.45),
+    0 18px 40px -24px rgba(0,0,0,0.85),
+    inset 0 1px 0.5px rgba(255,255,255,0.5);
+}
+/* troca de conteúdo: os pontos "reimprimem" com um pulso curto */
+.tb-island.is-swap canvas { animation: tbiSwap 0.26s var(--ease); }
+@keyframes tbiSwap {
+  0%   { opacity: 0; transform: translateY(3px); filter: blur(2px); }
+  100% { opacity: 1; transform: none; filter: none; }
+}
+body.reduce-motion .tb-island,
+body.reduce-motion .tb-island.is-swap canvas { transition: none; animation: none; }
+
 /* the Dynamic Island */
 .island {
   position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
