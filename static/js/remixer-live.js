@@ -32,7 +32,7 @@
   // mesmo mapeamento de knob do prototype.js (fonte única do frac)
   const KNOB = {
     Pitch: { min: -12, max: 12 },
-    Tempo: { min: 80, max: 160 },
+    Tempo: { min: 60, max: 160 },
   };
   const knobValue = (name, frac) => Math.round(KNOB[name].min + frac * (KNOB[name].max - KNOB[name].min));
   const fracForValue = (name, v) => Math.max(0, Math.min(1, (v - KNOB[name].min) / (KNOB[name].max - KNOB[name].min)));

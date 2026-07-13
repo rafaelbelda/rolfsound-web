@@ -753,7 +753,7 @@
   // value formatters per module title
   const KNOB = {
     Pitch:  { min: -12, max: 12, step: 1, fmt: (v) => `<span class="acc">${v > 0 ? '+' : ''}${v}</span><small>st</small>` },
-    Tempo:  { min: 80, max: 160, step: 1, fmt: (v) => `${v}<small>bpm</small>` },
+    Tempo:  { min: 60, max: 160, step: 1, fmt: (v) => `${v}<small>bpm</small>` },
     // Filtro em escala LOG (20 Hz–20 kHz): v é log2(Hz) — o knob percorre
     // oitavas, não Hz lineares (o miolo musical fica utilizável). O fmt
     // converte de volta. remixer-live.js usa o MESMO mapeamento no POST /fx.
