@@ -244,7 +244,8 @@
       "Bash(python \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\2476ecde-5fdc-49b0-b343-a6e09536d5ac\\\\scratchpad\\\\rmx_v2_html.py\")",
       "Bash(python \"C:\\\\Users\\\\lucbo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--lb---d-rolfsound-rolfsound-web\\\\2476ecde-5fdc-49b0-b343-a6e09536d5ac\\\\scratchpad\\\\rmx_v2_css.py\")",
       "Bash(node shot-remixer2.js)",
-      "Bash(awk '/<\\\\/section>/{print NR\": section close\"; if\\(++c==2\\) exit}' index.html)"
+      "Bash(awk '/<\\\\/section>/{print NR\": section close\"; if\\(++c==2\\) exit}' index.html)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/playback_service.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lucbo\\Documents\\rolfsound-pack\\rolfsound\\services",
